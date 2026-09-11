@@ -9,6 +9,7 @@ Image-to-layered-SVG tracing engine built on [VTracer 1.0](https://github.com/vt
 - **Auto layer separation** — `--layers N` groups shapes by color into semantic layers
 - **Layered SVG output** — semantic `<g>` layers with editability metadata
 - **8 pattern generators** — rosette, meander, scroll, taotie, ice_crack, cloud, wave, greek_key
+- **Transforms** — `--scale`, `--rotate`, `--flip` (h/v/both)
 - **Batch processing** — trace entire directories
 - **REST API** — axum server for web/desktop integration
 - **CLI** — single binary for all operations
