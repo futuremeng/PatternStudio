@@ -52,6 +52,9 @@ enum Command {
         /// Open output in browser after tracing
         #[arg(long)]
         open: bool,
+        /// Output JSON stats to stdout (for scripting)
+        #[arg(long)]
+        json: bool,
     },
     /// Generate a pattern SVG
     Pattern {
@@ -87,8 +90,8 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, open } => {
-            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers, open)
+        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, open, json } => {
+            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers, open, json)
         }
         Command::Pattern { kind, output, n_units, complexity, size, open } => {
             cmd_pattern(&kind, &output, n_units, complexity, size, open)
@@ -110,7 +113,7 @@ fn cmd_trace(
     input: &PathBuf, output: &PathBuf,
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
-    layers: usize, open: bool,
+    layers: usize, open: bool, json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Batch mode: input is a directory
     if input.is_dir() {
@@ -129,7 +132,7 @@ fn cmd_trace(
         for (i, file) in files.iter().enumerate() {
             let stem = file.file_stem().unwrap_or_default().to_string_lossy();
             let out_svg = out_dir.join(format!("{stem}.svg"));
-            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, false) {
+            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, false, false) {
                 Ok(()) => { ok += 1; }
                 Err(e) => eprintln!("  [{}] FAILED: {e}", file.display()),
             }
@@ -142,14 +145,14 @@ fn cmd_trace(
     }
 
     // Single file mode
-    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, open)
+    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, open, json)
 }
 
 fn trace_single(
     input: &PathBuf, output: &PathBuf,
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
-    layers: usize, open: bool,
+    layers: usize, open: bool, json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading: {}", input.display());
     let img = load_image(input)?;
@@ -192,6 +195,24 @@ fn trace_single(
     let svg = LayeredWriter::write(&layered);
     std::fs::write(output, &svg)?;
     eprintln!("Saved: {}", output.display());
+
+    if json {
+        let stats = serde_json::json!({
+            "input": input.display().to_string(),
+            "output": output.display().to_string(),
+            "width": layered.width,
+            "height": layered.height,
+            "shape_count": layered.total_shapes(),
+            "layer_count": layered.layers.len(),
+            "layers": layered.layers.iter().map(|l| serde_json::json!({
+                "name": l.name,
+                "role": l.role.to_string(),
+                "shapes": l.shapes.len(),
+            })).collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&stats)?);
+    }
+
     if open {
         open_in_browser(output);
     }
