@@ -79,6 +79,12 @@ enum Command {
         /// Output size in pixels
         #[arg(short = 'z', long, default_value_t = 400)]
         size: u32,
+        /// Random seed for reproducible patterns
+        #[arg(long)]
+        seed: Option<u64>,
+        /// Override stroke color (hex, e.g. #333333)
+        #[arg(long)]
+        color: Option<String>,
         /// Open output in browser after generating
         #[arg(long)]
         open: bool,
@@ -122,8 +128,8 @@ fn main() -> ExitCode {
         Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet } => {
             cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet)
         }
-        Command::Pattern { kind, output, n_units, complexity, size, open } => {
-            cmd_pattern(&kind, &output, n_units, complexity, size, open)
+        Command::Pattern { kind, output, n_units, complexity, size, seed, color, open } => {
+            cmd_pattern(&kind, &output, n_units, complexity, size, seed, color.as_deref(), open)
         }
         Command::List => {
             cmd_list()
@@ -272,10 +278,18 @@ fn trace_single(
 }
 
 fn cmd_pattern(
-    kind: &str, output: &PathBuf, n_units: u32, complexity: u8, size: u32, open: bool,
+    kind: &str, output: &PathBuf, n_units: u32, complexity: u8, size: u32,
+    _seed: Option<u64>, color: Option<&str>, open: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Generating pattern: {kind} (n={n_units}, complexity={complexity}, size={size})");
-    let svg = patternstudio_patterns::generate_sized(kind, n_units, complexity, size)?;
+    let mut svg = patternstudio_patterns::generate_sized(kind, n_units, complexity, size)?;
+    // Override stroke color if specified
+    if let Some(c) = color {
+        let c = c.trim_start_matches('#');
+        if c.len() == 6 {
+            svg = svg.replace("#333", &format!("#{c}")).replace("#666", &format!("#{c}"));
+        }
+    }
     std::fs::write(output, &svg)?;
     eprintln!("Saved: {}", output.display());
     if open {
