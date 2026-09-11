@@ -144,10 +144,14 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, preview, optimize, open, json, quiet, scale, rotate, flip } => {
-            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, preview, optimize, open, json, quiet, scale, rotate, &flip)
+            cmd_trace(&input, &output, TraceOptions {
+                resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle,
+                layers, no_background, threshold, preview, optimize, open, json, quiet,
+                scale, rotate, flip,
+            })
         }
         Command::Pattern { kind, output, n_units, complexity, size, seed, color, open } => {
-            cmd_pattern(&kind, &output, n_units, complexity, size, seed, color.as_deref(), open)
+            cmd_pattern(PatternOptions { kind, output, n_units, complexity, size, seed, color, open })
         }
         Command::List => {
             cmd_list()
@@ -165,13 +169,30 @@ fn main() -> ExitCode {
     }
 }
 
-fn cmd_trace(
-    input: &PathBuf, output: &PathBuf,
-    resolution: &str, simplify: &str, preset: &str,
-    mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
-    layers: usize, no_background: bool, threshold: u8, preview: bool, optimize: bool, open: bool, json: bool, quiet: bool,
-    scale: f64, rotate: f64, flip: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+/// Options for a single trace run.
+#[derive(Clone)]
+struct TraceOptions {
+    resolution: String,
+    simplify: String,
+    preset: String,
+    mode: String,
+    max_colors: usize,
+    color_precision: i32,
+    filter_speckle: usize,
+    layers: usize,
+    no_background: bool,
+    threshold: u8,
+    preview: bool,
+    optimize: bool,
+    open: bool,
+    json: bool,
+    quiet: bool,
+    scale: f64,
+    rotate: f64,
+    flip: String,
+}
+
+fn cmd_trace(input: &PathBuf, output: &PathBuf, opts: TraceOptions) -> Result<(), Box<dyn std::error::Error>> {
     // Batch mode: input is a directory
     if input.is_dir() {
         let out_dir = output.clone();
@@ -189,7 +210,16 @@ fn cmd_trace(
         for (i, file) in files.iter().enumerate() {
             let stem = file.file_stem().unwrap_or_default().to_string_lossy();
             let out_svg = out_dir.join(format!("{stem}.svg"));
-            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, false, false, false, false, true, 1.0, 0.0, "none") {
+            let mut batch_opts = opts.clone();
+            batch_opts.preview = false;
+            batch_opts.optimize = false;
+            batch_opts.open = false;
+            batch_opts.json = false;
+            batch_opts.quiet = true;
+            batch_opts.scale = 1.0;
+            batch_opts.rotate = 0.0;
+            batch_opts.flip = "none".to_string();
+            match trace_single(file, &out_svg, batch_opts) {
                 Ok(()) => { ok += 1; }
                 Err(e) => eprintln!("  [{}] FAILED: {e}", file.display()),
             }
@@ -202,16 +232,17 @@ fn cmd_trace(
     }
 
     // Single file mode
-    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, preview, optimize, open, json, quiet, scale, rotate, flip)
+    trace_single(input, output, opts)
 }
 
 fn trace_single(
-    input: &PathBuf, output: &PathBuf,
-    resolution: &str, simplify: &str, preset: &str,
-    mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
-    layers: usize, no_background: bool, threshold: u8, preview: bool, optimize: bool, open: bool, json: bool, quiet: bool,
-    scale: f64, rotate: f64, flip: &str,
+    input: &PathBuf, output: &PathBuf, opts: TraceOptions,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let TraceOptions {
+        resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle,
+        layers, no_background, threshold, preview, optimize, open, json, quiet,
+        scale, rotate, flip,
+    } = opts;
     if !quiet {
         eprintln!("Loading: {}", input.display());
     }
@@ -244,13 +275,13 @@ fn trace_single(
         img
     };
 
-    let p = match preset {
+    let p = match preset.as_str() {
         "bw" => Preset::Bw,
         "photo" => Preset::Photo,
         _ => Preset::Poster,
     };
     let mut vt_config = vtracer::Config::from_preset(p);
-    vt_config.mode = match mode {
+    vt_config.mode = match mode.as_str() {
         "pixel" => vtracer::config::FitMode::Pixel,
         "polygon" => vtracer::config::FitMode::Polygon,
         _ => vtracer::config::FitMode::Spline,
@@ -262,8 +293,8 @@ fn trace_single(
     vt_config.filter_speckle = filter_speckle;
 
     let config = PatternStudioConfig {
-        resolution: parse_resolution(resolution),
-        simplify: parse_simplify(simplify),
+        resolution: parse_resolution(&resolution),
+        simplify: parse_simplify(&simplify),
         vtracer: vt_config,
     };
 
@@ -311,7 +342,7 @@ fn trace_single(
         if scale != 1.0 {
             parts.push(format!("scale({scale})"));
         }
-        match flip {
+        match flip.as_str() {
             "h" => parts.push(format!("translate({w} 0) scale(-1 1)")),
             "v" => parts.push(format!("translate(0 {h}) scale(1 -1)")),
             "both" => parts.push(format!("translate({w} {h}) scale(-1 -1)")),
@@ -345,10 +376,8 @@ fn trace_single(
     if preview {
         let preview_path = output.with_extension("png");
         if let Ok(img) = image::open(input) {
-            if img.save(&preview_path).is_ok() {
-                if !quiet {
-                    eprintln!("Preview: {}", preview_path.display());
-                }
+            if img.save(&preview_path).is_ok() && !quiet {
+                eprintln!("Preview: {}", preview_path.display());
             }
         }
     }
@@ -376,12 +405,25 @@ fn trace_single(
     Ok(())
 }
 
-fn cmd_pattern(
-    kind: &str, output: &PathBuf, n_units: u32, complexity: u8, size: u32,
-    _seed: Option<u64>, color: Option<&str>, open: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+/// Options for a single pattern generation run.
+#[derive(Clone)]
+struct PatternOptions {
+    kind: String,
+    output: PathBuf,
+    n_units: u32,
+    complexity: u8,
+    size: u32,
+    /// Accepted for CLI compatibility; not yet consumed by the generators.
+    #[allow(dead_code)]
+    seed: Option<u64>,
+    color: Option<String>,
+    open: bool,
+}
+
+fn cmd_pattern(opts: PatternOptions) -> Result<(), Box<dyn std::error::Error>> {
+    let PatternOptions { kind, output, n_units, complexity, size, color, open, .. } = opts;
     eprintln!("Generating pattern: {kind} (n={n_units}, complexity={complexity}, size={size})");
-    let mut svg = patternstudio_patterns::generate_sized(kind, n_units, complexity, size)?;
+    let mut svg = patternstudio_patterns::generate_sized(&kind, n_units, complexity, size)?;
     // Override stroke color if specified
     if let Some(c) = color {
         let c = c.trim_start_matches('#');
@@ -389,10 +431,10 @@ fn cmd_pattern(
             svg = svg.replace("#333", &format!("#{c}")).replace("#666", &format!("#{c}"));
         }
     }
-    std::fs::write(output, &svg)?;
+    std::fs::write(&output, &svg)?;
     eprintln!("Saved: {}", output.display());
     if open {
-        open_in_browser(output);
+        open_in_browser(&output);
     }
     Ok(())
 }
@@ -443,7 +485,26 @@ fn cmd_convert(
         eprintln!("Copied: {}", output.display());
     } else {
         // It's actually an image file - trace it
-        trace_single(input, output, "medium", simplify, "poster", mode, max_colors, 4, 2, layers, false, 30, false, false, open, false, false, 1.0, 0.0, "none")?;
+        trace_single(input, output, TraceOptions {
+            resolution: "medium".to_string(),
+            simplify: simplify.to_string(),
+            preset: "poster".to_string(),
+            mode: mode.to_string(),
+            max_colors,
+            color_precision: 4,
+            filter_speckle: 2,
+            layers,
+            no_background: false,
+            threshold: 30,
+            preview: false,
+            optimize: false,
+            open,
+            json: false,
+            quiet: false,
+            scale: 1.0,
+            rotate: 0.0,
+            flip: "none".to_string(),
+        })?;
     }
     Ok(())
 }
