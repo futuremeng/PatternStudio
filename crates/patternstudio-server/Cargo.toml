@@ -1,0 +1,24 @@
+[package]
+name = "patternstudio-server"
+description = "PatternStudio API server (axum)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "patternstudio-server"
+path = "src/main.rs"
+
+[dependencies]
+patternstudio-core = { workspace = true }
+patternstudio-tracer = { workspace = true }
+patternstudio-svg = { workspace = true }
+patternstudio-patterns = { workspace = true }
+vtracer = { workspace = true }
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { version = "1", features = ["v4"] }

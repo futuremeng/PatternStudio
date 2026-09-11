@@ -1,10 +1,10 @@
 [workspace]
 members = [
-    "crates/penpaw-core",
-    "crates/penpaw-tracer",
-    "crates/penpaw-svg",
-    "crates/penpaw-cli",
-    "crates/penpaw-patterns",
+    "crates/patternstudio-core",
+    "crates/patternstudio-tracer",
+    "crates/patternstudio-svg",
+    "crates/patternstudio-cli",
+    "crates/patternstudio-patterns",
 ]
 resolver = "2"
 
@@ -35,10 +35,10 @@ serde_json = "1"
 thiserror = "2"
 
 # Internal crates
-penpaw-core = { path = "crates/penpaw-core" }
-penpaw-tracer = { path = "crates/penpaw-tracer" }
-penpaw-svg = { path = "crates/penpaw-svg" }
-penpaw-patterns = { path = "crates/penpaw-patterns" }
+patternstudio-core = { path = "crates/patternstudio-core" }
+patternstudio-tracer = { path = "crates/patternstudio-tracer" }
+patternstudio-svg = { path = "crates/patternstudio-svg" }
+patternstudio-patterns = { path = "crates/patternstudio-patterns" }
 
 [profile.release]
 lto = true

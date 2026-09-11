@@ -1,0 +1,21 @@
+[package]
+name = "patternstudio-cli"
+description = "PatternStudio CLI: trace images to layered SVG"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "patternstudio"
+path = "src/main.rs"
+
+[dependencies]
+patternstudio-core = { workspace = true }
+patternstudio-tracer = { workspace = true }
+patternstudio-svg = { workspace = true }
+patternstudio-patterns = { workspace = true }
+vtracer = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+image = { workspace = true }
