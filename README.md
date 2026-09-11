@@ -68,6 +68,7 @@ cargo run --bin patternstudio-server
 | `--filter-speckle` | Speckle filter size |
 | `-l, --layers` | Auto-separate into N color layers |
 | `--no-background` | Remove background layer (transparent) |
+| `--threshold` | Background removal threshold (0-255) |
 | `--scale` | Scale factor (0.5 = half, 2.0 = double) |
 | `--rotate` | Rotate degrees (0-360) |
 | `--flip` | Flip: none / h / v / both |
