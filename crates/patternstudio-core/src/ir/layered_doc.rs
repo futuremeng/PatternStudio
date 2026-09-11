@@ -129,6 +129,95 @@ impl LayerAssignment {
             }],
         }
     }
+
+    /// Auto-assign shapes to layers by their fill color.
+    ///
+    /// Groups shapes with the same color into one layer.
+    /// The most common color becomes "background", the rest become "color-N".
+    /// If there are more distinct colors than `max_layers`, the smallest groups
+    /// are merged into the last layer ("other").
+    pub fn by_color(doc: &VectorDoc, max_layers: usize) -> Self {
+        use std::collections::HashMap;
+
+        // Group shape indices by color
+        let mut color_groups: HashMap<[u8; 3], Vec<usize>> = HashMap::new();
+        for (i, shape) in doc.shapes.iter().enumerate() {
+            let [r, g, b] = shape.paint.color().rgb_u8();
+            color_groups.entry([r, g, b]).or_default().push(i);
+        }
+
+        // Sort by group size descending (most common = background)
+        let mut groups: Vec<([u8; 3], Vec<usize>)> = color_groups.into_iter().collect();
+        groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+        if groups.len() <= max_layers {
+            // No overflow: each color gets its own layer
+            let layers = groups
+                .into_iter()
+                .enumerate()
+                .map(|(idx, (color, indices))| {
+                    let name = if idx == 0 {
+                        "background".into()
+                    } else {
+                        format!("color-{:02x}{:02x}{:02x}", color[0], color[1], color[2])
+                    };
+                    let role = if idx == 0 {
+                        LayerRole::Background
+                    } else {
+                        LayerRole::Custom(name.clone())
+                    };
+                    LayerSpec {
+                        name,
+                        role,
+                        shape_indices: indices,
+                        editability: EditabilityFlags::full(),
+                    }
+                })
+                .collect();
+            return Self { layers };
+        }
+
+        // Overflow: keep top (max_layers - 1) colors, merge rest into "other"
+        let keep = max_layers.saturating_sub(1);
+        let top: Vec<([u8; 3], Vec<usize>)> = groups[..keep].to_vec();
+        let mut other_indices: Vec<usize> = Vec::new();
+        for (_, indices) in &groups[keep..] {
+            other_indices.extend(indices.iter().copied());
+        }
+
+        let mut layers: Vec<LayerSpec> = top
+            .into_iter()
+            .enumerate()
+            .map(|(idx, (color, indices))| {
+                let name = if idx == 0 {
+                    "background".into()
+                } else {
+                    format!("color-{:02x}{:02x}{:02x}", color[0], color[1], color[2])
+                };
+                let role = if idx == 0 {
+                    LayerRole::Background
+                } else {
+                    LayerRole::Custom(name.clone())
+                };
+                LayerSpec {
+                    name,
+                    role,
+                    shape_indices: indices,
+                    editability: EditabilityFlags::full(),
+                }
+            })
+            .collect();
+
+        // Add "other" layer with all remaining shapes
+        layers.push(LayerSpec {
+            name: "other".into(),
+            role: LayerRole::Details,
+            shape_indices: other_indices,
+            editability: EditabilityFlags::full(),
+        });
+
+        Self { layers }
+    }
 }
 
 /// Layered document IR — PatternStudio's core output type.

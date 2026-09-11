@@ -41,6 +41,17 @@ impl PatternStudioPipeline {
         let doc = self.trace(img)?;
         Ok(LayeredDoc::from_vector_doc(&doc, assignment))
     }
+
+    /// Run the full pipeline with automatic color-based layer separation.
+    pub fn trace_layered_auto(
+        &self,
+        img: &ColorImage,
+        max_layers: usize,
+    ) -> Result<LayeredDoc, Error> {
+        let doc = self.trace(img)?;
+        let assignment = LayerAssignment::by_color(&doc, max_layers);
+        Ok(LayeredDoc::from_vector_doc(&doc, &assignment))
+    }
 }
 
 impl Default for PatternStudioPipeline {

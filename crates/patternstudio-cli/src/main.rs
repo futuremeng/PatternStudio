@@ -46,6 +46,9 @@ enum Command {
         /// Speckle filter size
         #[arg(long, default_value_t = 2)]
         filter_speckle: usize,
+        /// Auto-separate layers by color (0 = single layer, N = max N layers)
+        #[arg(short = 'l', long, default_value_t = 0)]
+        layers: usize,
     },
     /// Generate a pattern SVG
     Pattern {
@@ -67,8 +70,8 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle } => {
-            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle)
+        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers } => {
+            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers)
         }
         Command::Pattern { kind, output, n_units, complexity } => {
             cmd_pattern(&kind, &output, n_units, complexity)
@@ -84,6 +87,7 @@ fn cmd_trace(
     input: &PathBuf, output: &PathBuf,
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
+    layers: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Batch mode: input is a directory
     if input.is_dir() {
@@ -102,7 +106,7 @@ fn cmd_trace(
         for (i, file) in files.iter().enumerate() {
             let stem = file.file_stem().unwrap_or_default().to_string_lossy();
             let out_svg = out_dir.join(format!("{stem}.svg"));
-            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle) {
+            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers) {
                 Ok(()) => { ok += 1; }
                 Err(e) => eprintln!("  [{}] FAILED: {e}", file.display()),
             }
@@ -115,13 +119,14 @@ fn cmd_trace(
     }
 
     // Single file mode
-    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle)
+    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers)
 }
 
 fn trace_single(
     input: &PathBuf, output: &PathBuf,
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
+    layers: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading: {}", input.display());
     let img = load_image(input)?;
@@ -152,8 +157,13 @@ fn trace_single(
 
     eprintln!("Tracing...");
     let pipeline = PatternStudioPipeline::new(&config)?;
-    let assignment = LayerAssignment::single_layer();
-    let layered = pipeline.trace_layered(&img, &assignment)?;
+
+    let layered = if layers > 1 {
+        pipeline.trace_layered_auto(&img, layers)?
+    } else {
+        let assignment = LayerAssignment::single_layer();
+        pipeline.trace_layered(&img, &assignment)?
+    };
     eprintln!("Done: {} shapes in {} layer(s)", layered.total_shapes(), layered.layers.len());
 
     let svg = LayeredWriter::write(&layered);
