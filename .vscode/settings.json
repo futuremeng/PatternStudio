@@ -1,0 +1,20 @@
+{
+    // rust-analyzer 相关设置
+    "rust-analyzer.cargo.workspaceEdit": true,
+    "rust-analyzer.checkOnSave": true,
+    "rust-analyzer.check.command": "clippy",
+    "rust-analyzer.check.allTargets": true,
+    "rust-analyzer.imports.granularity.group": true,
+    "rust-analyzer.inlayHints.chainingMethodType.enabled": true,
+    "rust-analyzer.inlayHints.closureReturn.enabled": true,
+
+    // CodeLLDB 设置
+    "lldb.showDisassembly": "never",
+    "lldb.useLibcxx": true,
+
+    // 保存时格式化
+    "[rust]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "rust-lang.rust-analyzer"
+    }
+}

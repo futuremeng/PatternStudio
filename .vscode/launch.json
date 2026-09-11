@@ -1,0 +1,62 @@
+{
+    // Rust 调试配置 —— 需要安装 CodeLLDB 扩展 (vadimcn.vscode-lldb)
+    // 文档: https://github.com/vadimcn/codelldb
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug CLI (patternstudio)",
+            "cargo": {
+                // 构建要调试的二进制（debug 模式，带调试符号）
+                "args": ["build", "--bin=patternstudio", "--package=patternstudio-cli"],
+                "filter": {
+                    "name": "patternstudio",
+                    "kind": "bin"
+                }
+            },
+            // 传给程序启动参数的示例:
+            // "args": ["trace", "path/to/image.png", "-o", "out.svg"],
+            // "args": ["pattern", "-k", "grid", "-n", "5", "-o", "out.svg"],
+            "args": [],
+            // 程序的工作目录
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug Server (patternstudio-server)",
+            "cargo": {
+                "args": ["build", "--bin=patternstudio-server", "--package=patternstudio-server"],
+                "filter": {
+                    "name": "patternstudio-server",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug Tests (workspace)",
+            "cargo": {
+                // 编译测试但不运行，然后附加调试
+                "args": ["test", "--no-run", "--workspace"],
+                "filter": {
+                    "name": "patternstudio.*",
+                    "kind": "bin"
+                }
+            },
+            // 只运行指定测试，例如:
+            // "args": ["some_test_name", "--exact"],
+            "args": []
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Debug CLI + attach",
+            "configurations": ["Debug CLI (patternstudio)"]
+        }
+    ]
+}
