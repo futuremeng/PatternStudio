@@ -74,6 +74,7 @@ cargo run --bin patternstudio-server
 | `--rotate` | Rotate degrees (0-360) |
 | `--flip` | Flip: none / h / v / both |
 | `--preview` | Save PNG preview alongside SVG |
+| `--optimize` | Round coordinates to reduce file size |
 | `--open` | Open output in browser |
 | `--json` | Output JSON stats to stdout |
 | `-q, --quiet` | Suppress progress output |
