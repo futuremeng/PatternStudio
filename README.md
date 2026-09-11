@@ -12,6 +12,7 @@ Image-to-layered-SVG tracing engine built on [VTracer 1.0](https://github.com/vt
 - **Batch processing** — trace entire directories
 - **REST API** — axum server for web/desktop integration
 - **CLI** — single binary for all operations
+- **Scripting** — `--json` output, `--quiet` mode, `--no-background` transparent SVGs
 
 ## Quick Start
 
@@ -30,19 +31,68 @@ cargo run --bin patternstudio -- trace input.png -o out.svg \
     --preset poster --mode spline --simplify low --resolution medium \
     --max-colors 16 --color-precision 4 --filter-speckle 2
 
-# Batch trace a directory
-cargo run --bin patternstudio -- trace ./images/ -o ./svg_output/
+# Trace with transparent background + JSON stats
+cargo run --bin patternstudio -- trace input.png -o out.svg \
+    --layers 3 --no-background --json
 
-# Generate a pattern
-cargo run --bin patternstudio -- pattern -k rosette -n 8 -z 800 -o rosette.svg
+# Batch trace a directory (quiet mode)
+cargo run --bin patternstudio -- trace ./images/ -o ./svg_output/ --quiet
+
+# Generate a pattern and open in browser
+cargo run --bin patternstudio -- pattern -k rosette -n 8 -z 800 -o rosette.svg --open
 
 # List available patterns
 cargo run --bin patternstudio -- list
+
+# Convert/re-trace with different settings
+cargo run --bin patternstudio -- convert input.png -o out.svg --simplify high --layers 5
 
 # Start API server
 cargo run --bin patternstudio-server
 # → http://localhost:8000/api/v1/health
 ```
+
+## CLI Options
+
+### `trace` command
+
+| Flag | Description |
+|------|-------------|
+| `-o, --output` | Output SVG path (or directory for batch) |
+| `-r, --resolution` | coarse / medium / fine |
+| `-s, --simplify` | minimal / low / medium / high / maximum |
+| `--preset` | bw / poster / photo |
+| `--mode` | pixel / polygon / spline |
+| `--max-colors` | Max colors (0 = unlimited) |
+| `--color-precision` | Color quantization bits (1-8) |
+| `--filter-speckle` | Speckle filter size |
+| `-l, --layers` | Auto-separate into N color layers |
+| `--no-background` | Remove background layer (transparent) |
+| `--open` | Open output in browser |
+| `--json` | Output JSON stats to stdout |
+| `-q, --quiet` | Suppress progress output |
+
+### `pattern` command
+
+| Flag | Description |
+|------|-------------|
+| `-k, --kind` | Pattern type (see list) |
+| `-o, --output` | Output SVG path |
+| `-n, --n-units` | Number of repeating units |
+| `-c, --complexity` | Complexity 0-100 |
+| `-z, --size` | Output size in pixels |
+| `--open` | Open output in browser |
+
+### `convert` command
+
+| Flag | Description |
+|------|-------------|
+| `-o, --output` | Output SVG path |
+| `-s, --simplify` | Simplification level |
+| `--mode` | Fit mode |
+| `--max-colors` | Max colors |
+| `-l, --layers` | Auto-separate layers |
+| `--open` | Open output in browser |
 
 ## API Endpoints
 
