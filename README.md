@@ -205,6 +205,20 @@ make clippy     # cargo clippy --workspace
 make fmt        # cargo fmt --all
 ```
 
+## Feature Summary
+
+| Category | Features |
+|----------|----------|
+| **Tracing** | VTracer 1.0, 3 presets (bw/poster/photo), 3 fit modes, full config |
+| **Layers** | Auto color-based separation, `--no-background`, editability metadata |
+| **Transforms** | `--scale`, `--rotate`, `--flip` (h/v/both) |
+| **Patterns** | 8 types: rosette, meander, scroll, taotie, ice_crack, cloud, wave, greek_key |
+| **Output** | Layered SVG, `--json` stats, `--open` browser preview |
+| **Batch** | Directory input, `--quiet` mode |
+| **API** | axum REST: /trace, /pattern, /patterns, /uploads, /health |
+| **CLI** | trace, pattern, list, serve, convert commands |
+| **Binary** | 2.5MB release, single static binary |
+
 ## License
 
 MIT OR Apache-2.0
