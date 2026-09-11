@@ -49,12 +49,18 @@ enum Command {
         /// Auto-separate layers by color (0 = single layer, N = max N layers)
         #[arg(short = 'l', long, default_value_t = 0)]
         layers: usize,
+        /// Remove background (make transparent)
+        #[arg(long)]
+        no_background: bool,
         /// Open output in browser after tracing
         #[arg(long)]
         open: bool,
         /// Output JSON stats to stdout (for scripting)
         #[arg(long)]
         json: bool,
+        /// Suppress progress output
+        #[arg(short, long)]
+        quiet: bool,
     },
     /// Generate a pattern SVG
     Pattern {
@@ -90,8 +96,8 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, open, json } => {
-            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers, open, json)
+        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet } => {
+            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet)
         }
         Command::Pattern { kind, output, n_units, complexity, size, open } => {
             cmd_pattern(&kind, &output, n_units, complexity, size, open)
@@ -113,7 +119,7 @@ fn cmd_trace(
     input: &PathBuf, output: &PathBuf,
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
-    layers: usize, open: bool, json: bool,
+    layers: usize, no_background: bool, open: bool, json: bool, quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Batch mode: input is a directory
     if input.is_dir() {
@@ -132,7 +138,7 @@ fn cmd_trace(
         for (i, file) in files.iter().enumerate() {
             let stem = file.file_stem().unwrap_or_default().to_string_lossy();
             let out_svg = out_dir.join(format!("{stem}.svg"));
-            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, false, false) {
+            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, false, false, true) {
                 Ok(()) => { ok += 1; }
                 Err(e) => eprintln!("  [{}] FAILED: {e}", file.display()),
             }
@@ -145,18 +151,22 @@ fn cmd_trace(
     }
 
     // Single file mode
-    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, open, json)
+    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet)
 }
 
 fn trace_single(
     input: &PathBuf, output: &PathBuf,
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
-    layers: usize, open: bool, json: bool,
+    layers: usize, no_background: bool, open: bool, json: bool, quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("Loading: {}", input.display());
+    if !quiet {
+        eprintln!("Loading: {}", input.display());
+    }
     let img = load_image(input)?;
-    eprintln!("Size: {}x{}", img.width, img.height);
+    if !quiet {
+        eprintln!("Size: {}x{}", img.width, img.height);
+    }
 
     let p = match preset {
         "bw" => Preset::Bw,
@@ -181,7 +191,9 @@ fn trace_single(
         vtracer: vt_config,
     };
 
-    eprintln!("Tracing...");
+    if !quiet {
+        eprintln!("Tracing...");
+    }
     let pipeline = PatternStudioPipeline::new(&config)?;
 
     let layered = if layers > 1 {
@@ -190,11 +202,25 @@ fn trace_single(
         let assignment = LayerAssignment::single_layer();
         pipeline.trace_layered(&img, &assignment)?
     };
-    eprintln!("Done: {} shapes in {} layer(s)", layered.total_shapes(), layered.layers.len());
+
+    // Remove background layer if requested
+    let layered = if no_background {
+        let mut l = layered;
+        l.layers.retain(|layer| layer.role != patternstudio_core::LayerRole::Background);
+        l
+    } else {
+        layered
+    };
+
+    if !quiet {
+        eprintln!("Done: {} shapes in {} layer(s)", layered.total_shapes(), layered.layers.len());
+    }
 
     let svg = LayeredWriter::write(&layered);
     std::fs::write(output, &svg)?;
-    eprintln!("Saved: {}", output.display());
+    if !quiet {
+        eprintln!("Saved: {}", output.display());
+    }
 
     if json {
         let stats = serde_json::json!({
