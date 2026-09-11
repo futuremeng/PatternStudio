@@ -73,6 +73,7 @@ cargo run --bin patternstudio-server
 | `--scale` | Scale factor (0.5 = half, 2.0 = double) |
 | `--rotate` | Rotate degrees (0-360) |
 | `--flip` | Flip: none / h / v / both |
+| `--preview` | Save PNG preview alongside SVG |
 | `--open` | Open output in browser |
 | `--json` | Output JSON stats to stdout |
 | `-q, --quiet` | Suppress progress output |
