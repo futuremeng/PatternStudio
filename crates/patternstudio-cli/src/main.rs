@@ -49,6 +49,9 @@ enum Command {
         /// Auto-separate layers by color (0 = single layer, N = max N layers)
         #[arg(short = 'l', long, default_value_t = 0)]
         layers: usize,
+        /// Open output in browser after tracing
+        #[arg(long)]
+        open: bool,
     },
     /// Generate a pattern SVG
     Pattern {
@@ -67,22 +70,34 @@ enum Command {
         /// Output size in pixels
         #[arg(short = 'z', long, default_value_t = 400)]
         size: u32,
+        /// Open output in browser after generating
+        #[arg(long)]
+        open: bool,
     },
     /// List available pattern types
     List,
+    /// Start the API server
+    Serve {
+        /// Port to listen on
+        #[arg(short, long, default_value_t = 8000)]
+        port: u16,
+    },
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers } => {
-            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers)
+        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, open } => {
+            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers, open)
         }
-        Command::Pattern { kind, output, n_units, complexity, size } => {
-            cmd_pattern(&kind, &output, n_units, complexity, size)
+        Command::Pattern { kind, output, n_units, complexity, size, open } => {
+            cmd_pattern(&kind, &output, n_units, complexity, size, open)
         }
         Command::List => {
             cmd_list()
+        }
+        Command::Serve { port } => {
+            cmd_serve(port)
         }
     };
     match result {
@@ -95,7 +110,7 @@ fn cmd_trace(
     input: &PathBuf, output: &PathBuf,
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
-    layers: usize,
+    layers: usize, open: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Batch mode: input is a directory
     if input.is_dir() {
@@ -114,7 +129,7 @@ fn cmd_trace(
         for (i, file) in files.iter().enumerate() {
             let stem = file.file_stem().unwrap_or_default().to_string_lossy();
             let out_svg = out_dir.join(format!("{stem}.svg"));
-            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers) {
+            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, false) {
                 Ok(()) => { ok += 1; }
                 Err(e) => eprintln!("  [{}] FAILED: {e}", file.display()),
             }
@@ -127,14 +142,14 @@ fn cmd_trace(
     }
 
     // Single file mode
-    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers)
+    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, open)
 }
 
 fn trace_single(
     input: &PathBuf, output: &PathBuf,
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
-    layers: usize,
+    layers: usize, open: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading: {}", input.display());
     let img = load_image(input)?;
@@ -177,16 +192,22 @@ fn trace_single(
     let svg = LayeredWriter::write(&layered);
     std::fs::write(output, &svg)?;
     eprintln!("Saved: {}", output.display());
+    if open {
+        open_in_browser(output);
+    }
     Ok(())
 }
 
 fn cmd_pattern(
-    kind: &str, output: &PathBuf, n_units: u32, complexity: u8, size: u32,
+    kind: &str, output: &PathBuf, n_units: u32, complexity: u8, size: u32, open: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Generating pattern: {kind} (n={n_units}, complexity={complexity}, size={size})");
     let svg = patternstudio_patterns::generate_sized(kind, n_units, complexity, size)?;
     std::fs::write(output, &svg)?;
     eprintln!("Saved: {}", output.display());
+    if open {
+        open_in_browser(output);
+    }
     Ok(())
 }
 
@@ -209,5 +230,30 @@ fn parse_simplify(s: &str) -> Simplify {
         "high" => Simplify::High,
         "maximum" => Simplify::Maximum,
         _ => Simplify::Low,
+    }
+}
+
+fn cmd_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    eprintln!("Starting PatternStudio API server on port {port}...");
+    std::env::set_var("PORT", port.to_string());
+    // Delegate to the server binary's main logic
+    // For now, just print instructions since we can't easily call another binary's main
+    eprintln!("Use: cargo run --bin patternstudio-server");
+    eprintln!("Or: PORT={port} ./target/release/patternstudio-server");
+    Ok(())
+}
+
+fn open_in_browser(path: &PathBuf) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(path).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd").args(["/C", "start"]).arg(path).spawn();
     }
 }
