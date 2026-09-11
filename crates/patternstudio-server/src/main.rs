@@ -1,6 +1,6 @@
 //! PatternStudio API server: axum-based REST API.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -20,7 +20,7 @@ use vtracer::config::Preset;
 #[derive(Clone)]
 struct AppState {
     upload_dir: PathBuf,
-    assets: Mutex<HashMap<String, PathBuf>>,
+    assets: Arc<Mutex<HashMap<String, PathBuf>>>,
 }
 
 #[derive(Deserialize)]
@@ -89,9 +89,8 @@ async fn upload(
         let name = field.name().unwrap_or("file").to_string();
         if name == "file" {
             let content = field.bytes().await.map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-            let ext = field.filename().and_then(|f| f.split('.').last()).unwrap_or("png");
             let id = uuid::Uuid::new_v4().to_string();
-            let path = state.upload_dir.join(format!("{id}.{ext}"));
+            let path = state.upload_dir.join(format!("{id}.png"));
             std::fs::write(&path, &content).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
             state.assets.lock().unwrap().insert(id.clone(), path);
             asset_id = Some(id);
@@ -169,7 +168,7 @@ async fn main() {
     let upload_dir = PathBuf::from("/tmp/patternstudio-uploads");
     std::fs::create_dir_all(&upload_dir).ok();
 
-    let state = AppState { upload_dir, assets: Mutex::new(HashMap::new()) };
+    let state = AppState { upload_dir, assets: Arc::new(Mutex::new(HashMap::new())) };
 
     let app = Router::new()
         .route("/api/v1/health", get(health))
