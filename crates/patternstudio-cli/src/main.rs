@@ -220,6 +220,30 @@ fn trace_single(
         eprintln!("Size: {}x{}", img.width, img.height);
     }
 
+    // Remove background pixels before tracing if requested
+    let img = if no_background {
+        let (w, h) = (img.width, img.height);
+        // Sample the four corners to estimate the background color
+        let corners = [
+            img.get_pixel(0, 0),
+            img.get_pixel(w - 1, 0),
+            img.get_pixel(0, h - 1),
+            img.get_pixel(w - 1, h - 1),
+        ];
+        let bg = visioncortex::Color::new(
+            (corners.iter().map(|c| c.rgb_u8()[0] as u32).sum::<u32>() / 4) as u8,
+            (corners.iter().map(|c| c.rgb_u8()[1] as u32).sum::<u32>() / 4) as u8,
+            (corners.iter().map(|c| c.rgb_u8()[2] as u32).sum::<u32>() / 4) as u8,
+        );
+        let mask = patternstudio_tracer::MaskFrontend::with_background(bg, threshold);
+        if !quiet {
+            eprintln!("Removing background (threshold {threshold})...");
+        }
+        mask.remove_background(&img)
+    } else {
+        img
+    };
+
     let p = match preset {
         "bw" => Preset::Bw,
         "photo" => Preset::Photo,
@@ -255,10 +279,15 @@ fn trace_single(
         pipeline.trace_layered(&img, &assignment)?
     };
 
-    // Remove background layer if requested
+    // Remove background if requested: drop Background-role layers and any
+    // shapes left over from the masked (black) background pixels
     let layered = if no_background {
         let mut l = layered;
         l.layers.retain(|layer| layer.role != patternstudio_core::LayerRole::Background);
+        let removed = l.remove_color(visioncortex::Color::new(0, 0, 0), threshold);
+        if !quiet && removed > 0 {
+            eprintln!("Removed {removed} background shape(s)");
+        }
         l
     } else {
         layered

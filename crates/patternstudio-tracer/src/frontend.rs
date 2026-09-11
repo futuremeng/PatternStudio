@@ -32,7 +32,8 @@ impl MaskFrontend {
         }
     }
 
-    fn remove_background(&self, img: &ColorImage) -> ColorImage {
+    /// Replace pixels within `tolerance` of `background_color` with black.
+    pub fn remove_background(&self, img: &ColorImage) -> ColorImage {
         let mut out = img.clone();
         let bg = self.background_color;
         let tol = self.tolerance as i32;

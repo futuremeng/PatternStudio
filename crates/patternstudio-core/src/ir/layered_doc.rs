@@ -315,6 +315,25 @@ impl LayeredDoc {
         }
     }
 
+    /// Remove all shapes whose fill color is within `tolerance` (per channel)
+    /// of `color`. Returns the number of shapes removed.
+    pub fn remove_color(&mut self, color: Color, tolerance: u8) -> usize {
+        let target = color.rgb_u8();
+        let tol = tolerance as i32;
+        let matches = |shape: &Shape| {
+            let [r, g, b] = shape.paint.color().rgb_u8();
+            (r as i32 - target[0] as i32).abs() <= tol
+                && (g as i32 - target[1] as i32).abs() <= tol
+                && (b as i32 - target[2] as i32).abs() <= tol
+        };
+        let mut removed = 0;
+        for layer in &mut self.layers {
+            removed += layer.shapes.len() - layer.shapes.iter().filter(|s| !matches(s)).count();
+            layer.shapes.retain(|s| !matches(s));
+        }
+        removed
+    }
+
     pub fn total_shapes(&self) -> usize {
         self.layers.iter().map(|l| l.shapes.len()).sum()
     }
