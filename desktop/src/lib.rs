@@ -7,11 +7,18 @@
 pub mod commands;
 
 pub fn run() {
-    use commands::{generate_pattern, list_patterns, save_svg, trace_bytes};
+    use commands::{
+        batch_trace, generate_pattern, list_images, list_patterns, open_folder, read_image,
+        save_svg, trace_bytes,
+    };
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             trace_bytes,
+            open_folder,
+            list_images,
+            read_image,
+            batch_trace,
             generate_pattern,
             list_patterns,
             save_svg
