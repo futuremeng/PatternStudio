@@ -81,6 +81,8 @@ cargo run --bin patternstudio-server
 | `-n, --n-units` | Number of repeating units |
 | `-c, --complexity` | Complexity 0-100 |
 | `-z, --size` | Output size in pixels |
+| `--seed` | Random seed for reproducible patterns |
+| `--color` | Override stroke color (hex, e.g. `#ff0000`) |
 | `--open` | Open output in browser |
 
 ### `convert` command
