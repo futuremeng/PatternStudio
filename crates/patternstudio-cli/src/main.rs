@@ -52,7 +52,7 @@ enum Command {
     },
     /// Generate a pattern SVG
     Pattern {
-        /// Pattern type: rosette/meander/scroll/taotie/ice_crack
+        /// Pattern type: rosette/meander/scroll/taotie/ice_crack/cloud/wave/greek_key
         #[arg(short, long)]
         kind: String,
         /// Output SVG path
@@ -64,7 +64,12 @@ enum Command {
         /// Complexity (0-100)
         #[arg(short, long, default_value_t = 50)]
         complexity: u8,
+        /// Output size in pixels
+        #[arg(short = 'z', long, default_value_t = 400)]
+        size: u32,
     },
+    /// List available pattern types
+    List,
 }
 
 fn main() -> ExitCode {
@@ -73,8 +78,11 @@ fn main() -> ExitCode {
         Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers } => {
             cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers)
         }
-        Command::Pattern { kind, output, n_units, complexity } => {
-            cmd_pattern(&kind, &output, n_units, complexity)
+        Command::Pattern { kind, output, n_units, complexity, size } => {
+            cmd_pattern(&kind, &output, n_units, complexity, size)
+        }
+        Command::List => {
+            cmd_list()
         }
     };
     match result {
@@ -173,12 +181,20 @@ fn trace_single(
 }
 
 fn cmd_pattern(
-    kind: &str, output: &PathBuf, n_units: u32, complexity: u8,
+    kind: &str, output: &PathBuf, n_units: u32, complexity: u8, size: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("Generating pattern: {kind} (n={n_units}, complexity={complexity})");
-    let svg = patternstudio_patterns::generate(kind, n_units, complexity)?;
+    eprintln!("Generating pattern: {kind} (n={n_units}, complexity={complexity}, size={size})");
+    let svg = patternstudio_patterns::generate_sized(kind, n_units, complexity, size)?;
     std::fs::write(output, &svg)?;
     eprintln!("Saved: {}", output.display());
+    Ok(())
+}
+
+fn cmd_list() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Available pattern types:");
+    for (kind, desc) in patternstudio_patterns::list_kinds() {
+        println!("  {kind:<12} {desc}");
+    }
     Ok(())
 }
 
