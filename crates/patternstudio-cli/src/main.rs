@@ -58,6 +58,9 @@ enum Command {
         /// Save PNG preview of input alongside SVG
         #[arg(long)]
         preview: bool,
+        /// Optimize SVG output (round coordinates to reduce file size)
+        #[arg(long)]
+        optimize: bool,
         /// Open output in browser after tracing
         #[arg(long)]
         open: bool,
@@ -140,8 +143,8 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, preview, open, json, quiet, scale, rotate, flip } => {
-            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, preview, open, json, quiet, scale, rotate, &flip)
+        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, preview, optimize, open, json, quiet, scale, rotate, flip } => {
+            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, preview, optimize, open, json, quiet, scale, rotate, &flip)
         }
         Command::Pattern { kind, output, n_units, complexity, size, seed, color, open } => {
             cmd_pattern(&kind, &output, n_units, complexity, size, seed, color.as_deref(), open)
@@ -166,7 +169,7 @@ fn cmd_trace(
     input: &PathBuf, output: &PathBuf,
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
-    layers: usize, no_background: bool, threshold: u8, preview: bool, open: bool, json: bool, quiet: bool,
+    layers: usize, no_background: bool, threshold: u8, preview: bool, optimize: bool, open: bool, json: bool, quiet: bool,
     scale: f64, rotate: f64, flip: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Batch mode: input is a directory
@@ -186,7 +189,7 @@ fn cmd_trace(
         for (i, file) in files.iter().enumerate() {
             let stem = file.file_stem().unwrap_or_default().to_string_lossy();
             let out_svg = out_dir.join(format!("{stem}.svg"));
-            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, false, false, false, true, 1.0, 0.0, "none") {
+            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, false, false, false, false, true, 1.0, 0.0, "none") {
                 Ok(()) => { ok += 1; }
                 Err(e) => eprintln!("  [{}] FAILED: {e}", file.display()),
             }
@@ -199,14 +202,14 @@ fn cmd_trace(
     }
 
     // Single file mode
-    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, preview, open, json, quiet, scale, rotate, flip)
+    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, preview, optimize, open, json, quiet, scale, rotate, flip)
 }
 
 fn trace_single(
     input: &PathBuf, output: &PathBuf,
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
-    layers: usize, no_background: bool, threshold: u8, preview: bool, open: bool, json: bool, quiet: bool,
+    layers: usize, no_background: bool, threshold: u8, preview: bool, optimize: bool, open: bool, json: bool, quiet: bool,
     scale: f64, rotate: f64, flip: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !quiet {
@@ -296,6 +299,17 @@ fn trace_single(
     std::fs::write(output, &svg)?;
     if !quiet {
         eprintln!("Saved: {}", output.display());
+    }
+
+    // Optimize SVG: round coordinates to integers to reduce file size
+    if optimize {
+        let optimized = optimize_svg(&svg);
+        std::fs::write(output, &optimized)?;
+        if !quiet {
+            let orig_size = std::fs::metadata(input).map(|m| m.len()).unwrap_or(0);
+            let new_size = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
+            eprintln!("Optimized: {} → {} bytes", orig_size, new_size);
+        }
     }
 
     // Save PNG preview of input if requested
@@ -400,7 +414,7 @@ fn cmd_convert(
         eprintln!("Copied: {}", output.display());
     } else {
         // It's actually an image file - trace it
-        trace_single(input, output, "medium", simplify, "poster", mode, max_colors, 4, 2, layers, false, 30, false, open, false, false, 1.0, 0.0, "none")?;
+        trace_single(input, output, "medium", simplify, "poster", mode, max_colors, 4, 2, layers, false, 30, false, false, open, false, false, 1.0, 0.0, "none")?;
     }
     Ok(())
 }
@@ -413,6 +427,39 @@ fn cmd_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Use: cargo run --bin patternstudio-server");
     eprintln!("Or: PORT={port} ./target/release/patternstudio-server");
     Ok(())
+}
+
+/// Optimize SVG by rounding coordinates to integers.
+fn optimize_svg(svg: &str) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(svg.len());
+    let mut i = 0;
+    let bytes = svg.as_bytes();
+    while i < bytes.len() {
+        // Look for number patterns (digits, dots, minus)
+        if bytes[i].is_ascii_digit() || (bytes[i] == b'.' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit()) {
+            // Find the start of the number
+            let start = i;
+            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.' || bytes[i] == b'-') {
+                i += 1;
+            }
+            let num_str = std::str::from_utf8(&bytes[start..i]).unwrap_or("0");
+            if let Ok(val) = num_str.parse::<f64>() {
+                let rounded = val.round();
+                if rounded.fract() == 0.0 {
+                    let _ = write!(out, "{}", rounded as i64);
+                } else {
+                    let _ = write!(out, "{:.1}", rounded);
+                }
+            } else {
+                out.push_str(num_str);
+            }
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    out
 }
 
 fn open_in_browser(path: &PathBuf) {
