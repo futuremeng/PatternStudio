@@ -52,6 +52,9 @@ enum Command {
         /// Remove background (make transparent)
         #[arg(long)]
         no_background: bool,
+        /// Background removal threshold (0-255, default 30)
+        #[arg(long, default_value_t = 30)]
+        threshold: u8,
         /// Open output in browser after tracing
         #[arg(long)]
         open: bool,
@@ -134,8 +137,8 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet, scale, rotate, flip } => {
-            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet, scale, rotate, &flip)
+        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, open, json, quiet, scale, rotate, flip } => {
+            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, open, json, quiet, scale, rotate, &flip)
         }
         Command::Pattern { kind, output, n_units, complexity, size, seed, color, open } => {
             cmd_pattern(&kind, &output, n_units, complexity, size, seed, color.as_deref(), open)
@@ -160,7 +163,7 @@ fn cmd_trace(
     input: &PathBuf, output: &PathBuf,
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
-    layers: usize, no_background: bool, open: bool, json: bool, quiet: bool,
+    layers: usize, no_background: bool, threshold: u8, open: bool, json: bool, quiet: bool,
     scale: f64, rotate: f64, flip: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Batch mode: input is a directory
@@ -180,7 +183,7 @@ fn cmd_trace(
         for (i, file) in files.iter().enumerate() {
             let stem = file.file_stem().unwrap_or_default().to_string_lossy();
             let out_svg = out_dir.join(format!("{stem}.svg"));
-            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, false, false, true, 1.0, 0.0, "none") {
+            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, false, false, true, 1.0, 0.0, "none") {
                 Ok(()) => { ok += 1; }
                 Err(e) => eprintln!("  [{}] FAILED: {e}", file.display()),
             }
@@ -193,14 +196,14 @@ fn cmd_trace(
     }
 
     // Single file mode
-    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet, scale, rotate, flip)
+    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, open, json, quiet, scale, rotate, flip)
 }
 
 fn trace_single(
     input: &PathBuf, output: &PathBuf,
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
-    layers: usize, no_background: bool, open: bool, json: bool, quiet: bool,
+    layers: usize, no_background: bool, threshold: u8, open: bool, json: bool, quiet: bool,
     scale: f64, rotate: f64, flip: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !quiet {
@@ -382,7 +385,7 @@ fn cmd_convert(
         eprintln!("Copied: {}", output.display());
     } else {
         // It's actually an image file - trace it
-        trace_single(input, output, "medium", simplify, "poster", mode, max_colors, 4, 2, layers, false, open, false, false, 1.0, 0.0, "none")?;
+        trace_single(input, output, "medium", simplify, "poster", mode, max_colors, 4, 2, layers, false, 30, open, false, false, 1.0, 0.0, "none")?;
     }
     Ok(())
 }
