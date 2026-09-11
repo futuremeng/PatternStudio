@@ -35,6 +35,8 @@ struct TraceRequest {
     simplify: String,
     #[serde(default = "default_poster")]
     preset: String,
+    #[serde(default)]
+    layers: usize,
 }
 
 fn default_medium() -> String { "medium".into() }
@@ -48,10 +50,13 @@ struct PatternRequest {
     n_units: u32,
     #[serde(default = "default_complexity")]
     complexity: u8,
+    #[serde(default = "default_size")]
+    size: u32,
 }
 
 fn default_n_units() -> u32 { 8 }
 fn default_complexity() -> u8 { 50 }
+fn default_size() -> u32 { 400 }
 
 #[derive(Serialize)]
 struct TraceResponse {
@@ -141,8 +146,12 @@ async fn trace(
 
     let pipeline = PatternStudioPipeline::new(&config)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let layered = pipeline.trace_layered(&img, &LayerAssignment::single_layer())
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let layered = if req.layers > 1 {
+        pipeline.trace_layered_auto(&img, req.layers)
+    } else {
+        pipeline.trace_layered(&img, &LayerAssignment::single_layer())
+    }
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let svg = LayeredWriter::write(&layered);
     Ok(Json(TraceResponse {
@@ -157,9 +166,17 @@ async fn trace(
 async fn generate_pattern(
     Json(req): Json<PatternRequest>,
 ) -> Result<Json<PatternResponse>, (StatusCode, String)> {
-    let svg = patternstudio_patterns::generate(&req.kind, req.n_units, req.complexity)
+    let svg = patternstudio_patterns::generate_sized(&req.kind, req.n_units, req.complexity, req.size)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     Ok(Json(PatternResponse { svg }))
+}
+
+async fn list_patterns() -> Json<serde_json::Value> {
+    let kinds: Vec<serde_json::Value> = patternstudio_patterns::list_kinds()
+        .iter()
+        .map(|(kind, desc)| serde_json::json!({ "kind": kind, "description": desc }))
+        .collect();
+    Json(serde_json::json!({ "patterns": kinds }))
 }
 
 #[tokio::main]
@@ -175,6 +192,7 @@ async fn main() {
         .route("/api/v1/uploads", post(upload))
         .route("/api/v1/trace", post(trace))
         .route("/api/v1/pattern", post(generate_pattern))
+        .route("/api/v1/patterns", get(list_patterns))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
