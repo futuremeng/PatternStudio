@@ -15,6 +15,7 @@ use patternstudio_svg::LayeredWriter;
 use patternstudio_tracer::load_image;
 use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
+use tower_http::services::ServeDir;
 use vtracer::config::Preset;
 
 #[derive(Clone)]
@@ -193,11 +194,15 @@ async fn main() {
         .route("/api/v1/trace", post(trace))
         .route("/api/v1/pattern", post(generate_pattern))
         .route("/api/v1/patterns", get(list_patterns))
+        .fallback_service(ServeDir::new("web/dist").append_index_html_on_directories(true))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
     let addr = format!("0.0.0.0:{port}");
     println!("PatternStudio API server listening on {addr}");
+    if !PathBuf::from("web/dist/index.html").exists() {
+        println!("Note: web/dist not found — build the UI first: cd web && npm install && npm run build");
+    }
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

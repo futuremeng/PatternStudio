@@ -4,3 +4,8 @@ Cargo.lock
 !tests/**/*.svg
 .DS_Store
 crates/patternstudio-wasm/pkg/
+web/node_modules/
+web/dist/
+desktop/node_modules/
+desktop/src-tauri
+desktop/gen/

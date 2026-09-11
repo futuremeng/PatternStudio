@@ -49,7 +49,7 @@ The v0.1.0 refactor (28 commits) delivered:
 |-------|--------|------------|
 | **v0.1.0** — Core Engine | ✅ Done | VTracer pipeline, 8 patterns, CLI, REST API, 19 tests |
 | **v0.2.0** — Distribution | 🔜 Next | crates.io publication, Homebrew tap, cross-platform release (macOS/Linux/Windows) |
-| **v0.3.0** — Web UI | 📋 Planned | React frontend + API integration, drag-and-drop tracing, layer editor |
+| **v0.3.0** — Web UI | ✅ Done | React frontend + API integration, drag-and-drop tracing, layer editor |
 | **v0.4.0** — Semantic Layers | 📋 Planned | VTracer segmentation for semantic layer separation (not just color-based) |
 | **v0.5.0** — Plugin System | 💡 Idea | WASM plugin API for custom pattern generators and post-processors |
 | **v1.0.0** — Stable | 💡 Idea | API stability guarantee, Python bindings (PyO3), WASM bindings |
@@ -64,11 +64,11 @@ The v0.1.0 refactor (28 commits) delivered:
 
 ### v0.3.0 — Web UI
 
-- [ ] React + Vite frontend served by the axum server
-- [ ] Drag-and-drop image upload with live preview
-- [ ] Layer panel: show/hide, rename, reorder
-- [ ] Parameter controls mapped to trace options
-- [ ] Pattern gallery with live regeneration
+- [x] React + Vite frontend served by the axum server
+- [x] Drag-and-drop image upload with live preview
+- [x] Layer panel: show/hide, recolor, delete (rename/reorder pending)
+- [x] Parameter controls mapped to trace options
+- [x] Pattern gallery with live regeneration
 
 ### v0.4.0 — Semantic Layers
 
@@ -127,6 +127,35 @@ cargo run --bin patternstudio -- convert input.png -o out.svg --simplify high --
 cargo run --bin patternstudio-server
 # → http://localhost:8000/api/v1/health
 ```
+
+## Web UI
+
+```bash
+# Build the frontend (served by the API server)
+make web          # cd web && npm install && npm run build
+
+# Start the server (serves UI + API on http://localhost:8000)
+make web-serve    # cargo run --bin patternstudio-server
+
+# Development with hot reload (Vite dev server proxies /api to :8000)
+make web-dev      # then open http://localhost:1421
+```
+
+Features: drag-and-drop image upload, trace parameter panel (preset / resolution / simplify / auto layers), layer editor (show/hide, recolor, delete, download SVG), and a pattern generator tab with live preview.
+
+## Desktop App (Tauri)
+
+The same React frontend runs in a Tauri window; tracing happens in-process (no server needed).
+
+```bash
+make desktop      # build frontend + desktop binary
+make desktop-run  # run it
+
+# Hot-reload development (Vite + Tauri watcher)
+make desktop-dev
+```
+
+Debug the Rust side from VS Code: pick **"Debug Desktop (Tauri)"** in the Run and Debug panel (breakpoints work in `desktop/src/lib.rs`).
 
 ## CLI Options
 

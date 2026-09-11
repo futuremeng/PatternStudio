@@ -39,6 +39,23 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Debug Desktop (Tauri)",
+            // 调试 Tauri 桌面版（Rust 侧）。前端需先构建: make web
+            // 断点可打在 desktop/src/lib.rs 的 tauri command 里
+            // 注意: 必须带 tauri/custom-protocol，否则是 dev 模式，
+            // 窗口会去加载 devUrl（需要 vite dev server）而不是嵌入的前端 → 白屏
+            "cargo": {
+                "args": ["build", "--bin=patternstudio-desktop", "--manifest-path=desktop/Cargo.toml", "--features", "tauri/custom-protocol"],
+                "filter": {
+                    "name": "patternstudio-desktop",
+                    "kind": "bin"
+                }
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Debug Tests (workspace)",
             "cargo": {
                 // 编译测试但不运行，然后附加调试
