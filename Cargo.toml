@@ -6,6 +6,8 @@ members = [
     "crates/patternstudio-cli",
     "crates/patternstudio-patterns",
     "crates/patternstudio-server",
+    "crates/patternstudio-py",
+    "crates/patternstudio-wasm",
 ]
 resolver = "2"
 
@@ -27,6 +29,10 @@ image = "0.25"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
+
+# Language bindings
+pyo3 = "0.29"
+wasm-bindgen = "0.2"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

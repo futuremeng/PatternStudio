@@ -6,4 +6,4 @@ pub mod frontend;
 pub mod image_io;
 
 pub use frontend::MaskFrontend;
-pub use image_io::load_image;
+pub use image_io::{load_image, load_image_from_memory};

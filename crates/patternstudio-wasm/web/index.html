@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PatternStudio WASM Demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    .panel { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+    .preview { border: 1px solid #ccc; max-width: 640px; }
+    .preview svg { max-width: 100%; height: auto; }
+    button { padding: 0.4rem 1rem; }
+  </style>
+</head>
+<body>
+  <h1>PatternStudio WASM Demo</h1>
+
+  <h2>图片 → 分层 SVG</h2>
+  <div class="panel">
+    <input type="file" id="file" accept="image/*" />
+    <label>preset
+      <select id="preset">
+        <option value="poster" selected>poster</option>
+        <option value="bw">bw</option>
+        <option value="photo">photo</option>
+      </select>
+    </label>
+    <label>layers
+      <input type="number" id="layers" value="0" min="0" max="16" style="width: 4rem" />
+    </label>
+    <button id="traceBtn">Trace</button>
+    <span id="traceStatus"></span>
+  </div>
+  <div class="preview" id="traceResult"></div>
+
+  <h2>纹样生成</h2>
+  <div class="panel">
+    <select id="kind"></select>
+    <label>n_units <input type="number" id="nUnits" value="8" min="1" max="32" style="width: 4rem" /></label>
+    <label>complexity <input type="number" id="complexity" value="50" min="0" max="100" style="width: 4rem" /></label>
+    <button id="patternBtn">Generate</button>
+  </div>
+  <div class="preview" id="patternResult"></div>
+
+  <!-- wasm-pack 输出到 crates/patternstudio-wasm/pkg/，
+       用 http.server 从 crates/patternstudio-wasm/ 目录启动即可访问 -->
+  <script type="module">
+    import init, { traceBytes, generatePattern, listPatternKinds } from "./pkg/patternstudio_wasm.js";
+
+    await init();
+
+    const kindSelect = document.getElementById("kind");
+    for (const entry of listPatternKinds()) {
+      const [kind, desc] = entry.split(" - ");
+      const opt = document.createElement("option");
+      opt.value = kind;
+      opt.textContent = entry;
+      kindSelect.appendChild(opt);
+    }
+
+    document.getElementById("traceBtn").addEventListener("click", async () => {
+      const file = document.getElementById("file").files[0];
+      const status = document.getElementById("traceStatus");
+      const result = document.getElementById("traceResult");
+      if (!file) { status.textContent = "请先选择图片"; return; }
+      status.textContent = "tracing...";
+      result.innerHTML = "";
+      try {
+        const bytes = await file.arrayBuffer();
+        const svg = traceBytes(
+          new Uint8Array(bytes),
+          document.getElementById("preset").value,
+          "medium", "low",
+          Number(document.getElementById("layers").value)
+        );
+        result.innerHTML = svg;
+        status.textContent = "done";
+      } catch (e) {
+        status.textContent = `error: ${e}`;
+      }
+    });
+
+    document.getElementById("patternBtn").addEventListener("click", () => {
+      const svg = generatePattern(
+        kindSelect.value,
+        Number(document.getElementById("nUnits").value),
+        Number(document.getElementById("complexity").value),
+        400
+      );
+      document.getElementById("patternResult").innerHTML = svg;
+    });
+  </script>
+</body>
+</html>

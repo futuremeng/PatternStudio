@@ -3,3 +3,4 @@ Cargo.lock
 *.svg
 !tests/**/*.svg
 .DS_Store
+crates/patternstudio-wasm/pkg/

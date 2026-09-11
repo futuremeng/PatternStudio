@@ -1,0 +1,22 @@
+[package]
+name = "patternstudio-py"
+description = "PatternStudio Python bindings (PyO3)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "patternstudio"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { workspace = true }
+patternstudio-core = { workspace = true }
+patternstudio-tracer = { workspace = true }
+patternstudio-svg = { workspace = true }
+patternstudio-patterns = { workspace = true }
+vtracer = { workspace = true }
+
+[dev-dependencies]
+image = { workspace = true }
