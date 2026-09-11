@@ -67,6 +67,9 @@ enum Command {
         /// Rotate degrees (0-360)
         #[arg(long, default_value_t = 0.0)]
         rotate: f64,
+        /// Flip: none/h/v/both
+        #[arg(long, default_value = "none")]
+        flip: String,
     },
     /// Generate a pattern SVG
     Pattern {
@@ -131,8 +134,8 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet, scale, rotate } => {
-            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet, scale, rotate)
+        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet, scale, rotate, flip } => {
+            cmd_trace(&input, &output, &resolution, &simplify, &preset, &mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet, scale, rotate, &flip)
         }
         Command::Pattern { kind, output, n_units, complexity, size, seed, color, open } => {
             cmd_pattern(&kind, &output, n_units, complexity, size, seed, color.as_deref(), open)
@@ -158,7 +161,7 @@ fn cmd_trace(
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
     layers: usize, no_background: bool, open: bool, json: bool, quiet: bool,
-    scale: f64, rotate: f64,
+    scale: f64, rotate: f64, flip: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Batch mode: input is a directory
     if input.is_dir() {
@@ -177,7 +180,7 @@ fn cmd_trace(
         for (i, file) in files.iter().enumerate() {
             let stem = file.file_stem().unwrap_or_default().to_string_lossy();
             let out_svg = out_dir.join(format!("{stem}.svg"));
-            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, false, false, true, 1.0, 0.0) {
+            match trace_single(file, &out_svg, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, false, false, true, 1.0, 0.0, "none") {
                 Ok(()) => { ok += 1; }
                 Err(e) => eprintln!("  [{}] FAILED: {e}", file.display()),
             }
@@ -190,7 +193,7 @@ fn cmd_trace(
     }
 
     // Single file mode
-    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet, scale, rotate)
+    trace_single(input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, open, json, quiet, scale, rotate, flip)
 }
 
 fn trace_single(
@@ -198,7 +201,7 @@ fn trace_single(
     resolution: &str, simplify: &str, preset: &str,
     mode: &str, max_colors: usize, color_precision: i32, filter_speckle: usize,
     layers: usize, no_background: bool, open: bool, json: bool, quiet: bool,
-    scale: f64, rotate: f64,
+    scale: f64, rotate: f64, flip: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !quiet {
         eprintln!("Loading: {}", input.display());
@@ -257,21 +260,31 @@ fn trace_single(
     }
 
     let mut svg = LayeredWriter::write(&layered);
-    // Apply scale/rotate transforms if requested
-    if scale != 1.0 || rotate != 0.0 {
+    // Apply scale/rotate/flip transforms if requested
+    if scale != 1.0 || rotate != 0.0 || flip != "none" {
         let w = layered.width as f64;
         let h = layered.height as f64;
         let cx = w / 2.0;
         let cy = h / 2.0;
-        let transform = if rotate != 0.0 {
-            format!("rotate({rotate} {cx} {cy}) scale({scale})")
-        } else {
-            format!("scale({scale})")
-        };
-        // Insert transform into the first <g> element
-        if let Some(pos) = svg.find("<g ") {
-            let end = svg[pos..].find('>').map(|i| pos + i).unwrap_or(pos + 10);
-            svg.insert_str(end, &format!(" transform=\"{transform}\""));
+        let mut parts: Vec<String> = Vec::new();
+        if rotate != 0.0 {
+            parts.push(format!("rotate({rotate} {cx} {cy})"));
+        }
+        if scale != 1.0 {
+            parts.push(format!("scale({scale})"));
+        }
+        match flip {
+            "h" => parts.push(format!("translate({w} 0) scale(-1 1)")),
+            "v" => parts.push(format!("translate(0 {h}) scale(1 -1)")),
+            "both" => parts.push(format!("translate({w} {h}) scale(-1 -1)")),
+            _ => {}
+        }
+        if !parts.is_empty() {
+            let transform = parts.join(" ");
+            if let Some(pos) = svg.find("<g ") {
+                let end = svg[pos..].find('>').map(|i| pos + i).unwrap_or(pos + 10);
+                svg.insert_str(end, &format!(" transform=\"{transform}\""));
+            }
         }
     }
     std::fs::write(output, &svg)?;
@@ -369,7 +382,7 @@ fn cmd_convert(
         eprintln!("Copied: {}", output.display());
     } else {
         // It's actually an image file - trace it
-        trace_single(input, output, "medium", simplify, "poster", mode, max_colors, 4, 2, layers, false, open, false, false, 1.0, 0.0)?;
+        trace_single(input, output, "medium", simplify, "poster", mode, max_colors, 4, 2, layers, false, open, false, false, 1.0, 0.0, "none")?;
     }
     Ok(())
 }
