@@ -5,6 +5,7 @@ import { getCachedTrace, setCachedTrace } from "../traceCache.js";
 import ParameterPanel from "../components/ParameterPanel.jsx";
 import LayerPanel from "../components/LayerPanel.jsx";
 import ModeStrip from "../components/ModeStrip.jsx";
+import AppHeader from "../components/AppHeader.jsx";
 
 const DEFAULT_PARAMS = {
   preset: "poster",
@@ -131,9 +132,10 @@ export default function ImageEditorPage() {
 
   return (
     <div className="editor-page">
-      <div className="detail-header">
-        <button className="back-btn" onClick={() => navigate(`/project/${encodeURIComponent(projectId)}`)}>← 返回</button>
-        <h2>{filename}</h2>
+      <AppHeader
+        title={filename}
+        onBack={() => navigate(`/project/${encodeURIComponent(projectId)}`)}
+      >
         <div className="tabs">
           <button className={tab === "params" ? "active" : ""} onClick={() => setTab("params")}>参数</button>
           <button className={tab === "layers" ? "active" : ""} onClick={() => setTab("layers")}>图层</button>
@@ -142,7 +144,7 @@ export default function ImageEditorPage() {
           {busy ? "处理中..." : "重新 Trace"}
         </button>
         <button onClick={onDownload} disabled={!result?.svg}>下载 SVG</button>
-      </div>
+      </AppHeader>
 
       <div className="editor-main">
         <aside className="editor-sidebar">

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getImageUrl, startBatchTrace, MODE_PRESETS } from "../api.js";
 import { getCachedTrace, setCachedTrace } from "../traceCache.js";
+import AppHeader from "../components/AppHeader.jsx";
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams();
@@ -95,14 +96,15 @@ export default function ProjectDetailPage() {
 
   return (
     <div className="project-detail-page">
-      <div className="detail-header">
-        <button className="back-btn" onClick={() => navigate("/")}>← 返回</button>
-        <h2>{project.name}</h2>
-        <span className="muted">{project.images?.length || 0} 张图片</span>
+      <AppHeader
+        title={project.name}
+        meta={`${project.images?.length || 0} 张图片`}
+        onBack={() => navigate("/")}
+      >
         <button className="primary" onClick={onBatchTrace} disabled={batchStatus === "running"}>
           {batchStatus === "running" ? "批量处理中..." : "⚡ 批量处理"}
         </button>
-      </div>
+      </AppHeader>
 
       <div className="image-grid">
         {(project.images || []).map(filename => (
