@@ -117,6 +117,8 @@ impl IdealParams {
         b += (60 - self.corner_threshold) as f64 * 0.3;
         b -= self.filter_speckle as f64 * 2.0;
         b -= (20.0 - self.length_threshold.min(20.0)) * 1.5;
+        // color_precision: 1 → 0, 8 → +5 (higher precision = more color detail)
+        b += ((self.color_precision - 1) as f64 / 7.0) * 5.0;
         b.clamp(0.0, 100.0) as i32
     }
 }
