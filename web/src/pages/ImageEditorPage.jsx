@@ -13,6 +13,12 @@ const TRACE_DEBOUNCE_MS = 300;
 // Wait this long after a trace settles before snapshotting a user config (ms)
 const CONFIG_SETTLE_MS = 1500;
 const MAX_USER_CONFIGS = 12;
+// Pre-warm: presets to pre-generate in the background after the initial trace,
+// in priority order. The currently-active preset is already cached and skipped.
+const PREWARM_ORDER = ["color", "lineArt", "bw", "gradient", "lowPoly"];
+// If the user interacted (param change / preset switch) within this window, the
+// pre-warm yields so interactive traces always win the CPU.
+const PREWARM_IDLE_MS = 2000;
 
 /** Default configs from MODE_PRESETS (full param sets, ready to trace). */
 function buildDefaultConfigs() {
@@ -43,9 +49,14 @@ export default function ImageEditorPage() {
   const configsRef = useRef(configs);
   const overlayRef = useRef(null);
   const overlayDragging = useRef(false);
+  const busyRef = useRef(false);
+  const resultRef = useRef(null);
+  const lastUserActiveRef = useRef(0);
   const imageId = `${projectId}/${filename}`;
 
   useEffect(() => { configsRef.current = configs; }, [configs]);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
+  useEffect(() => { resultRef.current = result; }, [result]);
 
   // Restore user configs persisted from previous sessions.
   // Thumbnails are refilled from the trace cache when available.
@@ -147,6 +158,45 @@ export default function ImageEditorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params, imageUrl, retryTick, imageId, projectId, filename]);
 
+  // Pre-warm the remaining presets in the background after the initial trace
+  // settles, so switching between presets is instant. Runs once per image,
+  // serially, and yields whenever the user is active or a trace is in flight.
+  // It only writes the cache — it never touches the displayed result.
+  useEffect(() => {
+    if (!imageUrl) return;
+    let cancelled = false;
+    const isUserActive = () => Date.now() - lastUserActiveRef.current < PREWARM_IDLE_MS;
+    (async () => {
+      // Wait for the initial trace to settle (a result exists and we're idle).
+      while (!cancelled && (!resultRef.current || busyRef.current)) {
+        await sleep(200);
+      }
+      if (cancelled) return;
+      for (const key of PREWARM_ORDER) {
+        if (cancelled) return;
+        // Yield while the user is active or a trace is in flight.
+        while (!cancelled && (busyRef.current || isUserActive())) {
+          await sleep(400);
+        }
+        if (cancelled) return;
+        // Same params onConfigSelect would set, so the cache key matches.
+        const p = { ...DEFAULT_PARAMS, ...presetFullParams(key) };
+        const cached = await getCachedTrace(imageId, p).catch(() => null);
+        if (cancelled) return;
+        if (cached) continue; // already warm (e.g. the active preset)
+        try {
+          const source = prepareSource(projectId, filename);
+          const res = await traceSource(source, p);
+          if (cancelled) return;
+          await setCachedTrace(imageId, p, res).catch(() => {});
+        } catch (e) {
+          // Pre-warm failure is non-fatal; skip this preset.
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [imageUrl, imageId, projectId, filename]);
+
   /**
    * Snapshot the current params as a user config once the user stops
    * adjusting (settled for CONFIG_SETTLE_MS). Skipped when the params
@@ -183,11 +233,13 @@ export default function ImageEditorPage() {
   }, []);
 
   const onParamsChange = useCallback((updater) => {
+    lastUserActiveRef.current = Date.now();
     setParams(updater);
     setActiveConfigId(null);
   }, []);
 
   const onConfigSelect = useCallback((config) => {
+    lastUserActiveRef.current = Date.now();
     setActiveConfigId(config.id);
     // Normalize: configs saved before newer params fields exist.
     const next = { ...DEFAULT_PARAMS, ...config.params };

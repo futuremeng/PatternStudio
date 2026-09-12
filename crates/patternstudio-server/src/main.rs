@@ -14,7 +14,7 @@ use axum::{Json, Router};
 use futures::stream::{Stream, StreamExt};
 use patternstudio_core::ir::LayeredDoc;
 use patternstudio_core::profiles::{AutoDecision, IdealParams, apply_profiles};
-use patternstudio_core::{key_for_path, LayerAssignment, SessionCache};
+use patternstudio_core::{key_for_source, LayerAssignment, SessionCache};
 use patternstudio_svg::LayeredWriter;
 use patternstudio_tracer::load_image;
 use serde::{Deserialize, Serialize};
@@ -24,10 +24,11 @@ use tower_http::services::ServeDir;
 use vtracer::config::{Clustering, FitMode, Hierarchical, Preset};
 use vtracer::Session;
 
-/// How many decoded source images (and their cached segmentations) to keep
-/// around for instant re-tracing. Each entry holds one RGBA image plus its
-/// segmentation, so this bounds the extra memory used by the cache.
-const MAX_SESSIONS: usize = 8;
+/// How many (source, segmentation) sessions to keep around for instant
+/// re-tracing. Each entry holds one RGBA image plus its segmentation, so this
+/// bounds the extra memory used by the cache. Sized to hold the pre-warmed
+/// presets plus headroom for interactive clustering tweaks.
+const MAX_SESSIONS: usize = 10;
 
 #[derive(Clone)]
 struct AppState {
@@ -217,8 +218,9 @@ fn build_vtracer_config(params: &TraceParams) -> Result<vtracer::Config, String>
 /// batch tracing, where each file is traced exactly once (no reuse benefit).
 fn do_trace(img_path: &Path, params: &TraceParams) -> Result<TraceResult, String> {
     let img = load_image(img_path).map_err(|e| format!("failed to load image: {e}"))?;
+    let config = build_vtracer_config(params)?;
     let mut session = Session::new(img);
-    do_trace_with_session(&mut session, params)
+    do_trace_with_session(&mut session, &config, params)
 }
 
 /// Layering + SVG over a document produced by a [`Session`].
@@ -227,9 +229,8 @@ fn do_trace(img_path: &Path, params: &TraceParams) -> Result<TraceResult, String
 /// parameters are unchanged and only re-runs the cheap downstream stages — the
 /// core of the interactive tuning loop. Split out from the one-shot path so the
 /// `/trace` handler can drive a cached session.
-fn do_trace_with_session(session: &mut Session, params: &TraceParams) -> Result<TraceResult, String> {
-    let vtracer_config = build_vtracer_config(params)?;
-    let doc = session.render(&vtracer_config).map_err(|e| format!("trace failed: {e}"))?;
+fn do_trace_with_session(session: &mut Session, config: &vtracer::Config, params: &TraceParams) -> Result<TraceResult, String> {
+    let doc = session.render(config).map_err(|e| format!("trace failed: {e}"))?;
 
     // "auto": derive the strategy + multi-level profiles from the ideal params.
     let is_auto = params.layer_strategy.as_deref() == Some("auto");
@@ -375,9 +376,11 @@ async fn trace(
     let params = req.params.unwrap_or_default();
     let sessions = state.sessions.clone();
     let result = tokio::task::spawn_blocking(move || {
-        // Reuse (or create) a session for this source so the expensive
-        // segmentation is computed once and reused across parameter tweaks.
-        let key = key_for_path(&img_path);
+        // Build the config up front so the session cache can be keyed by the
+        // segmentation parameters (not just the file): each preset keeps its own
+        // cached segmentation instead of evicting the previous one.
+        let config = build_vtracer_config(&params)?;
+        let key = key_for_source(&img_path, &config.segment_key());
         let session = {
             let mut cache = sessions.lock().unwrap();
             let path = img_path.clone();
@@ -386,7 +389,7 @@ async fn trace(
             })?
         };
         let mut guard = session.lock().unwrap();
-        do_trace_with_session(&mut guard, &params)
+        do_trace_with_session(&mut guard, &config, &params)
     })
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?

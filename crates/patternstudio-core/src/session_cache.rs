@@ -98,6 +98,18 @@ pub fn key_for_path(path: &Path) -> String {
     }
 }
 
+/// A cache key for a source file *and* its segmentation parameters.
+///
+/// Unlike [`key_for_path`] (per-file), this also folds in the vtracer
+/// [`SegmentKey`](vtracer::config::SegmentKey) — the clustering parameters that
+/// decide whether a re-segmentation is needed. Keying sessions this way lets
+/// each preset / clustering setting keep its own cached segmentation instead of
+/// evicting the previous one, so pre-warming several presets doesn't churn the
+/// cache (and toggling between two clustering settings stays fast).
+pub fn key_for_source(path: &Path, seg: &vtracer::config::SegmentKey) -> String {
+    format!("{}:{:?}", key_for_path(path), seg)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
