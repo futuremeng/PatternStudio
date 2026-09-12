@@ -50,11 +50,15 @@ export default function ImageEditorPage() {
   const [activeConfigId, setActiveConfigId] = useState("default-color");
   const [showOriginal, setShowOriginal] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
+  const [compareMode, setCompareMode] = useState("side"); // "side" | "overlay"
+  const [overlayPos, setOverlayPos] = useState(50); // divider position, percent
   const fileRef = useRef(null);
   const traceSeq = useRef(0);
   const configTimerRef = useRef(null);
   const userConfigSeq = useRef(0);
   const configsRef = useRef(configs);
+  const overlayRef = useRef(null);
+  const overlayDragging = useRef(false);
   const imageId = `${projectId}/${filename}`;
 
   useEffect(() => { configsRef.current = configs; }, [configs]);
@@ -84,6 +88,27 @@ export default function ImageEditorPage() {
     fileRef.current = file;
     return file;
   }, [imageUrl, filename]);
+
+  // Overlay compare: move the divider to a pointer x position (percent).
+  const updateOverlayPos = useCallback((clientX) => {
+    const el = overlayRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0) return;
+    const pos = ((clientX - rect.left) / rect.width) * 100;
+    setOverlayPos(Math.min(100, Math.max(0, pos)));
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e) => { if (overlayDragging.current) updateOverlayPos(e.clientX); };
+    const onUp = () => { overlayDragging.current = false; };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [updateOverlayPos]);
 
   // Auto-trace: any param change (debounced) regenerates immediately.
   // Cache-first, so reverting a slider hits IndexedDB and is instant.
@@ -193,6 +218,10 @@ export default function ImageEditorPage() {
         title={filename}
         onBack={() => navigate(`/project/${encodeURIComponent(projectId)}`)}
       >
+        <div className="seg-control">
+          <button className={compareMode === "side" ? "active" : ""} onClick={() => setCompareMode("side")}>对照</button>
+          <button className={compareMode === "overlay" ? "active" : ""} onClick={() => setCompareMode("overlay")}>叠加</button>
+        </div>
         <button onClick={onDownload} disabled={!result?.svg}>下载 SVG</button>
       </AppHeader>
 
@@ -202,23 +231,54 @@ export default function ImageEditorPage() {
         </aside>
 
         <div className="editor-content">
-          <div className="before-after">
-            <div className="ba-panel">
-              <span className="label">原图</span>
-              {imageUrl ? <img src={imageUrl} alt="original" /> : <div className="placeholder">加载中</div>}
+          {compareMode === "side" ? (
+            <div className="before-after">
+              <div className="ba-panel">
+                <span className="label">原图</span>
+                {imageUrl ? <img src={imageUrl} alt="original" /> : <div className="placeholder">加载中</div>}
+              </div>
+              <div className="ba-panel">
+                <span className="label">{showOriginal ? "原图" : "SVG 结果"}</span>
+                {busy && <span className="busy-badge">处理中...</span>}
+                {showOriginal && imageUrl ? (
+                  <img src={imageUrl} alt="original" />
+                ) : result?.svg ? (
+                  <div className="svg-frame" dangerouslySetInnerHTML={{ __html: result.svg }} />
+                ) : (
+                  <div className="placeholder">{busy ? "处理中..." : "点击下方配置开始"}</div>
+                )}
+              </div>
             </div>
-            <div className="ba-panel">
-              <span className="label">{showOriginal ? "原图" : "SVG 结果"}</span>
+          ) : (
+            <div className="overlay-wrap">
               {busy && <span className="busy-badge">处理中...</span>}
               {showOriginal && imageUrl ? (
-                <img src={imageUrl} alt="original" />
-              ) : result?.svg ? (
-                <div className="svg-frame" dangerouslySetInnerHTML={{ __html: result.svg }} />
+                <img className="overlay-single" src={imageUrl} alt="original" />
+              ) : imageUrl && result?.svg ? (
+                <div
+                  className="overlay-compare"
+                  ref={overlayRef}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    overlayDragging.current = true;
+                    updateOverlayPos(e.clientX);
+                  }}
+                >
+                  <img src={imageUrl} alt="original" />
+                  <div className="overlay-top" style={{ clipPath: `inset(0 0 0 ${overlayPos}%)` }}>
+                    <div className="overlay-svg" dangerouslySetInnerHTML={{ __html: result.svg }} />
+                  </div>
+                  <span className="overlay-tag overlay-tag-left">原图</span>
+                  <span className="overlay-tag overlay-tag-right">SVG 结果</span>
+                  <div className="overlay-divider" style={{ left: `${overlayPos}%` }}>
+                    <div className="overlay-handle">‹›</div>
+                  </div>
+                </div>
               ) : (
                 <div className="placeholder">{busy ? "处理中..." : "点击下方配置开始"}</div>
               )}
             </div>
-          </div>
+          )}
           {error && (
             <div className="error" style={{ padding: "0 1rem" }}>
               {error}

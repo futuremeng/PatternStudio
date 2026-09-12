@@ -236,6 +236,48 @@ body {
 }
 .svg-frame svg { max-width: 100%; height: auto; }
 
+/* Overlay compare mode: original as base, SVG clipped on the right of a draggable divider */
+.overlay-wrap {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  padding: 1rem; overflow: auto; position: relative;
+}
+.overlay-single {
+  max-width: 100%; max-height: 60vh;
+  border-radius: var(--radius); border: 1px solid var(--border);
+  background: #fff;
+}
+.overlay-compare {
+  position: relative; max-width: 100%;
+  border-radius: var(--radius); border: 1px solid var(--border);
+  overflow: hidden; background: #fff;
+  cursor: col-resize; user-select: none; touch-action: none;
+}
+.overlay-compare img { display: block; max-width: 100%; max-height: 60vh; }
+.overlay-top { position: absolute; inset: 0; pointer-events: none; }
+.overlay-svg, .overlay-svg svg { width: 100%; height: 100%; display: block; }
+.overlay-divider {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: var(--accent); transform: translateX(-1px);
+  pointer-events: none;
+}
+.overlay-handle {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 28px; height: 28px; padding: 0 5px; border-radius: 14px;
+  background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.85rem; letter-spacing: -0.15em;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+}
+.overlay-tag {
+  position: absolute; top: 0.5rem; z-index: 1;
+  font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 10px;
+  background: rgba(0, 0, 0, 0.55); color: #fff;
+  pointer-events: none;
+}
+.overlay-tag-left { left: 0.5rem; }
+.overlay-tag-right { right: 0.5rem; }
+
 .mode-strip {
   display: flex; gap: 0.5rem; padding: 0.8rem 1rem;
   background: var(--surface); border-top: 1px solid var(--border);
