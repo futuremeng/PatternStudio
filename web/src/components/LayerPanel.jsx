@@ -1,6 +1,12 @@
 import React, { useState } from "react";
 import { downloadSvg } from "../api.js";
 
+const PROFILE_TITLES = {
+  L0: "L0 粗：背景层 — 加大简化容差 + 降低坐标精度",
+  L1: "L1 标准：保持理想参数结果",
+  L2: "L2 细：细节层 — 更高坐标精度 + 冗余段清理",
+};
+
 function LayerCard({ layer, selected, onToggle }) {
   return (
     <div
@@ -15,7 +21,14 @@ function LayerCard({ layer, selected, onToggle }) {
       />
       <div className="mini-preview" dangerouslySetInnerHTML={{ __html: layer.previewSvg }} />
       <div className="info">
-        <div className="name">{layer.name}</div>
+        <div className="name">
+          {layer.name}
+          {layer.profile && (
+            <span className="profile-badge" title={PROFILE_TITLES[layer.profile] || layer.profile}>
+              {layer.profile}
+            </span>
+          )}
+        </div>
         <div className="meta">
           <span className="color-dot" style={{ background: layer.dominantColor }} />
           <span>{layer.shapeCount} shapes</span>
@@ -27,7 +40,7 @@ function LayerCard({ layer, selected, onToggle }) {
   );
 }
 
-export default function LayerPanel({ layers }) {
+export default function LayerPanel({ layers, strategyInfo }) {
   const [selected, setSelected] = useState(new Set());
 
   const toggle = (name) => {
@@ -73,6 +86,12 @@ export default function LayerPanel({ layers }) {
           <button onClick={selectNone} style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}>清空</button>
         </div>
       </div>
+
+      {strategyInfo?.reason && (
+        <div className="strategy-note" title={`策略: ${strategyInfo.strategy} · 层数: ${strategyInfo.layers} · 复杂度阈值: ${strategyInfo.complexityThreshold}%`}>
+          {strategyInfo.reason}
+        </div>
+      )}
 
       {layers.map(layer => (
         <LayerCard

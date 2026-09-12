@@ -87,6 +87,8 @@ pub struct Layer {
     pub role: LayerRole,
     pub shapes: Vec<Shape>,
     pub editability: EditabilityFlags,
+    /// Multi-level parameter profile applied to this layer (auto strategy).
+    pub profile: crate::profiles::ProfileLevel,
     pub metadata: serde_json::Map<String, serde_json::Value>,
 }
 
@@ -103,6 +105,8 @@ pub struct LayerSpec {
     pub role: LayerRole,
     pub shape_indices: Vec<usize>,
     pub editability: EditabilityFlags,
+    /// Multi-level parameter profile for this layer (auto strategy).
+    pub profile: crate::profiles::ProfileLevel,
 }
 
 impl LayerAssignment {
@@ -114,6 +118,7 @@ impl LayerAssignment {
                 role: LayerRole::Structure,
                 shape_indices: Vec::new(),
                 editability: EditabilityFlags::full(),
+                profile: crate::profiles::ProfileLevel::default(),
             }],
         }
     }
@@ -126,6 +131,7 @@ impl LayerAssignment {
                 role: LayerRole::Custom("artwork".into()),
                 shape_indices: Vec::new(),
                 editability: EditabilityFlags::full(),
+                profile: crate::profiles::ProfileLevel::default(),
             }],
         }
     }
@@ -171,6 +177,7 @@ impl LayerAssignment {
                         role,
                         shape_indices: indices,
                         editability: EditabilityFlags::full(),
+                        profile: crate::profiles::ProfileLevel::default(),
                     }
                 })
                 .collect();
@@ -204,6 +211,7 @@ impl LayerAssignment {
                     role,
                     shape_indices: indices,
                     editability: EditabilityFlags::full(),
+                    profile: crate::profiles::ProfileLevel::default(),
                 }
             })
             .collect();
@@ -214,6 +222,7 @@ impl LayerAssignment {
             role: LayerRole::Details,
             shape_indices: other_indices,
             editability: EditabilityFlags::full(),
+            profile: crate::profiles::ProfileLevel::default(),
         });
 
         Self { layers }
@@ -262,6 +271,7 @@ impl LayerAssignment {
                 role: LayerRole::Structure,
                 shape_indices: simple_indices,
                 editability: EditabilityFlags::full(),
+                profile: crate::profiles::ProfileLevel::default(),
             });
         }
         layers.push(LayerSpec {
@@ -269,6 +279,7 @@ impl LayerAssignment {
             role: LayerRole::Details,
             shape_indices: complex_indices,
             editability: EditabilityFlags::full(),
+            profile: crate::profiles::ProfileLevel::default(),
         });
         Self { layers }
     }
@@ -324,6 +335,7 @@ impl LayerAssignment {
                 layers.push(LayerSpec {
                     name, role, shape_indices: base,
                     editability: EditabilityFlags::full(),
+                    profile: crate::profiles::ProfileLevel::default(),
                 });
             }
         }
@@ -333,6 +345,7 @@ impl LayerAssignment {
                 role: LayerRole::Details,
                 shape_indices: details_indices,
                 editability: EditabilityFlags::full(),
+                profile: crate::profiles::ProfileLevel::default(),
             });
         }
         Self { layers }
@@ -355,7 +368,7 @@ impl LayerAssignment {
                     format!("color-{:02x}{:02x}{:02x}", color[0], color[1], color[2])
                 };
                 let role = if idx == 0 { LayerRole::Structure } else { LayerRole::Custom(name.clone()) };
-                LayerSpec { name, role, shape_indices: indices, editability: EditabilityFlags::full() }
+                LayerSpec { name, role, shape_indices: indices, editability: EditabilityFlags::full(), profile: crate::profiles::ProfileLevel::default() }
             }).collect();
         }
 
@@ -368,11 +381,11 @@ impl LayerAssignment {
                 format!("color-{:02x}{:02x}{:02x}", color[0], color[1], color[2])
             };
             let role = if idx == 0 { LayerRole::Structure } else { LayerRole::Custom(name.clone()) };
-            LayerSpec { name, role, shape_indices: indices, editability: EditabilityFlags::full() }
+            LayerSpec { name, role, shape_indices: indices, editability: EditabilityFlags::full(), profile: crate::profiles::ProfileLevel::default() }
         }).collect();
         result.push(LayerSpec {
             name: "other".into(), role: LayerRole::Details,
-            shape_indices: other, editability: EditabilityFlags::full(),
+            shape_indices: other, editability: EditabilityFlags::full(), profile: crate::profiles::ProfileLevel::default(),
         });
         result
     }
@@ -407,6 +420,7 @@ impl LayeredDoc {
                 role: LayerRole::Custom("artwork".into()),
                 shapes: doc.shapes.clone(),
                 editability: EditabilityFlags::full(),
+                profile: crate::profiles::ProfileLevel::default(),
                 metadata: serde_json::Map::new(),
             });
         } else {
@@ -429,7 +443,15 @@ impl LayeredDoc {
                     role: spec.role.clone(),
                     shapes,
                     editability: spec.editability,
-                    metadata: serde_json::Map::new(),
+                    profile: spec.profile,
+                    metadata: {
+                        let mut m = serde_json::Map::new();
+                        m.insert(
+                            "profile".into(),
+                            serde_json::json!(spec.profile.as_str()),
+                        );
+                        m
+                    },
                 });
             }
         }
@@ -546,6 +568,7 @@ mod tests {
             role: LayerRole::Details,
             shapes: vec![test_shape(50)],
             editability: EditabilityFlags::full(),
+            profile: crate::profiles::ProfileLevel::default(),
             metadata: serde_json::Map::new(),
         };
         result.insert_layer(1, new_layer);

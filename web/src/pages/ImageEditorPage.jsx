@@ -256,7 +256,7 @@ export default function ImageEditorPage() {
               </div>
               <div className="ba-panel">
                 <span className="label">矢量</span>
-                {busy && <span className="busy-badge">处理中...</span>}
+                {busy && result?.svg && <span className="busy-badge">处理中...</span>}
                 {result?.svg ? (
                   <div className="svg-frame" dangerouslySetInnerHTML={{ __html: result.svg }} />
                 ) : (
@@ -266,7 +266,7 @@ export default function ImageEditorPage() {
             </div>
           ) : (
             <div className="overlay-wrap">
-              {busy && <span className="busy-badge">处理中...</span>}
+              {busy && result?.svg && <span className="busy-badge">处理中...</span>}
               {imageUrl && result?.svg ? (
                 <div
                   className="overlay-compare"
@@ -301,7 +301,7 @@ export default function ImageEditorPage() {
         </div>
 
         <aside className="editor-layers">
-          <LayerPanel layers={result?.layers || []} />
+          <LayerPanel layers={result?.layers || []} strategyInfo={result?.strategyInfo} />
         </aside>
       </div>
 

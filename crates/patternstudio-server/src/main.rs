@@ -13,6 +13,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::stream::{Stream, StreamExt};
 use patternstudio_core::ir::LayeredDoc;
+use patternstudio_core::profiles::{AutoDecision, IdealParams, apply_profiles};
 use patternstudio_core::LayerAssignment;
 use patternstudio_svg::LayeredWriter;
 use patternstudio_tracer::load_image;
@@ -135,6 +136,8 @@ struct LayerInfo {
     shape_count: usize,
     dominant_color: String,
     preview_svg: String,
+    /// Multi-level parameter profile ("L0" coarse / "L1" standard / "L2" fine).
+    profile: String,
 }
 
 #[derive(Serialize)]
@@ -146,6 +149,9 @@ struct TraceResult {
     shape_count: usize,
     layer_count: usize,
     layers: Vec<LayerInfo>,
+    /// Present when `layerStrategy: "auto"`: the chosen strategy and why.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    strategy_info: Option<AutoDecision>,
 }
 
 fn build_vtracer_config(params: &TraceParams) -> Result<vtracer::Config, String> {
@@ -200,24 +206,49 @@ fn do_trace(img_path: &Path, params: &TraceParams) -> Result<TraceResult, String
     let vtracer_config = build_vtracer_config(params)?;
     let pipeline = vtracer_config.build().map_err(|e| format!("failed to build pipeline: {e}"))?;
     let doc = pipeline.run(&img).map_err(|e| format!("trace failed: {e}"))?;
-    let assignment = match params.layer_strategy.as_deref().unwrap_or("none") {
-        "color" => {
-            let n = params.layers.max(2);
-            LayerAssignment::by_color(&doc, n)
-        }
-        "complexity" => {
-            let n = params.layers.max(2);
-            let t = params.complexity_threshold.unwrap_or(70);
-            LayerAssignment::by_complexity(&doc, t, n)
-        }
-        "hybrid" => {
-            let n = params.layers.max(2);
-            let t = params.complexity_threshold.unwrap_or(70);
-            LayerAssignment::hybrid(&doc, n, t)
-        }
-        _ => LayerAssignment::single_layer(),
+
+    // "auto": derive the strategy + multi-level profiles from the ideal params.
+    let is_auto = params.layer_strategy.as_deref() == Some("auto");
+    let ideal = IdealParams::from_options(
+        params.clustering.as_deref(),
+        params.line_art,
+        params.color_precision,
+        params.layer_difference,
+        params.max_colors,
+        params.simplify,
+        params.path_precision,
+        params.corner_threshold,
+        params.length_threshold,
+        params.filter_speckle,
+        params.optimize,
+    );
+    let (assignment, decision) = if is_auto {
+        let (a, d) = AutoDecision::assign(&doc, &ideal);
+        (a, Some(d))
+    } else {
+        let assignment = match params.layer_strategy.as_deref().unwrap_or("none") {
+            "color" => {
+                let n = params.layers.max(2);
+                LayerAssignment::by_color(&doc, n)
+            }
+            "complexity" => {
+                let n = params.layers.max(2);
+                let t = params.complexity_threshold.unwrap_or(70);
+                LayerAssignment::by_complexity(&doc, t, n)
+            }
+            "hybrid" => {
+                let n = params.layers.max(2);
+                let t = params.complexity_threshold.unwrap_or(70);
+                LayerAssignment::hybrid(&doc, n, t)
+            }
+            _ => LayerAssignment::single_layer(),
+        };
+        (assignment, None)
     };
-    let layered = LayeredDoc::from_vector_doc(&doc, &assignment);
+    let mut layered = LayeredDoc::from_vector_doc(&doc, &assignment);
+    if is_auto {
+        apply_profiles(&mut layered, &ideal);
+    }
     let svg = if params.line_art {
         LayeredWriter::write_line_art(&layered)
     } else {
@@ -230,10 +261,12 @@ fn do_trace(img_path: &Path, params: &TraceParams) -> Result<TraceResult, String
             shape_count: layer.shapes.len(),
             dominant_color: LayeredWriter::layer_dominant_color(layer),
             preview_svg: LayeredWriter::layer_preview_svg(&layered, i),
+            profile: layer.profile.as_str().into(),
         }).collect();
     Ok(TraceResult {
         svg, width: layered.width, height: layered.height,
         shape_count: layered.total_shapes(), layer_count: layered.layers.len(), layers,
+        strategy_info: decision,
     })
 }
 
@@ -535,6 +568,7 @@ async fn start_batch_trace(
                             "status": "done", "svg": tr.svg,
                             "width": tr.width, "height": tr.height,
                             "shape_count": tr.shape_count, "layers": tr.layers,
+                            "strategy_info": tr.strategy_info,
                             "elapsed_ms": elapsed
                         }).to_string())).await;
                 }

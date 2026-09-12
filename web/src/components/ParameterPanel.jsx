@@ -263,6 +263,7 @@ export default function ParameterPanel({ params, onChange }) {
           value={params.layerStrategy ?? "none"}
           options={[
             { value: "none", label: "单层", title: "所有形状放在同一个图层" },
+            { value: "auto", label: "自动", title: "根据当前参数组合自动选择分层策略，并按 粗/标准/细 三级参数剖面处理各层" },
             { value: "color", label: "颜色", title: "相同颜色的形状归到同一图层" },
             { value: "complexity", label: "复杂度", title: "简单形状作为底图，复杂形状单独成层" },
             { value: "hybrid", label: "混合", title: "先按颜色分组，再在每组内按复杂度拆分出细节层" },

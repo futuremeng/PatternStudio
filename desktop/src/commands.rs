@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use patternstudio_core::ir::LayeredDoc;
+use patternstudio_core::profiles::{apply_profiles, AutoDecision, IdealParams};
 use patternstudio_core::LayerAssignment;
 use patternstudio_patterns::{generate_sized, list_kinds};
 use patternstudio_svg::LayeredWriter;
@@ -78,6 +79,8 @@ pub struct LayerInfo {
     pub shape_count: usize,
     pub dominant_color: String,
     pub preview_svg: String,
+    /// Multi-level parameter profile ("L0" coarse / "L1" standard / "L2" fine).
+    pub profile: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -89,6 +92,9 @@ pub struct TraceOut {
     pub shape_count: usize,
     pub layer_count: usize,
     pub layers: Vec<LayerInfo>,
+    /// Present when `layerStrategy: "auto"`: the chosen strategy and why.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy_info: Option<AutoDecision>,
 }
 
 // ── Core trace logic ──────────────────────────────────────────────────────
@@ -151,24 +157,48 @@ fn trace_bytes_internal(data: &[u8], params: &TraceParams) -> Result<TraceOut, S
         .map_err(|e| e.to_string())?;
     let doc = pipeline.run(&img).map_err(|e| e.to_string())?;
 
-    let assignment = match params.layer_strategy.as_deref().unwrap_or("none") {
-        "color" => {
-            let n = params.layers.max(2);
-            LayerAssignment::by_color(&doc, n)
-        }
-        "complexity" => {
-            let n = params.layers.max(2);
-            let t = params.complexity_threshold.unwrap_or(70);
-            LayerAssignment::by_complexity(&doc, t, n)
-        }
-        "hybrid" => {
-            let n = params.layers.max(2);
-            let t = params.complexity_threshold.unwrap_or(70);
-            LayerAssignment::hybrid(&doc, n, t)
-        }
-        _ => LayerAssignment::single_layer(),
+    // "auto": derive the strategy + multi-level profiles from the ideal params.
+    let is_auto = params.layer_strategy.as_deref() == Some("auto");
+    let ideal = IdealParams::from_options(
+        params.clustering.as_deref(),
+        params.line_art,
+        params.color_precision,
+        params.layer_difference,
+        params.max_colors,
+        params.simplify,
+        params.path_precision,
+        params.corner_threshold,
+        params.length_threshold,
+        params.filter_speckle,
+        params.optimize,
+    );
+    let (assignment, decision) = if is_auto {
+        let (a, d) = AutoDecision::assign(&doc, &ideal);
+        (a, Some(d))
+    } else {
+        let assignment = match params.layer_strategy.as_deref().unwrap_or("none") {
+            "color" => {
+                let n = params.layers.max(2);
+                LayerAssignment::by_color(&doc, n)
+            }
+            "complexity" => {
+                let n = params.layers.max(2);
+                let t = params.complexity_threshold.unwrap_or(70);
+                LayerAssignment::by_complexity(&doc, t, n)
+            }
+            "hybrid" => {
+                let n = params.layers.max(2);
+                let t = params.complexity_threshold.unwrap_or(70);
+                LayerAssignment::hybrid(&doc, n, t)
+            }
+            _ => LayerAssignment::single_layer(),
+        };
+        (assignment, None)
     };
-    let layered = LayeredDoc::from_vector_doc(&doc, &assignment);
+    let mut layered = LayeredDoc::from_vector_doc(&doc, &assignment);
+    if is_auto {
+        apply_profiles(&mut layered, &ideal);
+    }
 
     let svg = if params.line_art {
         LayeredWriter::write_line_art(&layered)
@@ -186,6 +216,7 @@ fn trace_bytes_internal(data: &[u8], params: &TraceParams) -> Result<TraceOut, S
             shape_count: layer.shapes.len(),
             dominant_color: LayeredWriter::layer_dominant_color(layer),
             preview_svg: LayeredWriter::layer_preview_svg(&layered, i),
+            profile: layer.profile.as_str().into(),
         })
         .collect();
 
@@ -196,6 +227,7 @@ fn trace_bytes_internal(data: &[u8], params: &TraceParams) -> Result<TraceOut, S
         shape_count: layered.total_shapes(),
         layer_count: layered.layers.len(),
         layers,
+        strategy_info: decision,
     })
 }
 
@@ -459,6 +491,7 @@ pub async fn batch_trace(
                         "height": out.height,
                         "shapeCount": out.shape_count,
                         "layers": out.layers,
+                        "strategyInfo": out.strategy_info,
                         "elapsed_ms": elapsed,
                     }));
                 }
