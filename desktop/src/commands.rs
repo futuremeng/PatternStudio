@@ -7,7 +7,7 @@ use patternstudio_patterns::{generate_sized, list_kinds};
 use patternstudio_svg::LayeredWriter;
 use patternstudio_tracer::load_image_from_memory;
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use vtracer::config::{Clustering, FitMode, Hierarchical, Preset};
 
 // ── Trace params ──────────────────────────────────────────────────────────
@@ -174,6 +174,74 @@ pub fn open_folder() -> Result<String, String> {
         Some(p) => Ok(p.to_string_lossy().to_string()),
         None => Err("cancelled".into()),
     }
+}
+
+// ── Recent projects (persisted in the app data dir) ───────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentProject {
+    pub path: String,
+    pub name: String,
+    pub opened_at: u64,
+}
+
+fn recent_projects_file(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("projects.json"))
+}
+
+fn load_recent(app: &tauri::AppHandle) -> Vec<RecentProject> {
+    let file = match recent_projects_file(app) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+    match std::fs::read_to_string(&file) {
+        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn save_recent(app: &tauri::AppHandle, projects: &[RecentProject]) -> Result<(), String> {
+    let file = recent_projects_file(app)?;
+    let s = serde_json::to_string_pretty(projects).map_err(|e| e.to_string())?;
+    std::fs::write(&file, s).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn recent_projects(app: tauri::AppHandle) -> Vec<RecentProject> {
+    load_recent(&app)
+}
+
+#[tauri::command]
+pub fn add_recent_project(app: tauri::AppHandle, path: String) -> Result<RecentProject, String> {
+    let name = Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "project".into());
+    let opened_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut projects = load_recent(&app);
+    projects.retain(|p| p.path != path);
+    let project = RecentProject {
+        path,
+        name,
+        opened_at,
+    };
+    projects.insert(0, project.clone());
+    save_recent(&app, &projects)?;
+    Ok(project)
+}
+
+#[tauri::command]
+pub fn remove_recent_project(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let mut projects = load_recent(&app);
+    projects.retain(|p| p.path != path);
+    save_recent(&app, &projects)
 }
 
 #[derive(Debug, Serialize)]

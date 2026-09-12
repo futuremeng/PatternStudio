@@ -8,8 +8,8 @@ pub mod commands;
 
 pub fn run() {
     use commands::{
-        batch_trace, generate_pattern, list_images, list_patterns, open_folder, read_image,
-        save_svg, trace_bytes,
+        add_recent_project, batch_trace, generate_pattern, list_images, list_patterns,
+        open_folder, read_image, recent_projects, remove_recent_project, save_svg, trace_bytes,
     };
 
     tauri::Builder::default()
@@ -21,7 +21,10 @@ pub fn run() {
             batch_trace,
             generate_pattern,
             list_patterns,
-            save_svg
+            save_svg,
+            recent_projects,
+            add_recent_project,
+            remove_recent_project
         ])
         .run(tauri::generate_context!())
         .expect("error while running PatternStudio desktop");

@@ -49,6 +49,11 @@ export async function openProject() {
     const folderPath = await tauriInvoke("open_folder");
     const images = await tauriInvoke("list_images", { folderPath });
     const name = folderPath.split("/").pop() || "project";
+    try {
+      await tauriInvoke("add_recent_project", { path: folderPath });
+    } catch (e) {
+      console.error("Failed to save recent project:", e);
+    }
     return { id: folderPath, name, path: folderPath, imageCount: images.length, images: images.map(i => i.name) };
   }
   const path = prompt("输入项目文件夹路径:");
@@ -62,13 +67,34 @@ export async function openProject() {
 }
 
 export async function listProjects() {
-  if (isTauri()) return { projects: [] };
+  if (isTauri()) {
+    const recents = await tauriInvoke("recent_projects");
+    const projects = [];
+    for (const p of recents) {
+      try {
+        const images = await tauriInvoke("list_images", { folderPath: p.path });
+        projects.push({
+          id: p.path,
+          name: p.name,
+          path: p.path,
+          imageCount: images.length,
+          images: images.map(i => i.name),
+        });
+      } catch {
+        // Folder no longer exists (moved/deleted); skip it.
+      }
+    }
+    return { projects };
+  }
   const res = await fetch(`${BASE}/projects`);
   return handle(res);
 }
 
 export async function deleteProject(projectId) {
-  if (isTauri()) return;
+  if (isTauri()) {
+    await tauriInvoke("remove_recent_project", { path: projectId });
+    return;
+  }
   const res = await fetch(`${BASE}/projects/${projectId}`, { method: "DELETE" });
   if (!res.ok && res.status !== 204) throw new Error(`Failed to delete project`);
 }
