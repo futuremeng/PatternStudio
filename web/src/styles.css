@@ -241,11 +241,6 @@ body {
   flex: 1; display: flex; align-items: center; justify-content: center;
   padding: 1rem; overflow: auto; position: relative;
 }
-.overlay-single {
-  max-width: 100%; max-height: 60vh;
-  border-radius: var(--radius); border: 1px solid var(--border);
-  background: #fff;
-}
 .overlay-compare {
   position: relative; max-width: 100%;
   border-radius: var(--radius); border: 1px solid var(--border);
@@ -307,6 +302,16 @@ body {
   display: flex; align-items: center; justify-content: center;
 }
 .config-delete:hover { background: var(--error); border-color: var(--error); color: #fff; }
+.config-save {
+  position: absolute; top: -6px; left: -6px;
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text2); font-size: 0.75rem; line-height: 1;
+  cursor: pointer; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.config-save:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+.config-save.saved { background: var(--accent); border-color: var(--accent); color: #fff; }
 .mode-thumb img, .mode-thumb .svg-mini {
   width: 64px; height: 64px; object-fit: cover;
   border-radius: 4px; border: 1px solid var(--border);
@@ -319,9 +324,27 @@ body {
 
 .param-group { display: flex; flex-direction: column; gap: 0.6rem; }
 .param-group h4 { margin: 0; font-size: 0.85rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; }
+.param-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.param-section-header {
+  display: flex; align-items: center; gap: 0.4rem;
+  width: 100%; padding: 0.5rem 0.7rem;
+  background: var(--surface2); border: none; border-radius: 0;
+  color: var(--text); font-size: 0.8rem; font-weight: 600;
+  cursor: pointer; text-align: left;
+}
+.param-section-header:hover { background: var(--surface); }
+.param-section-header .chevron { font-size: 0.55rem; color: var(--text2); }
+.param-section-body {
+  display: flex; flex-direction: column; gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+}
 .param-row { display: flex; flex-direction: column; gap: 0.25rem; }
 .param-row label { font-size: 0.8rem; color: var(--text2); }
-.param-row select, .param-row input[type="number"] {
+.param-row select, .param-row input[type="number"], .param-row input[type="text"] {
   padding: 0.35rem 0.5rem; border: 1px solid var(--border);
   border-radius: 6px; font-size: 0.85rem;
   background: var(--surface2); color: var(--text);

@@ -218,6 +218,164 @@ impl LayerAssignment {
 
         Self { layers }
     }
+
+    /// Assign shapes to layers by geometric complexity (path command count).
+    pub fn by_complexity(doc: &VectorDoc, threshold_percent: u8, max_layers: usize) -> Self {
+        if max_layers <= 1 {
+            return Self::single_layer();
+        }
+        let complexities: Vec<(usize, usize)> = doc
+            .shapes
+            .iter()
+            .enumerate()
+            .map(|(i, shape)| {
+                let cmd_count: usize = shape.path.subpaths.iter().map(|sp| sp.commands.len()).sum();
+                (i, cmd_count)
+            })
+            .collect();
+        let mut sorted_counts: Vec<usize> = complexities.iter().map(|(_, c)| *c).collect();
+        sorted_counts.sort();
+        let idx = (threshold_percent as usize * sorted_counts.len()) / 100;
+        let threshold = sorted_counts.get(idx).copied().unwrap_or(0);
+
+        let mut simple_indices: Vec<usize> = Vec::new();
+        let mut complex_indices: Vec<usize> = Vec::new();
+        for (i, count) in &complexities {
+            if *count > threshold {
+                complex_indices.push(*i);
+            } else {
+                simple_indices.push(*i);
+            }
+        }
+        if complex_indices.is_empty() {
+            return Self::single_layer();
+        }
+
+        let mut layers: Vec<LayerSpec> = Vec::new();
+        let simple_budget = max_layers.saturating_sub(1);
+        if simple_budget >= 2 && simple_indices.len() > 1 {
+            let sub = Self::by_color_indices(&doc.shapes, &simple_indices, simple_budget);
+            layers.extend(sub);
+        } else {
+            layers.push(LayerSpec {
+                name: "base".into(),
+                role: LayerRole::Structure,
+                shape_indices: simple_indices,
+                editability: EditabilityFlags::full(),
+            });
+        }
+        layers.push(LayerSpec {
+            name: "details".into(),
+            role: LayerRole::Details,
+            shape_indices: complex_indices,
+            editability: EditabilityFlags::full(),
+        });
+        Self { layers }
+    }
+
+    /// Hybrid: group by color, then split complex shapes into "details".
+    pub fn hybrid(doc: &VectorDoc, max_layers: usize, threshold_percent: u8) -> Self {
+        if max_layers <= 1 {
+            return Self::single_layer();
+        }
+        let complexities: Vec<usize> = doc
+            .shapes
+            .iter()
+            .map(|s| s.path.subpaths.iter().map(|sp| sp.commands.len()).sum())
+            .collect();
+        let mut sorted: Vec<usize> = complexities.clone();
+        sorted.sort();
+        let idx = (threshold_percent as usize * sorted.len()) / 100;
+        let threshold = sorted.get(idx).copied().unwrap_or(0);
+
+        use std::collections::HashMap;
+        let mut color_groups: HashMap<[u8; 3], Vec<usize>> = HashMap::new();
+        for (i, shape) in doc.shapes.iter().enumerate() {
+            let [r, g, b] = shape.paint.color().rgb_u8();
+            color_groups.entry([r, g, b]).or_default().push(i);
+        }
+        let mut groups: Vec<([u8; 3], Vec<usize>)> = color_groups.into_iter().collect();
+        groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+        let color_budget = max_layers.saturating_sub(1).max(1);
+        let mut layers: Vec<LayerSpec> = Vec::new();
+        let mut details_indices: Vec<usize> = Vec::new();
+
+        for (idx, (color, indices)) in groups.into_iter().enumerate().take(color_budget) {
+            let mut base: Vec<usize> = Vec::new();
+            for &i in &indices {
+                if complexities[i] > threshold {
+                    details_indices.push(i);
+                } else {
+                    base.push(i);
+                }
+            }
+            if !base.is_empty() {
+                let name = if idx == 0 {
+                    "background".into()
+                } else {
+                    format!("color-{:02x}{:02x}{:02x}", color[0], color[1], color[2])
+                };
+                let role = if idx == 0 {
+                    LayerRole::Background
+                } else {
+                    LayerRole::Custom(name.clone())
+                };
+                layers.push(LayerSpec {
+                    name, role, shape_indices: base,
+                    editability: EditabilityFlags::full(),
+                });
+            }
+        }
+        if !details_indices.is_empty() {
+            layers.push(LayerSpec {
+                name: "details".into(),
+                role: LayerRole::Details,
+                shape_indices: details_indices,
+                editability: EditabilityFlags::full(),
+            });
+        }
+        Self { layers }
+    }
+
+    /// Helper: assign a subset of shapes to layers by color.
+    fn by_color_indices(shapes: &[Shape], indices: &[usize], max_layers: usize) -> Vec<LayerSpec> {
+        use std::collections::HashMap;
+        let mut color_groups: HashMap<[u8; 3], Vec<usize>> = HashMap::new();
+        for &i in indices {
+            let [r, g, b] = shapes[i].paint.color().rgb_u8();
+            color_groups.entry([r, g, b]).or_default().push(i);
+        }
+        let mut groups: Vec<([u8; 3], Vec<usize>)> = color_groups.into_iter().collect();
+        groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+        if groups.len() <= max_layers {
+            return groups.into_iter().enumerate().map(|(idx, (color, indices))| {
+                let name = if idx == 0 { "base".into() } else {
+                    format!("color-{:02x}{:02x}{:02x}", color[0], color[1], color[2])
+                };
+                let role = if idx == 0 { LayerRole::Structure } else { LayerRole::Custom(name.clone()) };
+                LayerSpec { name, role, shape_indices: indices, editability: EditabilityFlags::full() }
+            }).collect();
+        }
+
+        let keep = max_layers.saturating_sub(1);
+        let top: Vec<([u8; 3], Vec<usize>)> = groups[..keep].to_vec();
+        let mut other: Vec<usize> = Vec::new();
+        for (_, indices) in &groups[keep..] { other.extend(indices.iter().copied()); }
+        let mut result: Vec<LayerSpec> = top.into_iter().enumerate().map(|(idx, (color, indices))| {
+            let name = if idx == 0 { "base".into() } else {
+                format!("color-{:02x}{:02x}{:02x}", color[0], color[1], color[2])
+            };
+            let role = if idx == 0 { LayerRole::Structure } else { LayerRole::Custom(name.clone()) };
+            LayerSpec { name, role, shape_indices: indices, editability: EditabilityFlags::full() }
+        }).collect();
+        result.push(LayerSpec {
+            name: "other".into(), role: LayerRole::Details,
+            shape_indices: other, editability: EditabilityFlags::full(),
+        });
+        result
+    }
 }
 
 /// Layered document IR — PatternStudio's core output type.
@@ -417,5 +575,59 @@ mod tests {
 
         let none = EditabilityFlags::default();
         assert_eq!(none.to_svg_attr(), "");
+    }
+
+    #[test]
+    fn by_complexity_splits_simple_and_complex() {
+        // Create shapes with varying complexity
+        let mut doc = VectorDoc::new(100, 100);
+        // Simple shape: 4 commands (move, line, line, close)
+        doc.shapes.push(test_shape(255));
+        doc.shapes.push(test_shape(200));
+        // Complex shape: many commands
+        let mut complex_sub = SubPath::new();
+        for i in 0..20 {
+            complex_sub.commands.push(vtracer::ir::PathCmd::MoveTo(PointF64 { x: i as f64, y: 0.0 }));
+            complex_sub.commands.push(vtracer::ir::PathCmd::LineTo(PointF64 { x: i as f64, y: 1.0 }));
+        }
+        doc.shapes.push(Shape {
+            paint: vtracer::ir::Paint::Solid(Color::new(100, 100, 100)),
+            path: MultiPath { subpaths: vec![complex_sub] },
+        });
+
+        let assignment = LayerAssignment::by_complexity(&doc, 50, 3);
+        assert!(assignment.layers.len() >= 2);
+        // Last layer should be "details"
+        assert_eq!(assignment.layers.last().unwrap().name, "details");
+    }
+
+    #[test]
+    fn hybrid_produces_details_layer() {
+        let mut doc = VectorDoc::new(100, 100);
+        doc.shapes.push(test_shape(255));
+        doc.shapes.push(test_shape(255));
+        // Complex shape with different color
+        let mut complex_sub = SubPath::new();
+        for i in 0..30 {
+            complex_sub.commands.push(vtracer::ir::PathCmd::MoveTo(PointF64 { x: i as f64, y: 0.0 }));
+            complex_sub.commands.push(vtracer::ir::PathCmd::LineTo(PointF64 { x: i as f64, y: 1.0 }));
+        }
+        doc.shapes.push(Shape {
+            paint: vtracer::ir::Paint::Solid(Color::new(50, 50, 50)),
+            path: MultiPath { subpaths: vec![complex_sub] },
+        });
+
+        let assignment = LayerAssignment::hybrid(&doc, 4, 50);
+        assert!(!assignment.layers.is_empty());
+        let has_details = assignment.layers.iter().any(|l| l.name == "details");
+        assert!(has_details);
+    }
+
+    #[test]
+    fn single_layer_strategy_returns_one_layer() {
+        let mut doc = VectorDoc::new(10, 10);
+        doc.shapes.push(test_shape(255));
+        let assignment = LayerAssignment::by_complexity(&doc, 50, 1);
+        assert_eq!(assignment.layers.len(), 1);
     }
 }

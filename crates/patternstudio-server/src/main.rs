@@ -100,7 +100,29 @@ struct TraceParams {
     #[serde(default)]
     line_art: bool,
     #[serde(default)]
+    binary_adaptive: bool,
+    #[serde(default)]
+    binary_threshold: Option<u8>,
+    #[serde(default)]
+    watershed_detail: Option<u32>,
+    #[serde(default)]
+    palette: Option<String>,
+    #[serde(default)]
     layers: usize,
+    #[serde(default)]
+    corner_threshold: Option<i32>,
+    #[serde(default)]
+    length_threshold: Option<f64>,
+    #[serde(default)]
+    optimize: Option<u8>,
+    #[serde(default)]
+    binary_adaptive_t: Option<f64>,
+    #[serde(default)]
+    binary_adaptive_window: Option<u32>,
+    #[serde(default)]
+    layer_strategy: Option<String>,
+    #[serde(default)]
+    complexity_threshold: Option<u8>,
 }
 
 fn default_preset() -> String { "poster".into() }
@@ -126,7 +148,7 @@ struct TraceResult {
     layers: Vec<LayerInfo>,
 }
 
-fn build_vtracer_config(params: &TraceParams) -> vtracer::Config {
+fn build_vtracer_config(params: &TraceParams) -> Result<vtracer::Config, String> {
     let preset = match params.preset.as_str() {
         "bw" => Preset::Bw,
         "photo" => Preset::Photo,
@@ -159,18 +181,41 @@ fn build_vtracer_config(params: &TraceParams) -> vtracer::Config {
     if let Some(v) = params.simplify { config.simplify = Some(v); }
     if let Some(v) = params.path_precision { config.path_precision = Some(v as u32); }
     if let Some(v) = params.max_colors { config.max_colors = Some(v); }
-    config
+    config.binary_adaptive = params.binary_adaptive;
+    if let Some(v) = params.binary_threshold { config.binary_threshold = v; }
+    if let Some(v) = params.watershed_detail { config.watershed_detail = v; }
+    if let Some(ref p) = params.palette {
+        config.palette = patternstudio_tracer::parse_palette(p)?;
+    }
+    if let Some(v) = params.corner_threshold { config.corner_threshold = v; }
+    if let Some(v) = params.length_threshold { config.length_threshold = v; }
+    if let Some(v) = params.optimize { config.optimize = v; }
+    if let Some(v) = params.binary_adaptive_t { config.binary_adaptive_t = v; }
+    if let Some(v) = params.binary_adaptive_window { config.binary_adaptive_window = v; }
+    Ok(config)
 }
 
 fn do_trace(img_path: &Path, params: &TraceParams) -> Result<TraceResult, String> {
     let img = load_image(img_path).map_err(|e| format!("failed to load image: {e}"))?;
-    let vtracer_config = build_vtracer_config(params);
+    let vtracer_config = build_vtracer_config(params)?;
     let pipeline = vtracer_config.build().map_err(|e| format!("failed to build pipeline: {e}"))?;
     let doc = pipeline.run(&img).map_err(|e| format!("trace failed: {e}"))?;
-    let assignment = if params.layers > 1 {
-        LayerAssignment::by_color(&doc, params.layers)
-    } else {
-        LayerAssignment::single_layer()
+    let assignment = match params.layer_strategy.as_deref().unwrap_or("none") {
+        "color" => {
+            let n = params.layers.max(2);
+            LayerAssignment::by_color(&doc, n)
+        }
+        "complexity" => {
+            let n = params.layers.max(2);
+            let t = params.complexity_threshold.unwrap_or(70);
+            LayerAssignment::by_complexity(&doc, t, n)
+        }
+        "hybrid" => {
+            let n = params.layers.max(2);
+            let t = params.complexity_threshold.unwrap_or(70);
+            LayerAssignment::hybrid(&doc, n, t)
+        }
+        _ => LayerAssignment::single_layer(),
     };
     let layered = LayeredDoc::from_vector_doc(&doc, &assignment);
     let svg = if params.line_art {

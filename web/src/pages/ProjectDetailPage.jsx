@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getImageUrl, startBatchTrace, MODE_PRESETS } from "../api.js";
+import { getImageUrl, startBatchTrace, presetFullParams } from "../api.js";
 import { getCachedTrace, setCachedTrace } from "../traceCache.js";
 import AppHeader from "../components/AppHeader.jsx";
 
@@ -84,8 +84,8 @@ export default function ProjectDetailPage() {
       for (const name of project.images) {
         const imageId = `${projectId}/${name}`;
         const [line, color] = await Promise.all([
-          getCachedTrace(imageId, MODE_PRESETS.lineArt.params).catch(() => null),
-          getCachedTrace(imageId, MODE_PRESETS.color.params).catch(() => null),
+          getCachedTrace(imageId, presetFullParams("lineArt")).catch(() => null),
+          getCachedTrace(imageId, presetFullParams("color")).catch(() => null),
         ]);
         if (line || color) found[name] = { line: line?.svg || null, color: color?.svg || null };
       }
@@ -98,8 +98,8 @@ export default function ProjectDetailPage() {
     if (!project) return;
     // Two passes per image: line art, then color fill (both feed the split preview)
     const jobs = [
-      { pkey: "line", params: MODE_PRESETS.lineArt.params },
-      { pkey: "color", params: MODE_PRESETS.color.params },
+      { pkey: "line", params: presetFullParams("lineArt") },
+      { pkey: "color", params: presetFullParams("color") },
     ];
     // Cache-first: only send images without a same-params result to the backend
     const plan = [];

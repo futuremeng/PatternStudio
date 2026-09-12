@@ -224,12 +224,48 @@ export async function downloadSvg(svg, name) {
   URL.revokeObjectURL(a.href);
 }
 
-export const MODE_PRESETS = {
-  original: { label: "原图", params: {} },
-  bw: { label: "黑白", params: { preset: "bw", clustering: "binary" } },
-  lineArt: { label: "线稿", params: { preset: "bw", clustering: "binary", lineArt: true } },
-  color: { label: "彩色填充", params: { preset: "poster", clustering: "color" } },
-  silhouette: { label: "剪影", params: { preset: "bw", clustering: "binary", maxColors: 1 } },
-  gradient: { label: "渐变", params: { preset: "photo", clustering: "color", colorPrecision: 8, layerDifference: 4 } },
+/** Base trace params; presets and user tweaks are merged on top of this. */
+export const DEFAULT_PARAMS = {
+  preset: "poster",
+  clustering: "color",
+  hierarchical: "stacked",
+  colorPrecision: 6,
+  layerDifference: 16,
+  filterSpeckle: 4,
+  mode: "spline",
+  simplify: 0.1,
+  pathPrecision: 2,
+  maxColors: null,
+  lineArt: false,
+  binaryAdaptive: false,
+  binaryThreshold: 128,
+  binaryAdaptiveT: 15,
+  binaryAdaptiveWindow: 0,
+  watershedDetail: 128,
+  palette: "",
+  layers: 0,
+  layerStrategy: "none",
+  complexityThreshold: 70,
+  cornerThreshold: 60,
+  lengthThreshold: 4,
+  optimize: 1,
 };
+
+/**
+ * Bottom-strip presets: each one showcases a different algorithmic dimension
+ * (output mode / color clustering / adaptive threshold / fine gradient / polygon fit).
+ */
+export const MODE_PRESETS = {
+  lineArt: { label: "线稿", params: { preset: "bw", clustering: "binary", lineArt: true, mode: "spline" } },
+  color: { label: "彩色填充", params: { preset: "poster", clustering: "color", mode: "spline" } },
+  bw: { label: "黑白", params: { preset: "bw", clustering: "binary", binaryAdaptive: true, mode: "spline", filterSpeckle: 4 } },
+  gradient: { label: "渐变", params: { preset: "photo", clustering: "color", colorPrecision: 8, layerDifference: 4, mode: "spline", simplify: 0.2 } },
+  lowPoly: { label: "低多边形", params: { preset: "poster", clustering: "color", colorPrecision: 4, layerDifference: 32, mode: "polygon" } },
+};
+
+/** Full param set for a preset (DEFAULT_PARAMS + preset overrides). */
+export function presetFullParams(key) {
+  const preset = MODE_PRESETS[key];
+  return preset ? { ...DEFAULT_PARAMS, ...preset.params } : { ...DEFAULT_PARAMS };
+}
 

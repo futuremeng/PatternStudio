@@ -1,26 +1,12 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getImageUrl, traceImage, downloadSvg, MODE_PRESETS } from "../api.js";
+import { getImageUrl, traceImage, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams } from "../api.js";
 import { getCachedTrace, setCachedTrace, stableStringify } from "../traceCache.js";
+import { loadSavedConfigs, saveConfig, deleteSavedConfig } from "../configStore.js";
 import ParameterPanel from "../components/ParameterPanel.jsx";
 import LayerPanel from "../components/LayerPanel.jsx";
 import ConfigStrip from "../components/ConfigStrip.jsx";
 import AppHeader from "../components/AppHeader.jsx";
-
-const DEFAULT_PARAMS = {
-  preset: "poster",
-  clustering: "color",
-  hierarchical: "stacked",
-  colorPrecision: 6,
-  layerDifference: 16,
-  filterSpeckle: 4,
-  mode: "spline",
-  simplify: 0.5,
-  pathPrecision: 2,
-  maxColors: null,
-  lineArt: false,
-  layers: 0,
-};
 
 // Debounce for auto-trace after param changes (ms)
 const TRACE_DEBOUNCE_MS = 300;
@@ -28,12 +14,12 @@ const TRACE_DEBOUNCE_MS = 300;
 const CONFIG_SETTLE_MS = 1500;
 const MAX_USER_CONFIGS = 12;
 
-/** Default configs from MODE_PRESETS; "original" has params=null (no trace). */
+/** Default configs from MODE_PRESETS (full param sets, ready to trace). */
 function buildDefaultConfigs() {
   return Object.entries(MODE_PRESETS).map(([key, preset]) => ({
     id: `default-${key}`,
     label: preset.label,
-    params: key === "original" ? null : { ...DEFAULT_PARAMS, ...preset.params },
+    params: presetFullParams(key),
     isDefault: true,
   }));
 }
@@ -48,7 +34,6 @@ export default function ImageEditorPage() {
   const [error, setError] = useState(null);
   const [configs, setConfigs] = useState(buildDefaultConfigs);
   const [activeConfigId, setActiveConfigId] = useState("default-color");
-  const [showOriginal, setShowOriginal] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
   const [compareMode, setCompareMode] = useState("side"); // "side" | "overlay"
   const [overlayPos, setOverlayPos] = useState(50); // divider position, percent
@@ -62,6 +47,29 @@ export default function ImageEditorPage() {
   const imageId = `${projectId}/${filename}`;
 
   useEffect(() => { configsRef.current = configs; }, [configs]);
+
+  // Restore user configs persisted from previous sessions.
+  // Thumbnails are refilled from the trace cache when available.
+  useEffect(() => {
+    let cancelled = false;
+    loadSavedConfigs().then(async saved => {
+      if (cancelled || !saved.length) return;
+      const restored = saved.map(s => ({
+        id: s.id, label: s.label, params: { ...DEFAULT_PARAMS, ...s.params },
+        isDefault: false, saved: true, result: null,
+      }));
+      for (const c of restored) {
+        c.result = await getCachedTrace(imageId, c.params).catch(() => null);
+      }
+      if (cancelled) return;
+      setConfigs(prev => {
+        const known = new Set(prev.map(c => c.id));
+        const fresh = restored.filter(c => !known.has(c.id));
+        return fresh.length ? [...prev, ...fresh] : prev;
+      });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [imageId]);
 
   // Load the source image; the auto-trace effect below picks up from here.
   useEffect(() => {
@@ -161,20 +169,22 @@ export default function ImageEditorPage() {
       const sig = stableStringify(traceParams);
       // Skip when the params already match an existing config
       // (e.g. initial load matches the "彩色填充" default).
-      if (configsRef.current.some(c => c.params !== null && stableStringify(c.params) === sig)) return;
+      if (configsRef.current.some(c => stableStringify(c.params) === sig)) return;
       userConfigSeq.current += 1;
       const cfg = {
-        id: `user-${userConfigSeq.current}`,
+        id: `user-${Date.now()}-${userConfigSeq.current}`,
         label: `自定义 ${userConfigSeq.current}`,
         params: traceParams,
         isDefault: false,
+        saved: false,
         result: res,
       };
       setConfigs(prev => {
-        if (prev.some(c => c.params !== null && stableStringify(c.params) === sig)) return prev;
-        const userConfigs = prev.filter(c => !c.isDefault);
-        const next = userConfigs.length >= MAX_USER_CONFIGS
-          ? prev.filter(c => c.id !== userConfigs[0].id)
+        if (prev.some(c => stableStringify(c.params) === sig)) return prev;
+        // Evict the oldest *unsaved* snapshot; saved configs are kept.
+        const unsaved = prev.filter(c => !c.isDefault && !c.saved);
+        const next = unsaved.length >= MAX_USER_CONFIGS
+          ? prev.filter(c => c.id !== unsaved[0].id)
           : prev;
         return [...next, cfg];
       });
@@ -185,25 +195,32 @@ export default function ImageEditorPage() {
   const onParamsChange = useCallback((updater) => {
     setParams(updater);
     setActiveConfigId(null);
-    setShowOriginal(false);
   }, []);
 
   const onConfigSelect = useCallback((config) => {
     setActiveConfigId(config.id);
-    if (config.params === null) {
-      // "原图" config: just show the source image, no trace.
-      setShowOriginal(true);
-      return;
-    }
-    setShowOriginal(false);
+    // Normalize: configs saved before newer params fields exist.
+    const next = { ...DEFAULT_PARAMS, ...config.params };
     setParams(prev =>
-      stableStringify(prev) === stableStringify(config.params) ? prev : config.params
+      stableStringify(prev) === stableStringify(next) ? prev : next
     );
   }, []);
 
   const onConfigDelete = useCallback((id) => {
+    const target = configsRef.current.find(c => c.id === id);
+    if (target?.saved) deleteSavedConfig(id).catch(() => {});
     setConfigs(prev => prev.filter(c => c.id !== id));
     setActiveConfigId(prev => (prev === id ? null : prev));
+  }, []);
+
+  /** Toggle persistence for a user config (save / unsave). */
+  const onConfigSave = useCallback((config) => {
+    if (config.saved) {
+      deleteSavedConfig(config.id).catch(() => {});
+    } else {
+      saveConfig(config).catch(() => {});
+    }
+    setConfigs(prev => prev.map(c => (c.id === config.id ? { ...c, saved: !c.saved } : c)));
   }, []);
 
   const onDownload = useCallback(() => {
@@ -238,11 +255,9 @@ export default function ImageEditorPage() {
                 {imageUrl ? <img src={imageUrl} alt="original" /> : <div className="placeholder">加载中</div>}
               </div>
               <div className="ba-panel">
-                <span className="label">{showOriginal ? "原图" : "SVG 结果"}</span>
+                <span className="label">矢量</span>
                 {busy && <span className="busy-badge">处理中...</span>}
-                {showOriginal && imageUrl ? (
-                  <img src={imageUrl} alt="original" />
-                ) : result?.svg ? (
+                {result?.svg ? (
                   <div className="svg-frame" dangerouslySetInnerHTML={{ __html: result.svg }} />
                 ) : (
                   <div className="placeholder">{busy ? "处理中..." : "点击下方配置开始"}</div>
@@ -252,9 +267,7 @@ export default function ImageEditorPage() {
           ) : (
             <div className="overlay-wrap">
               {busy && <span className="busy-badge">处理中...</span>}
-              {showOriginal && imageUrl ? (
-                <img className="overlay-single" src={imageUrl} alt="original" />
-              ) : imageUrl && result?.svg ? (
+              {imageUrl && result?.svg ? (
                 <div
                   className="overlay-compare"
                   ref={overlayRef}
@@ -269,7 +282,7 @@ export default function ImageEditorPage() {
                     <div className="overlay-svg" dangerouslySetInnerHTML={{ __html: result.svg }} />
                   </div>
                   <span className="overlay-tag overlay-tag-left">原图</span>
-                  <span className="overlay-tag overlay-tag-right">SVG 结果</span>
+                  <span className="overlay-tag overlay-tag-right">矢量</span>
                   <div className="overlay-divider" style={{ left: `${overlayPos}%` }}>
                     <div className="overlay-handle">‹›</div>
                   </div>
@@ -295,8 +308,8 @@ export default function ImageEditorPage() {
       <ConfigStrip
         configs={configs}
         activeConfigId={activeConfigId}
-        imageUrl={imageUrl}
         onConfigSelect={onConfigSelect}
+        onConfigSave={onConfigSave}
         onConfigDelete={onConfigDelete}
       />
     </div>
