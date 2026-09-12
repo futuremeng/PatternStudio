@@ -28,11 +28,83 @@ function cropSvgQuarter(svg, quarter) {
   return svg;
 }
 
+/**
+ * A single image card that lazy-loads its thumbnail only when scrolled near
+ * the viewport. In Tauri mode each thumbnail is a full-resolution image read
+ * over IPC, so eagerly loading a 100-image project would stall the UI and
+ * balloon memory; IntersectionObserver keeps only the visible cards loaded.
+ */
+function ImageCard({ projectId, filename, preview, onClick }) {
+  const [url, setUrl] = useState(null);
+  const cardRef = useRef(null);
+
+  // Lazy-load: fetch the image once the card nears the viewport.
+  useEffect(() => {
+    if (url) return;
+    const el = cardRef.current;
+    if (!el) return;
+    let cancelled = false;
+    const io = new IntersectionObserver(
+      async (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        io.disconnect();
+        try {
+          const u = await getImageUrl(projectId, filename);
+          if (!cancelled) setUrl(u);
+        } catch {
+          /* ignore load failures; the placeholder stays visible */
+        }
+      },
+      { rootMargin: "400px 0px" }
+    );
+    io.observe(el);
+    return () => {
+      cancelled = true;
+      io.disconnect();
+    };
+  }, [projectId, filename, url]);
+
+  // Release the object URL when it changes or the card unmounts.
+  useEffect(() => {
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [url]);
+
+  return (
+    <div className="image-card" ref={cardRef} onClick={onClick}>
+      {preview ? (
+        <div className="img-wrap split">
+          <div className="split-left">
+            {url && <img src={url} alt={filename} />}
+          </div>
+          <div className="split-right">
+            <div className="split-panel">
+              {preview.line
+                ? <div className="svg-mini" dangerouslySetInnerHTML={{ __html: cropSvgQuarter(preview.line, "tr") }} />
+                : <div className="mini-empty">线稿</div>}
+            </div>
+            <div className="split-panel">
+              {preview.color
+                ? <div className="svg-mini" dangerouslySetInnerHTML={{ __html: cropSvgQuarter(preview.color, "br") }} />
+                : <div className="mini-empty">色稿</div>}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="img-wrap">
+          {url && <img src={url} alt={filename} />}
+        </div>
+      )}
+      <div className="name">{filename}</div>
+    </div>
+  );
+}
+
 export default function ProjectDetailPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
   const [project, setProject] = useState(null);
-  const [imageUrls, setImageUrls] = useState({});
   const [batchStatus, setBatchStatus] = useState(null);
   const [batchProgress, setBatchProgress] = useState(null);
   const [batchFailed, setBatchFailed] = useState(0);
@@ -43,7 +115,7 @@ export default function ProjectDetailPage() {
   const cancelRef = useRef(false);
 
   useEffect(() => {
-    // Load project info and image URLs
+    // Load project info (image thumbnails are lazy-loaded per card below).
     (async () => {
       try {
         const { listProjects } = await import("../api.js");
@@ -51,23 +123,12 @@ export default function ProjectDetailPage() {
         const proj = (data.projects || []).find(p => p.id === projectId);
         if (proj) {
           setProject(proj);
-          // Load image URLs
-          const urls = {};
-          for (const img of proj.images) {
-            try { urls[img] = await getImageUrl(projectId, img); } catch {}
-          }
-          setImageUrls(urls);
         } else {
           // Tauri mode: project id is the folder path
           setProject({ id: projectId, name: projectId.split("/").pop(), path: projectId, images: [] });
           const { invoke } = await import("@tauri-apps/api/core");
           const images = await invoke("list_images", { folderPath: projectId });
           setProject(p => ({ ...p, images: images.map(i => i.name), imageCount: images.length }));
-          const urls = {};
-          for (const img of images) {
-            try { urls[img.name] = await getImageUrl(projectId, img.name); } catch {}
-          }
-          setImageUrls(urls);
         }
       } catch (e) {
         setError(e.message);
@@ -208,42 +269,18 @@ export default function ProjectDetailPage() {
         </button>
       </AppHeader>
 
-      <div className="image-grid">
-        {(project.images || []).map(filename => {
-          const preview = previews[filename];
-          return (
-            <div
+      <div className="image-grid-scroll">
+        <div className="image-grid">
+          {(project.images || []).map(filename => (
+            <ImageCard
               key={filename}
-              className="image-card"
+              projectId={projectId}
+              filename={filename}
+              preview={previews[filename]}
               onClick={() => navigate(`/project/${encodeURIComponent(projectId)}/image/${encodeURIComponent(filename)}`)}
-            >
-              {preview ? (
-                <div className="img-wrap split">
-                  <div className="split-left">
-                    {imageUrls[filename] && <img src={imageUrls[filename]} alt={filename} />}
-                  </div>
-                  <div className="split-right">
-                    <div className="split-panel">
-                      {preview.line
-                        ? <div className="svg-mini" dangerouslySetInnerHTML={{ __html: cropSvgQuarter(preview.line, "tr") }} />
-                        : <div className="mini-empty">线稿</div>}
-                    </div>
-                    <div className="split-panel">
-                      {preview.color
-                        ? <div className="svg-mini" dangerouslySetInnerHTML={{ __html: cropSvgQuarter(preview.color, "br") }} />
-                        : <div className="mini-empty">色稿</div>}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="img-wrap">
-                  {imageUrls[filename] && <img src={imageUrls[filename]} alt={filename} />}
-                </div>
-              )}
-              <div className="name">{filename}</div>
-            </div>
-          );
-        })}
+            />
+          ))}
+        </div>
       </div>
 
       {batchProgress && (

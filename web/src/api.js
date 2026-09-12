@@ -128,9 +128,20 @@ export async function deleteProject(projectId) {
   if (!res.ok && res.status !== 204) throw new Error(`Failed to delete project`);
 }
 
+// Cache list_images results per folder so thumbnails don't re-list the
+// directory on every load (a 100-image project would otherwise issue 100
+// redundant IPC calls before a single byte of image data is read).
+const imageListCache = new Map();
+async function listImagesCached(folderPath) {
+  if (imageListCache.has(folderPath)) return imageListCache.get(folderPath);
+  const images = await tauriInvoke("list_images", { folderPath });
+  imageListCache.set(folderPath, images);
+  return images;
+}
+
 export async function getImageUrl(projectId, filename) {
   if (isTauri()) {
-    const images = await tauriInvoke("list_images", { folderPath: projectId });
+    const images = await listImagesCached(projectId);
     const img = images.find(i => i.name === filename);
     if (!img) throw new Error(`Image not found: ${filename}`);
     const bytes = await tauriInvoke("read_image", { filePath: img.path });
