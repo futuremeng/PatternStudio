@@ -95,6 +95,9 @@ pub struct TraceOut {
     /// Present when `layerStrategy: "auto"`: the chosen strategy and why.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strategy_info: Option<AutoDecision>,
+    /// Elapsed time for the profile re-fitting step (ms), when auto layering is active.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_ms: Option<u64>,
 }
 
 // ── Core trace logic ──────────────────────────────────────────────────────
@@ -196,8 +199,11 @@ fn trace_bytes_internal(data: &[u8], params: &TraceParams) -> Result<TraceOut, S
         (assignment, None)
     };
     let mut layered = LayeredDoc::from_vector_doc(&doc, &assignment);
+    let mut profile_ms: Option<u64> = None;
     if is_auto {
+        let t = std::time::Instant::now();
         apply_profiles(&mut layered, &ideal);
+        profile_ms = Some(t.elapsed().as_millis() as u64);
     }
 
     let svg = if params.line_art {
@@ -228,6 +234,7 @@ fn trace_bytes_internal(data: &[u8], params: &TraceParams) -> Result<TraceOut, S
         layer_count: layered.layers.len(),
         layers,
         strategy_info: decision,
+        profile_ms,
     })
 }
 

@@ -329,7 +329,9 @@ impl AutoDecision {
 /// layers are left untouched. Topology is never changed, so stacking all
 /// layers still reproduces the ideal result.
 pub fn apply_profiles(layered: &mut LayeredDoc, ideal: &IdealParams) {
+    let t0 = std::time::Instant::now();
     let profiles = LayerProfile::derive(ideal);
+    let mut total_shapes = 0usize;
     for layer in &mut layered.layers {
         // Derive the level from the role so this also works for layers built
         // outside the auto strategy (which leave the spec profile at L1).
@@ -339,10 +341,18 @@ pub fn apply_profiles(layered: &mut LayeredDoc, ideal: &IdealParams) {
         for shape in &mut layer.shapes {
             refine_shape(shape, &profile);
         }
+        total_shapes += layer.shapes.len();
         layer
             .metadata
             .insert("profile".into(), serde_json::json!(level.as_str()));
     }
+    let elapsed = t0.elapsed();
+    eprintln!(
+        "[apply_profiles] {} layers, {} shapes in {:.1} ms",
+        layered.layers.len(),
+        total_shapes,
+        elapsed.as_secs_f64() * 1000.0
+    );
 }
 
 fn refine_shape(shape: &mut vtracer::ir::Shape, profile: &LayerProfile) {
