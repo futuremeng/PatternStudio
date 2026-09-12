@@ -301,7 +301,7 @@ export default function ImageEditorPage() {
         </div>
 
         <aside className="editor-layers">
-          <LayerPanel layers={result?.layers || []} strategyInfo={result?.strategyInfo} />
+          <LayerPanel layers={result?.layers || []} strategyInfo={result?.strategyInfo} profileMs={result?.profileMs} />
         </aside>
       </div>
 

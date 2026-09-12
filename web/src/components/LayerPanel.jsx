@@ -47,7 +47,7 @@ function LayerCard({ layer, selected, onToggle }) {
   );
 }
 
-export default function LayerPanel({ layers, strategyInfo }) {
+export default function LayerPanel({ layers, strategyInfo, profileMs }) {
   const [selected, setSelected] = useState(new Set());
 
   const toggle = (name) => {
@@ -99,7 +99,10 @@ export default function LayerPanel({ layers, strategyInfo }) {
           <div className="strategy-header">
             <span className="strategy-icon">⚙</span>
             <span className="strategy-type">{STRATEGY_LABELS[strategyInfo.strategy] || strategyInfo.strategy}</span>
-            <span className="strategy-meta">{strategyInfo.layers} 层 · 阈值 {strategyInfo.complexityThreshold}%</span>
+            <span className="strategy-meta">
+              {strategyInfo.layers} 层 · {strategyInfo.distinctColors} 色 · 预算 {strategyInfo.detailBudget}
+              {profileMs != null && ` · ${profileMs}ms`}
+            </span>
           </div>
           <div className="strategy-reason">{strategyInfo.reason}</div>
         </div>

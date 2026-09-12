@@ -211,6 +211,10 @@ pub struct AutoDecision {
     pub layers: usize,
     pub complexity_threshold: u8,
     pub reason: String,
+    /// Distinct colors detected in the traced document.
+    pub distinct_colors: usize,
+    /// The computed detail budget (0..=100) that drove the decision.
+    pub detail_budget: i32,
 }
 
 impl AutoDecision {
@@ -228,14 +232,16 @@ impl AutoDecision {
                     layers: 4,
                     complexity_threshold: threshold,
                     reason: format!("二值/线稿 + 高细节预算({budget}) → 复杂度分层"),
-                };
+                distinct_colors: 1,
+                detail_budget: budget,                };
             }
             return Self {
                 strategy: "none".into(),
                 layers: 1,
                 complexity_threshold: threshold,
                 reason: format!("二值/线稿 + 细节预算 {budget} → 单层"),
-            };
+            distinct_colors: 1,
+            detail_budget: budget,            };
         }
 
         if c <= 1 {
@@ -244,7 +250,8 @@ impl AutoDecision {
                 layers: 1,
                 complexity_threshold: threshold,
                 reason: format!("仅 {c} 色 → 单层"),
-            };
+                distinct_colors: c,
+                detail_budget: budget,            };
         }
 
         if c <= 4 {
@@ -254,13 +261,16 @@ impl AutoDecision {
                     layers: (c + 1).min(8),
                     complexity_threshold: threshold,
                     reason: format!("{c} 色 + 细节预算 {budget} ≥ 40 → 混合分层"),
-                };
+                    distinct_colors: c,
+                    detail_budget: budget,                };
             }
             return Self {
                 strategy: "color".into(),
                 layers: c,
                 complexity_threshold: threshold,
                 reason: format!("{c} 色 + 细节预算 {budget} < 40 → 颜色分层"),
+                distinct_colors: c,
+                detail_budget: budget,
             };
         }
 
@@ -271,6 +281,8 @@ impl AutoDecision {
                 layers,
                 complexity_threshold: threshold,
                 reason: format!("{c} 色 + 细节预算 {budget} ≥ 60 → 混合分层（颜色预算减半）"),
+                distinct_colors: c,
+                detail_budget: budget,
             }
         } else {
             Self {
@@ -278,6 +290,8 @@ impl AutoDecision {
                 layers: 4,
                 complexity_threshold: threshold,
                 reason: format!("{c} 色 + 细节预算 {budget} < 60 → 复杂度分层"),
+                distinct_colors: c,
+                detail_budget: budget,
             }
         }
     }
