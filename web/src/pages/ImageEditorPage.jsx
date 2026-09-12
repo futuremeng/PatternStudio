@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getImageUrl, traceImage, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams } from "../api.js";
+import { getImageUrl, prepareSource, traceSource, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams } from "../api.js";
 import { getCachedTrace, setCachedTrace, stableStringify } from "../traceCache.js";
 import { loadSavedConfigs, saveConfig, deleteSavedConfig } from "../configStore.js";
 import ParameterPanel from "../components/ParameterPanel.jsx";
@@ -37,7 +37,6 @@ export default function ImageEditorPage() {
   const [retryTick, setRetryTick] = useState(0);
   const [compareMode, setCompareMode] = useState("side"); // "side" | "overlay"
   const [overlayPos, setOverlayPos] = useState(50); // divider position, percent
-  const fileRef = useRef(null);
   const traceSeq = useRef(0);
   const configTimerRef = useRef(null);
   const userConfigSeq = useRef(0);
@@ -74,7 +73,6 @@ export default function ImageEditorPage() {
   // Load the source image; the auto-trace effect below picks up from here.
   useEffect(() => {
     let cancelled = false;
-    fileRef.current = null;
     (async () => {
       try {
         const url = await getImageUrl(projectId, filename);
@@ -86,16 +84,6 @@ export default function ImageEditorPage() {
     })();
     return () => { cancelled = true; };
   }, [projectId, filename]);
-
-  // Fetch the source file once per image and reuse it across traces.
-  const getFile = useCallback(async () => {
-    if (fileRef.current) return fileRef.current;
-    const resp = await fetch(imageUrl);
-    const blob = await resp.blob();
-    const file = new File([blob], filename, { type: blob.type });
-    fileRef.current = file;
-    return file;
-  }, [imageUrl, filename]);
 
   // Overlay compare: move the divider to a pointer x position (percent).
   const updateOverlayPos = useCallback((clientX) => {
@@ -135,8 +123,10 @@ export default function ImageEditorPage() {
       setBusy(true);
       setError(null);
       try {
-        const file = await getFile();
-        const res = await traceImage(file, params);
+        // Resolve the source once (path on Tauri, project+file on web) and let
+        // the engine reuse its cached session/segmentation across tweaks.
+        const source = prepareSource(projectId, filename);
+        const res = await traceSource(source, params);
         if (seq !== traceSeq.current) return;
         setResult(res);
         setCachedTrace(imageId, params, res).catch(() => {});
@@ -155,7 +145,7 @@ export default function ImageEditorPage() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params, imageUrl, retryTick, imageId, getFile]);
+  }, [params, imageUrl, retryTick, imageId, projectId, filename]);
 
   /**
    * Snapshot the current params as a user config once the user stops

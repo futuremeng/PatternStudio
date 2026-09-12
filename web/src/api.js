@@ -27,6 +27,35 @@ export async function health() {
   return handle(res);
 }
 
+/**
+ * Resolve a traceable source once. Returns an opaque token reused across
+ * traces so the image is read at most once:
+ * - Tauri: the image file path (the engine reads it from disk and caches the
+ *   decoded session, so no bytes cross the IPC bridge on every tweak).
+ * - Web: the project id + filename (the server reads it from the project
+ *   folder, so no re-upload on every parameter change).
+ */
+export function prepareSource(projectId, filename) {
+  if (isTauri()) {
+    return { kind: "file", path: `${projectId}/${filename}` };
+  }
+  return { kind: "project", projectId, filename };
+}
+
+/** Trace using a source prepared by {@link prepareSource}. */
+export async function traceSource(source, params) {
+  if (isTauri()) {
+    return tauriInvoke("trace_file", { filePath: source.path, params });
+  }
+  const res = await fetch(`${BASE}/trace`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project_id: source.projectId, filename: source.filename, params }),
+  });
+  return handle(res);
+}
+
+/** One-shot trace of an in-memory file (upload on web, bytes on Tauri). */
 export async function traceImage(file, params) {
   if (isTauri()) {
     const bytes = new Uint8Array(await file.arrayBuffer());

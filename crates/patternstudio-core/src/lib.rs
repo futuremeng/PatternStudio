@@ -5,9 +5,11 @@ pub mod error;
 pub mod ir;
 pub mod pipeline;
 pub mod profiles;
+pub mod session_cache;
 
 pub use config::{PatternStudioConfig, Resolution, Simplify};
 pub use error::Error;
 pub use ir::{Layer, LayerAssignment, LayeredDoc, LayerRole, SemanticMetadata};
 pub use pipeline::PatternStudioPipeline;
 pub use profiles::{apply_profiles, AutoDecision, IdealParams, LayerProfile, ProfileLevel};
+pub use session_cache::{SessionCache, key_for_path};

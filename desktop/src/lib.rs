@@ -10,12 +10,13 @@ pub fn run() {
     use commands::{
         add_recent_project, batch_trace, cancel_batch_trace, generate_pattern, list_images,
         list_patterns, open_folder, read_image, recent_projects, remove_recent_project, save_svg,
-        trace_bytes,
+        trace_bytes, trace_file,
     };
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             trace_bytes,
+            trace_file,
             open_folder,
             list_images,
             read_image,

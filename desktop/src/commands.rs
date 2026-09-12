@@ -1,18 +1,19 @@
 //! Tauri commands: in-process access to the tracing engine.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use patternstudio_core::ir::LayeredDoc;
 use patternstudio_core::profiles::{apply_profiles, AutoDecision, IdealParams};
-use patternstudio_core::LayerAssignment;
+use patternstudio_core::{key_for_path, LayerAssignment, SessionCache};
 use patternstudio_patterns::{generate_sized, list_kinds};
 use patternstudio_svg::LayeredWriter;
-use patternstudio_tracer::load_image_from_memory;
+use patternstudio_tracer::{load_image, load_image_from_memory};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 use vtracer::config::{Clustering, FitMode, Hierarchical, Preset};
+use vtracer::Session;
 
 // ── Trace params ──────────────────────────────────────────────────────────
 
@@ -152,13 +153,23 @@ fn build_vtracer_config(params: &TraceParams) -> Result<vtracer::Config, String>
     Ok(config)
 }
 
+/// One-shot trace from in-memory bytes: decode and run through a fresh session.
+/// Used by batch tracing, where each file is traced exactly once (no reuse).
 fn trace_bytes_internal(data: &[u8], params: &TraceParams) -> Result<TraceOut, String> {
     let img = load_image_from_memory(data).map_err(|e| format!("failed to decode image: {e}"))?;
+    let mut session = Session::new(img);
+    trace_with_session(&mut session, params)
+}
+
+/// Layering + SVG over a document produced by a [`Session`].
+///
+/// `session.render` reuses the cached segmentation when the clustering
+/// parameters are unchanged and only re-runs the cheap downstream stages — the
+/// core of the interactive tuning loop. Split out from the one-shot path so the
+/// `trace_file` command can drive a cached session.
+fn trace_with_session(session: &mut Session, params: &TraceParams) -> Result<TraceOut, String> {
     let vtracer_config = build_vtracer_config(params)?;
-    let pipeline = vtracer_config
-        .build()
-        .map_err(|e| e.to_string())?;
-    let doc = pipeline.run(&img).map_err(|e| e.to_string())?;
+    let doc = session.render(&vtracer_config).map_err(|e| e.to_string())?;
 
     // "auto": derive the strategy + multi-level profiles from the ideal params.
     let is_auto = params.layer_strategy.as_deref() == Some("auto");
@@ -250,6 +261,43 @@ pub async fn trace_bytes(data: Vec<u8>, params: TraceParams) -> Result<TraceOut,
     tauri::async_runtime::spawn_blocking(move || trace_bytes_internal(&data, &params))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// How many decoded source images (and their cached segmentations) to keep
+/// around for instant re-tracing in the desktop app.
+const MAX_SESSIONS: usize = 8;
+
+/// Process-wide LRU cache of VTracer sessions, keyed by source (path:size:mtime).
+/// Caching the expensive segmentation here is what makes parameter tweaks instant.
+fn session_cache() -> &'static Mutex<SessionCache> {
+    static CACHE: OnceLock<Mutex<SessionCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(SessionCache::new(MAX_SESSIONS)))
+}
+
+/// Trace an image file by path, reusing a cached session (and thus a cached
+/// segmentation) across calls. This is the fast path for the editor: the image
+/// is read and decoded once, and only the cheap downstream stages re-run when a
+/// non-clustering parameter changes.
+#[tauri::command]
+pub async fn trace_file(file_path: String, params: TraceParams) -> Result<TraceOut, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = Path::new(&file_path);
+        if !path.exists() {
+            return Err(format!("image not found: {file_path}"));
+        }
+        let key = key_for_path(path);
+        let session = {
+            let mut cache = session_cache().lock().unwrap();
+            let p: PathBuf = path.to_path_buf();
+            cache.get_or_create(&key, || {
+                load_image(&p).map_err(|e| format!("failed to decode image: {e}"))
+            })?
+        };
+        let mut guard = session.lock().unwrap();
+        trace_with_session(&mut guard, &params)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

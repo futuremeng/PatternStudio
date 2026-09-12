@@ -14,7 +14,7 @@ use axum::{Json, Router};
 use futures::stream::{Stream, StreamExt};
 use patternstudio_core::ir::LayeredDoc;
 use patternstudio_core::profiles::{AutoDecision, IdealParams, apply_profiles};
-use patternstudio_core::LayerAssignment;
+use patternstudio_core::{key_for_path, LayerAssignment, SessionCache};
 use patternstudio_svg::LayeredWriter;
 use patternstudio_tracer::load_image;
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use vtracer::config::{Clustering, FitMode, Hierarchical, Preset};
+use vtracer::Session;
+
+/// How many decoded source images (and their cached segmentations) to keep
+/// around for instant re-tracing. Each entry holds one RGBA image plus its
+/// segmentation, so this bounds the extra memory used by the cache.
+const MAX_SESSIONS: usize = 8;
 
 #[derive(Clone)]
 struct AppState {
@@ -31,6 +37,9 @@ struct AppState {
     jobs: Arc<Mutex<HashMap<String, Option<tokio::sync::mpsc::Receiver<Event>>>>>,
     cancels: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     projects_file: PathBuf,
+    /// Reusable VTracer sessions keyed by source (path:size:mtime). Caching the
+    /// expensive segmentation here is what makes parameter tweaks instant.
+    sessions: Arc<Mutex<SessionCache>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -204,11 +213,23 @@ fn build_vtracer_config(params: &TraceParams) -> Result<vtracer::Config, String>
     Ok(config)
 }
 
+/// One-shot trace: decode the image and run it through a fresh session. Used by
+/// batch tracing, where each file is traced exactly once (no reuse benefit).
 fn do_trace(img_path: &Path, params: &TraceParams) -> Result<TraceResult, String> {
     let img = load_image(img_path).map_err(|e| format!("failed to load image: {e}"))?;
+    let mut session = Session::new(img);
+    do_trace_with_session(&mut session, params)
+}
+
+/// Layering + SVG over a document produced by a [`Session`].
+///
+/// `session.render` reuses the cached segmentation when the clustering
+/// parameters are unchanged and only re-runs the cheap downstream stages — the
+/// core of the interactive tuning loop. Split out from the one-shot path so the
+/// `/trace` handler can drive a cached session.
+fn do_trace_with_session(session: &mut Session, params: &TraceParams) -> Result<TraceResult, String> {
     let vtracer_config = build_vtracer_config(params)?;
-    let pipeline = vtracer_config.build().map_err(|e| format!("failed to build pipeline: {e}"))?;
-    let doc = pipeline.run(&img).map_err(|e| format!("trace failed: {e}"))?;
+    let doc = session.render(&vtracer_config).map_err(|e| format!("trace failed: {e}"))?;
 
     // "auto": derive the strategy + multi-level profiles from the ideal params.
     let is_auto = params.layer_strategy.as_deref() == Some("auto");
@@ -317,6 +338,10 @@ struct TraceRequest {
     #[serde(default)]
     file_path: Option<String>,
     #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    filename: Option<String>,
+    #[serde(default)]
     params: Option<TraceParams>,
 }
 
@@ -324,19 +349,48 @@ async fn trace(
     State(state): State<AppState>,
     Json(req): Json<TraceRequest>,
 ) -> Result<Json<TraceResult>, (StatusCode, String)> {
+    // Resolve the source image path from whichever identifier the client sent.
+    // `project_id` + `filename` lets the web UI trace straight from the project
+    // folder without re-uploading the image on every parameter change.
     let img_path = if let Some(ref asset_id) = req.asset_id {
         state.assets.lock().unwrap().get(asset_id).cloned()
             .ok_or((StatusCode::NOT_FOUND, format!("asset {asset_id} not found")))?
+    } else if let (Some(ref pid), Some(ref name)) = (&req.project_id, &req.filename) {
+        let project = state.projects.lock().unwrap().get(pid).cloned()
+            .ok_or((StatusCode::NOT_FOUND, "project not found".into()))?;
+        if name.contains("..") || name.contains('/') || name.contains('\\') {
+            return Err((StatusCode::BAD_REQUEST, "invalid filename".into()));
+        }
+        let p = project.path.join(name);
+        if !p.exists() {
+            return Err((StatusCode::NOT_FOUND, "image not found".into()));
+        }
+        p
     } else if let Some(ref fp) = req.file_path {
         PathBuf::from(fp)
     } else {
-        return Err((StatusCode::BAD_REQUEST, "asset_id or file_path required".into()));
+        return Err((StatusCode::BAD_REQUEST,
+            "asset_id, project_id+filename, or file_path required".into()));
     };
     let params = req.params.unwrap_or_default();
-    let result = tokio::task::spawn_blocking(move || do_trace(&img_path, &params))
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let sessions = state.sessions.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        // Reuse (or create) a session for this source so the expensive
+        // segmentation is computed once and reused across parameter tweaks.
+        let key = key_for_path(&img_path);
+        let session = {
+            let mut cache = sessions.lock().unwrap();
+            let path = img_path.clone();
+            cache.get_or_create(&key, || {
+                load_image(&path).map_err(|e| format!("failed to load image: {e}"))
+            })?
+        };
+        let mut guard = session.lock().unwrap();
+        do_trace_with_session(&mut guard, &params)
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(result))
 }
 
@@ -641,6 +695,7 @@ async fn main() {
         jobs: Arc::new(Mutex::new(HashMap::new())),
         cancels: Arc::new(Mutex::new(HashMap::new())),
         projects_file,
+        sessions: Arc::new(Mutex::new(SessionCache::new(MAX_SESSIONS))),
     };
     let app = Router::new()
         .route("/api/v1/health", get(health))
