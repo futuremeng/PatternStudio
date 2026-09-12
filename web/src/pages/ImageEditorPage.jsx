@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getImageUrl, traceImage, downloadSvg, MODE_PRESETS } from "../api.js";
+import { getCachedTrace, setCachedTrace } from "../traceCache.js";
 import ParameterPanel from "../components/ParameterPanel.jsx";
 import LayerPanel from "../components/LayerPanel.jsx";
 import ModeStrip from "../components/ModeStrip.jsx";
@@ -32,43 +33,66 @@ export default function ImageEditorPage() {
   const [activeMode, setActiveMode] = useState("color");
   const [modeResults, setModeResults] = useState({});
   const fileRef = useRef(null);
+  const imageId = `${projectId}/${filename}`;
+
+  // Params changed -> previously generated mode thumbnails are stale
+  useEffect(() => {
+    setModeResults({});
+  }, [params]);
 
   useEffect(() => {
     (async () => {
       try {
         const url = await getImageUrl(projectId, filename);
         setImageUrl(url);
-        // Auto-trace with default params
-        const resp = await fetch(url);
-        const blob = await resp.blob();
-        const file = new File([blob], filename, { type: blob.type });
-        await doTrace(file, DEFAULT_PARAMS);
+        // Cache-first: only traces when no result exists for these params
+        await doTrace(() => fileFromUrl(url, filename), DEFAULT_PARAMS);
+        // Pre-warm mode-strip thumbnails from cache (no computation)
+        const found = {};
+        for (const [modeKey, preset] of Object.entries(MODE_PRESETS)) {
+          if (modeKey === "original") continue;
+          const r = await getCachedTrace(imageId, { ...DEFAULT_PARAMS, ...preset.params }).catch(() => null);
+          if (r) found[modeKey] = r;
+        }
+        if (Object.keys(found).length > 0) setModeResults(prev => ({ ...found, ...prev }));
       } catch (e) {
         setError(e.message);
       }
     })();
   }, [projectId, filename]);
 
-  const doTrace = useCallback(async (file, traceParams) => {
+  async function fileFromUrl(url, name) {
+    const resp = await fetch(url);
+    const blob = await resp.blob();
+    return new File([blob], name, { type: blob.type });
+  }
+
+  // Cache-first trace: getFile is only invoked on a cache miss
+  const doTrace = useCallback(async (getFile, traceParams) => {
+    const cached = await getCachedTrace(imageId, traceParams).catch(() => null);
+    if (cached) {
+      setResult(cached);
+      return cached;
+    }
     setBusy(true);
     setError(null);
     try {
+      const file = await getFile();
       const res = await traceImage(file, traceParams);
       setResult(res);
+      setCachedTrace(imageId, traceParams, res).catch(() => {});
+      return res;
     } catch (e) {
       setError(`Trace 失败: ${e.message}`);
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [imageId]);
 
   const onTrace = useCallback(async () => {
     if (!imageUrl) return;
     try {
-      const resp = await fetch(imageUrl);
-      const blob = await resp.blob();
-      const file = new File([blob], filename, { type: blob.type });
-      await doTrace(file, params);
+      await doTrace(() => fileFromUrl(imageUrl, filename), params);
     } catch (e) {
       setError(e.message);
     }
@@ -76,21 +100,28 @@ export default function ImageEditorPage() {
 
   const onModeSelect = useCallback(async (modeKey) => {
     setActiveMode(modeKey);
-    if (modeResults[modeKey]) return;
     if (!imageUrl) return;
+    const preset = MODE_PRESETS[modeKey];
+    const merged = { ...params, ...preset.params };
+    const cached = await getCachedTrace(imageId, merged).catch(() => null);
+    if (cached) {
+      setModeResults(prev => ({ ...prev, [modeKey]: cached }));
+      setResult(cached);
+      return;
+    }
+    setBusy(true);
     try {
-      const preset = MODE_PRESETS[modeKey];
-      const merged = { ...params, ...preset.params };
-      const resp = await fetch(imageUrl);
-      const blob = await resp.blob();
-      const file = new File([blob], filename, { type: blob.type });
+      const file = await fileFromUrl(imageUrl, filename);
       const res = await traceImage(file, merged);
       setModeResults(prev => ({ ...prev, [modeKey]: res }));
       setResult(res);
+      setCachedTrace(imageId, merged, res).catch(() => {});
     } catch (e) {
       setError(`模式 "${preset.label}" 处理失败: ${e.message}`);
+    } finally {
+      setBusy(false);
     }
-  }, [imageUrl, filename, params, modeResults]);
+  }, [imageUrl, filename, params, imageId]);
 
   const onDownload = useCallback(() => {
     if (result?.svg) {

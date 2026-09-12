@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getImageUrl, startBatchTrace, MODE_PRESETS } from "../api.js";
+import { getCachedTrace, setCachedTrace } from "../traceCache.js";
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams();
@@ -46,19 +47,40 @@ export default function ProjectDetailPage() {
 
   const onBatchTrace = useCallback(async () => {
     if (!project) return;
+    const params = MODE_PRESETS.color.params;
+    // Cache-first: only send images without a same-params result to the backend
+    const missing = [];
+    for (const name of project.images) {
+      const cached = await getCachedTrace(`${projectId}/${name}`, params).catch(() => null);
+      if (!cached) missing.push(name);
+    }
+    if (missing.length === 0) {
+      setBatchStatus("done");
+      setBatchProgress({ current: project.images.length, total: project.images.length, file: "" });
+      return;
+    }
     setBatchStatus("running");
-    setBatchProgress({ current: 0, total: project.images.length, file: "" });
+    setBatchProgress({ current: 0, total: missing.length, file: "" });
 
-    const handle = startBatchTrace(projectId, MODE_PRESETS.color.params);
+    const handle = startBatchTrace(projectId, params, missing);
     handle.setOnEvent((event) => {
       if (event.type === "start") {
         setBatchProgress({ current: 0, total: event.total, file: "" });
       } else if (event.type === "processing") {
         setBatchProgress({ current: event.index, total: event.total, file: event.file });
-      } else if (event.type === "done" || event.type === "error") {
+      } else if (event.type === "done") {
         setBatchProgress(p => ({ ...p, current: p.current + 1 }));
-        // Update image status
-        setImageUrls(prev => ({ ...prev }));
+        // Persist the generated result so the editor page hits the cache
+        setCachedTrace(`${projectId}/${event.file}`, params, {
+          svg: event.svg,
+          width: event.width,
+          height: event.height,
+          shapeCount: event.shapeCount ?? event.shape_count,
+          layerCount: (event.layers || []).length,
+          layers: event.layers || [],
+        }).catch(() => {});
+      } else if (event.type === "error") {
+        setBatchProgress(p => ({ ...p, current: p.current + 1 }));
       } else if (event.type === "complete") {
         setBatchStatus("done");
         setBatchProgress({ current: event.total, total: event.total, file: "" });

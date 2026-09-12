@@ -159,8 +159,10 @@ pub struct PatternInfo {
 }
 
 #[tauri::command]
-pub fn trace_bytes(data: Vec<u8>, params: TraceParams) -> Result<TraceOut, String> {
-    trace_bytes_internal(&data, &params)
+pub async fn trace_bytes(data: Vec<u8>, params: TraceParams) -> Result<TraceOut, String> {
+    tauri::async_runtime::spawn_blocking(move || trace_bytes_internal(&data, &params))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -184,30 +186,38 @@ pub struct ImageFile {
 const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tiff", "gif"];
 
 #[tauri::command]
-pub fn list_images(folder_path: String) -> Result<Vec<ImageFile>, String> {
-    let path = Path::new(&folder_path);
-    if !path.is_dir() {
-        return Err(format!("not a directory: {folder_path}"));
-    }
-    let mut files = Vec::new();
-    for entry in std::fs::read_dir(path).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
-        if IMAGE_EXTS.contains(&ext.as_str()) {
-            files.push(ImageFile {
-                name: name.clone(),
-                path: entry.path().to_string_lossy().to_string(),
-            });
+pub async fn list_images(folder_path: String) -> Result<Vec<ImageFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = Path::new(&folder_path);
+        if !path.is_dir() {
+            return Err(format!("not a directory: {folder_path}"));
         }
-    }
-    files.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(files)
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(path).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+            if IMAGE_EXTS.contains(&ext.as_str()) {
+                files.push(ImageFile {
+                    name: name.clone(),
+                    path: entry.path().to_string_lossy().to_string(),
+                });
+            }
+        }
+        files.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(files)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn read_image(file_path: String) -> Result<Vec<u8>, String> {
-    std::fs::read(&file_path).map_err(|e| format!("failed to read {file_path}: {e}"))
+pub async fn read_image(file_path: String) -> Result<Vec<u8>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::read(&file_path).map_err(|e| format!("failed to read {file_path}: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,6 +241,7 @@ pub async fn batch_trace(
     app: tauri::AppHandle,
     folder_path: String,
     params: TraceParams,
+    files: Option<Vec<String>>,
 ) -> Result<String, String> {
     let job_id = uuid::Uuid::new_v4().to_string();
 
@@ -238,31 +249,36 @@ pub async fn batch_trace(
     if !path.is_dir() {
         return Err(format!("not a directory: {folder_path}"));
     }
-    let mut files: Vec<(String, String)> = Vec::new();
+    let mut image_files: Vec<(String, String)> = Vec::new();
     for entry in std::fs::read_dir(path).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let name = entry.file_name().to_string_lossy().to_string();
         let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
         if IMAGE_EXTS.contains(&ext.as_str()) {
-            files.push((name, entry.path().to_string_lossy().to_string()));
+            if let Some(ref wanted) = files {
+                if !wanted.contains(&name) {
+                    continue;
+                }
+            }
+            image_files.push((name, entry.path().to_string_lossy().to_string()));
         }
     }
-    files.sort_by(|a, b| a.0.cmp(&b.0));
+    image_files.sort_by(|a, b| a.0.cmp(&b.0));
 
     tauri::async_runtime::spawn(async move {
         let start = std::time::Instant::now();
-        let total = files.len();
+        let total = image_files.len();
 
         let _ = app.emit("batch-trace", serde_json::json!({
             "type": "start",
             "total": total,
-            "files": files.iter().map(|f| f.0.clone()).collect::<Vec<_>>(),
+            "files": image_files.iter().map(|f| f.0.clone()).collect::<Vec<_>>(),
         }));
 
         let mut success = 0usize;
         let mut failed = 0usize;
 
-        for (i, (name, file_path)) in files.iter().enumerate() {
+        for (i, (name, file_path)) in image_files.iter().enumerate() {
             let elapsed = start.elapsed().as_millis() as u64;
             let _ = app.emit("batch-trace", serde_json::json!({
                 "type": "processing",
@@ -272,9 +288,11 @@ pub async fn batch_trace(
                 "elapsed_ms": elapsed,
             }));
 
-            let data = std::fs::read(file_path).unwrap_or_default();
+            let file_path = file_path.clone();
             let params_clone = params.clone();
             let result = tauri::async_runtime::spawn_blocking(move || {
+                let data = std::fs::read(&file_path)
+                    .map_err(|e| format!("failed to read {file_path}: {e}"))?;
                 trace_bytes_internal(&data, &params_clone)
             })
             .await
@@ -324,9 +342,13 @@ pub async fn batch_trace(
 }
 
 #[tauri::command]
-pub fn generate_pattern(params: PatternParams) -> Result<String, String> {
-    generate_sized(&params.kind, params.n_units, params.complexity, params.size)
-        .map_err(|e| e.to_string())
+pub async fn generate_pattern(params: PatternParams) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        generate_sized(&params.kind, params.n_units, params.complexity, params.size)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

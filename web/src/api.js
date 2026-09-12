@@ -85,11 +85,11 @@ export async function getImageUrl(projectId, filename) {
   return `${BASE}/projects/${projectId}/images/${encodeURIComponent(filename)}`;
 }
 
-export function startBatchTrace(projectId, params) {
+export function startBatchTrace(projectId, params, files) {
   if (isTauri()) {
     let unlisten = null;
     let onEvent = () => {};
-    const start = tauriInvoke("batch_trace", { folderPath: projectId, params })
+    const start = tauriInvoke("batch_trace", { folderPath: projectId, params, files })
       .then(() => tauriListen("batch-trace", (event) => { onEvent(event.payload); })
         .then(u => { unlisten = u; }));
     return { start, setOnEvent: (fn) => { onEvent = fn; }, cancel: () => { if (unlisten) unlisten(); } };
@@ -99,11 +99,21 @@ export function startBatchTrace(projectId, params) {
   const start = fetch(`${BASE}/projects/${projectId}/batch-trace`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ params }),
+    body: JSON.stringify({ params, files }),
   }).then(async res => {
     const { job_id } = await res.json();
     eventSource = new EventSource(`${BASE}/projects/${projectId}/batch-trace/${job_id}/events`);
-    eventSource.onmessage = (e) => { try { onEvent(JSON.parse(e.data)); } catch {} };
+    // Server sends named SSE events (start/progress/complete); onmessage
+    // only receives unnamed ones, so listen per event name.
+    const onSse = (e) => {
+      let data;
+      try { data = JSON.parse(e.data); } catch { return; }
+      // Normalize server {status: ...} payloads to Tauri-style {type: ...}
+      onEvent(data.status ? { ...data, type: data.status } : data);
+    };
+    eventSource.addEventListener("start", onSse);
+    eventSource.addEventListener("progress", onSse);
+    eventSource.addEventListener("complete", onSse);
     eventSource.onerror = () => { eventSource.close(); };
     return job_id;
   });

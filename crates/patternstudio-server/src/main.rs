@@ -208,7 +208,11 @@ async fn upload(
             let content = field.bytes().await.map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
             let id = uuid::Uuid::new_v4().to_string();
             let path = state.upload_dir.join(format!("{id}.png"));
-            std::fs::write(&path, &content).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            let write_path = path.clone();
+            tokio::task::spawn_blocking(move || std::fs::write(&write_path, &content))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
             state.assets.lock().unwrap().insert(id.clone(), path);
             asset_id = Some(id);
         }
@@ -242,7 +246,10 @@ async fn trace(
         return Err((StatusCode::BAD_REQUEST, "asset_id or file_path required".into()));
     };
     let params = req.params.unwrap_or_default();
-    let result = do_trace(&img_path, &params).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let result = tokio::task::spawn_blocking(move || do_trace(&img_path, &params))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(result))
 }
 
@@ -267,8 +274,13 @@ struct PatternResponse { svg: String }
 async fn generate_pattern(
     Json(req): Json<PatternRequest>,
 ) -> Result<Json<PatternResponse>, (StatusCode, String)> {
-    let svg = patternstudio_patterns::generate_sized(&req.kind, req.n_units, req.complexity, req.size)
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let svg = tokio::task::spawn_blocking(move || {
+        patternstudio_patterns::generate_sized(&req.kind, req.n_units, req.complexity, req.size)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     Ok(Json(PatternResponse { svg }))
 }
 
@@ -387,7 +399,9 @@ async fn serve_image(
     if !img_path.exists() {
         return Err((StatusCode::NOT_FOUND, "image not found".into()));
     }
-    let data = std::fs::read(&img_path)
+    let data = tokio::task::spawn_blocking(move || std::fs::read(&img_path))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let content_type = match filename.rsplit('.').next().unwrap_or("").to_lowercase().as_str() {
         "jpg" | "jpeg" => "image/jpeg",
@@ -408,6 +422,8 @@ async fn serve_image(
 struct BatchTraceRequest {
     #[serde(default)]
     params: Option<TraceParams>,
+    #[serde(default)]
+    files: Option<Vec<String>>,
 }
 
 async fn start_batch_trace(
@@ -420,7 +436,15 @@ async fn start_batch_trace(
     let job_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     state.jobs.lock().unwrap().insert(job_id.clone(), Some(rx));
-    let files = project.images.clone();
+    let files = match req.files {
+        Some(wanted) => project
+            .images
+            .iter()
+            .filter(|f| wanted.contains(*f))
+            .cloned()
+            .collect::<Vec<_>>(),
+        None => project.images.clone(),
+    };
     let folder = project.path.clone();
     let params = req.params.unwrap_or_default();
 
