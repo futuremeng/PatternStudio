@@ -11,6 +11,7 @@ export default function ProjectDetailPage() {
   const [imageUrls, setImageUrls] = useState({});
   const [batchStatus, setBatchStatus] = useState(null);
   const [batchProgress, setBatchProgress] = useState(null);
+  const [batchFailed, setBatchFailed] = useState(0);
   const [error, setError] = useState(null);
   const batchHandleRef = useRef(null);
 
@@ -58,10 +59,12 @@ export default function ProjectDetailPage() {
     }
     if (missing.length === 0) {
       setBatchStatus("done");
+      setBatchFailed(0);
       setBatchProgress({ current: project.images.length, total: project.images.length, file: "" });
       return;
     }
     setBatchStatus("running");
+    setBatchFailed(0);
     setBatchProgress({ current: 0, total: missing.length, file: "" });
 
     const handle = startBatchTrace(projectId, params, missing);
@@ -83,10 +86,12 @@ export default function ProjectDetailPage() {
           layers: event.layers || [],
         }).catch(() => {});
       } else if (event.type === "error") {
+        setBatchFailed(f => f + 1);
         setBatchProgress(p => ({ ...p, current: p.current + 1 }));
       } else if (event.type === "complete") {
         setBatchStatus("done");
-        setBatchProgress({ current: event.total, total: event.total, file: "" });
+        setBatchFailed(event.failed || 0);
+        setBatchProgress({ current: event.total - (event.failed || 0), total: event.total, file: "" });
       } else if (event.type === "cancelled") {
         setBatchStatus("cancelled");
         setBatchProgress(p => ({ ...p, total: event.total, file: "" }));
@@ -107,6 +112,14 @@ export default function ProjectDetailPage() {
     return <div className="placeholder">{error ? error : "加载中..."}</div>;
   }
 
+  const allDone = batchStatus === "done" && batchFailed === 0;
+  const batchLabel =
+    batchStatus === "running" ? "批量处理中..."
+    : allDone ? "✓ 已完成"
+    : batchStatus === "cancelled" ? "⚡ 继续处理"
+    : batchStatus === "done" ? "⚡ 重新处理失败项"
+    : "⚡ 批量处理";
+
   return (
     <div className="project-detail-page">
       <AppHeader
@@ -117,8 +130,8 @@ export default function ProjectDetailPage() {
         {batchStatus === "running" && (
           <button className="danger" onClick={onCancelBatch}>⏹ 中止</button>
         )}
-        <button className="primary" onClick={onBatchTrace} disabled={batchStatus === "running"}>
-          {batchStatus === "running" ? "批量处理中..." : "⚡ 批量处理"}
+        <button className="primary" onClick={onBatchTrace} disabled={batchStatus === "running" || allDone}>
+          {batchLabel}
         </button>
       </AppHeader>
 
@@ -150,7 +163,9 @@ export default function ProjectDetailPage() {
               ? `${batchProgress.current}/${batchProgress.total} ${batchProgress.file}`
               : batchStatus === "cancelled"
                 ? `已中止: ${batchProgress.current}/${batchProgress.total}`
-                : `完成: ${batchProgress.current}/${batchProgress.total}`}
+                : batchFailed > 0
+                  ? `完成: ${batchProgress.current}/${batchProgress.total} · 失败 ${batchFailed}`
+                  : `完成: ${batchProgress.current}/${batchProgress.total}`}
           </div>
         </div>
       )}

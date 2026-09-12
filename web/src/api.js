@@ -155,8 +155,9 @@ export function startBatchTrace(projectId, params, files) {
     const onSse = (e) => {
       let data;
       try { data = JSON.parse(e.data); } catch { return; }
-      // Normalize server {status: ...} payloads to Tauri-style {type: ...}
-      onEvent(data.status ? { ...data, type: data.status } : data);
+      // Normalize server {status: ...} payloads to Tauri-style {type: ...};
+      // fall back to the SSE event name (start/complete have no status field).
+      onEvent(data.status ? { ...data, type: data.status } : { ...data, type: e.type });
     };
     eventSource.addEventListener("start", onSse);
     eventSource.addEventListener("progress", onSse);
