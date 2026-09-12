@@ -124,24 +124,33 @@ export function startBatchTrace(projectId, params, files) {
     let unlisten = null;
     let onEvent = () => {};
     let jobId = null;
+    let resolveDone = () => {};
+    const done = new Promise(r => { resolveDone = r; });
     const start = tauriInvoke("batch_trace", { folderPath: projectId, params, files })
       .then((id) => {
         jobId = id;
-        return tauriListen("batch-trace", (event) => { onEvent(event.payload); })
-          .then(u => { unlisten = u; });
+        return tauriListen("batch-trace", (event) => {
+          onEvent(event.payload);
+          if (event.payload?.type === "complete" || event.payload?.type === "cancelled") resolveDone();
+        }).then(u => { unlisten = u; });
       });
     return {
       start,
+      done,
       setOnEvent: (fn) => { onEvent = fn; },
+      close: () => { if (unlisten) { unlisten(); unlisten = null; } },
       cancel: () => {
         if (jobId) cancelBatchTrace(projectId, jobId).catch(() => {});
-        if (unlisten) unlisten();
+        if (unlisten) { unlisten(); unlisten = null; }
+        resolveDone();
       },
     };
   }
   let eventSource = null;
   let onEvent = () => {};
   let jobId = null;
+  let resolveDone = () => {};
+  const done = new Promise(r => { resolveDone = r; });
   const start = fetch(`${BASE}/projects/${projectId}/batch-trace`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -157,20 +166,25 @@ export function startBatchTrace(projectId, params, files) {
       try { data = JSON.parse(e.data); } catch { return; }
       // Normalize server {status: ...} payloads to Tauri-style {type: ...};
       // fall back to the SSE event name (start/complete have no status field).
-      onEvent(data.status ? { ...data, type: data.status } : { ...data, type: e.type });
+      const evt = data.status ? { ...data, type: data.status } : { ...data, type: e.type };
+      onEvent(evt);
+      if (evt.type === "complete" || evt.type === "cancelled") resolveDone();
     };
     eventSource.addEventListener("start", onSse);
     eventSource.addEventListener("progress", onSse);
     eventSource.addEventListener("complete", onSse);
-    eventSource.onerror = () => { eventSource.close(); };
+    eventSource.onerror = () => { eventSource.close(); resolveDone(); };
     return job_id;
   });
   return {
     start,
+    done,
     setOnEvent: (fn) => { onEvent = fn; },
+    close: () => { if (eventSource) { eventSource.close(); eventSource = null; } },
     cancel: () => {
       if (jobId) cancelBatchTrace(projectId, jobId).catch(() => {});
-      if (eventSource) eventSource.close();
+      if (eventSource) { eventSource.close(); eventSource = null; }
+      resolveDone();
     },
   };
 }

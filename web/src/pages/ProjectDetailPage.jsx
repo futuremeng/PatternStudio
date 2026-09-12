@@ -4,6 +4,30 @@ import { getImageUrl, startBatchTrace, MODE_PRESETS } from "../api.js";
 import { getCachedTrace, setCachedTrace } from "../traceCache.js";
 import AppHeader from "../components/AppHeader.jsx";
 
+/**
+ * Crop an SVG to one of its quarters by rewriting the viewBox.
+ * quarter: "tr" = top-right, "br" = bottom-right.
+ * Falls back to the width/height attributes when no viewBox exists.
+ */
+function cropSvgQuarter(svg, quarter) {
+  const vb = svg.match(/viewBox="([^"]+)"/);
+  if (vb) {
+    const [x, y, w, h] = vb[1].split(/[\s,]+/).map(Number);
+    if ([x, y, w, h].some(n => !Number.isFinite(n))) return svg;
+    const nx = x + w / 2;
+    const ny = quarter === "tr" ? y : y + h / 2;
+    return svg.replace(vb[0], `viewBox="${nx} ${ny} ${w / 2} ${h / 2}"`);
+  }
+  const wm = svg.match(/width="([\d.]+)(px)?"/);
+  const hm = svg.match(/height="([\d.]+)(px)?"/);
+  if (wm && hm) {
+    const w = parseFloat(wm[1]), h = parseFloat(hm[1]);
+    const ny = quarter === "tr" ? 0 : h / 2;
+    return svg.replace(/<svg/, `<svg viewBox="${w / 2} ${ny} ${w / 2} ${h / 2}"`);
+  }
+  return svg;
+}
+
 export default function ProjectDetailPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
@@ -13,7 +37,10 @@ export default function ProjectDetailPage() {
   const [batchProgress, setBatchProgress] = useState(null);
   const [batchFailed, setBatchFailed] = useState(0);
   const [error, setError] = useState(null);
+  // Cached line/color SVGs per image, for the split preview on processed cards
+  const [previews, setPreviews] = useState({});
   const batchHandleRef = useRef(null);
+  const cancelRef = useRef(false);
 
   useEffect(() => {
     // Load project info and image URLs
@@ -48,65 +75,111 @@ export default function ProjectDetailPage() {
     })();
   }, [projectId]);
 
+  // Load cached line/color results (same params as batch trace) for the split preview
+  useEffect(() => {
+    if (!project?.images?.length) return;
+    let cancelled = false;
+    (async () => {
+      const found = {};
+      for (const name of project.images) {
+        const imageId = `${projectId}/${name}`;
+        const [line, color] = await Promise.all([
+          getCachedTrace(imageId, MODE_PRESETS.lineArt.params).catch(() => null),
+          getCachedTrace(imageId, MODE_PRESETS.color.params).catch(() => null),
+        ]);
+        if (line || color) found[name] = { line: line?.svg || null, color: color?.svg || null };
+      }
+      if (!cancelled) setPreviews(found);
+    })();
+    return () => { cancelled = true; };
+  }, [project, projectId]);
+
   const onBatchTrace = useCallback(async () => {
     if (!project) return;
-    const params = MODE_PRESETS.color.params;
+    // Two passes per image: line art, then color fill (both feed the split preview)
+    const jobs = [
+      { pkey: "line", params: MODE_PRESETS.lineArt.params },
+      { pkey: "color", params: MODE_PRESETS.color.params },
+    ];
     // Cache-first: only send images without a same-params result to the backend
-    const missing = [];
-    for (const name of project.images) {
-      const cached = await getCachedTrace(`${projectId}/${name}`, params).catch(() => null);
-      if (!cached) missing.push(name);
+    const plan = [];
+    for (const job of jobs) {
+      const missing = [];
+      for (const name of project.images) {
+        const cached = await getCachedTrace(`${projectId}/${name}`, job.params).catch(() => null);
+        if (!cached) missing.push(name);
+      }
+      if (missing.length) plan.push({ ...job, missing });
     }
-    if (missing.length === 0) {
+    const total = plan.reduce((s, j) => s + j.missing.length, 0);
+    if (total === 0) {
       setBatchStatus("done");
       setBatchFailed(0);
       setBatchProgress({ current: project.images.length, total: project.images.length, file: "" });
       return;
     }
+    cancelRef.current = false;
     setBatchStatus("running");
     setBatchFailed(0);
-    setBatchProgress({ current: 0, total: missing.length, file: "" });
+    setBatchProgress({ current: 0, total, file: "" });
 
-    const handle = startBatchTrace(projectId, params, missing);
-    batchHandleRef.current = handle;
-    handle.setOnEvent((event) => {
-      if (event.type === "start") {
-        setBatchProgress({ current: 0, total: event.total, file: "" });
-      } else if (event.type === "processing") {
-        setBatchProgress({ current: event.index, total: event.total, file: event.file });
-      } else if (event.type === "done") {
-        setBatchProgress(p => ({ ...p, current: p.current + 1 }));
-        // Persist the generated result so the editor page hits the cache
-        setCachedTrace(`${projectId}/${event.file}`, params, {
-          svg: event.svg,
-          width: event.width,
-          height: event.height,
-          shapeCount: event.shapeCount ?? event.shape_count,
-          layerCount: (event.layers || []).length,
-          layers: event.layers || [],
-        }).catch(() => {});
-      } else if (event.type === "error") {
-        setBatchFailed(f => f + 1);
-        setBatchProgress(p => ({ ...p, current: p.current + 1 }));
-      } else if (event.type === "complete") {
-        setBatchStatus("done");
-        setBatchFailed(event.failed || 0);
-        setBatchProgress({ current: event.total - (event.failed || 0), total: event.total, file: "" });
-      } else if (event.type === "cancelled") {
-        setBatchStatus("cancelled");
-        setBatchProgress(p => ({ ...p, total: event.total, file: "" }));
-      }
-    });
-    await handle.start;
+    let doneCount = 0;
+    let failedCount = 0;
+    for (const job of plan) {
+      const handle = startBatchTrace(projectId, job.params, job.missing);
+      batchHandleRef.current = handle;
+      handle.setOnEvent((event) => {
+        if (event.type === "processing") {
+          setBatchProgress({ current: doneCount, total, file: event.file });
+        } else if (event.type === "done") {
+          doneCount += 1;
+          setBatchProgress(p => ({ ...p, current: doneCount }));
+          // Persist the generated result so the editor page hits the cache
+          setCachedTrace(`${projectId}/${event.file}`, job.params, {
+            svg: event.svg,
+            width: event.width,
+            height: event.height,
+            shapeCount: event.shapeCount ?? event.shape_count,
+            layerCount: (event.layers || []).length,
+            layers: event.layers || [],
+          }).catch(() => {});
+          // Refresh the split preview for this card
+          setPreviews(prev => ({
+            ...prev,
+            [event.file]: { ...(prev[event.file] || {}), [job.pkey]: event.svg },
+          }));
+        } else if (event.type === "error") {
+          doneCount += 1;
+          failedCount += 1;
+          setBatchFailed(f => f + 1);
+          setBatchProgress(p => ({ ...p, current: doneCount }));
+        } else if (event.type === "cancelled") {
+          setBatchStatus("cancelled");
+        }
+      });
+      await handle.start;
+      await handle.done;
+      handle.close();
+      if (cancelRef.current) break;
+    }
+    if (!cancelRef.current) {
+      setBatchStatus("done");
+      setBatchFailed(failedCount);
+      setBatchProgress({ current: total, total, file: "" });
+    }
   }, [project, projectId]);
 
   const onCancelBatch = useCallback(() => {
+    cancelRef.current = true;
     setBatchStatus("cancelled");
     batchHandleRef.current?.cancel();
   }, []);
 
-  // Stop listening when the page unmounts mid-batch
-  useEffect(() => () => { batchHandleRef.current?.cancel(); }, []);
+  // Stop the batch when the page unmounts mid-run
+  useEffect(() => () => {
+    cancelRef.current = true;
+    batchHandleRef.current?.cancel();
+  }, []);
 
   if (!project) {
     return <div className="placeholder">{error ? error : "加载中..."}</div>;
@@ -136,18 +209,41 @@ export default function ProjectDetailPage() {
       </AppHeader>
 
       <div className="image-grid">
-        {(project.images || []).map(filename => (
-          <div
-            key={filename}
-            className="image-card"
-            onClick={() => navigate(`/project/${encodeURIComponent(projectId)}/image/${encodeURIComponent(filename)}`)}
-          >
-            <div className="img-wrap">
-              {imageUrls[filename] && <img src={imageUrls[filename]} alt={filename} />}
+        {(project.images || []).map(filename => {
+          const preview = previews[filename];
+          return (
+            <div
+              key={filename}
+              className="image-card"
+              onClick={() => navigate(`/project/${encodeURIComponent(projectId)}/image/${encodeURIComponent(filename)}`)}
+            >
+              {preview ? (
+                <div className="img-wrap split">
+                  <div className="split-left">
+                    {imageUrls[filename] && <img src={imageUrls[filename]} alt={filename} />}
+                  </div>
+                  <div className="split-right">
+                    <div className="split-panel">
+                      {preview.line
+                        ? <div className="svg-mini" dangerouslySetInnerHTML={{ __html: cropSvgQuarter(preview.line, "tr") }} />
+                        : <div className="mini-empty">线稿</div>}
+                    </div>
+                    <div className="split-panel">
+                      {preview.color
+                        ? <div className="svg-mini" dangerouslySetInnerHTML={{ __html: cropSvgQuarter(preview.color, "br") }} />
+                        : <div className="mini-empty">色稿</div>}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="img-wrap">
+                  {imageUrls[filename] && <img src={imageUrls[filename]} alt={filename} />}
+                </div>
+              )}
+              <div className="name">{filename}</div>
             </div>
-            <div className="name">{filename}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {batchProgress && (
