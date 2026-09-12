@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getImageUrl, startBatchTrace, MODE_PRESETS } from "../api.js";
 import { getCachedTrace, setCachedTrace } from "../traceCache.js";
@@ -12,6 +12,7 @@ export default function ProjectDetailPage() {
   const [batchStatus, setBatchStatus] = useState(null);
   const [batchProgress, setBatchProgress] = useState(null);
   const [error, setError] = useState(null);
+  const batchHandleRef = useRef(null);
 
   useEffect(() => {
     // Load project info and image URLs
@@ -64,6 +65,7 @@ export default function ProjectDetailPage() {
     setBatchProgress({ current: 0, total: missing.length, file: "" });
 
     const handle = startBatchTrace(projectId, params, missing);
+    batchHandleRef.current = handle;
     handle.setOnEvent((event) => {
       if (event.type === "start") {
         setBatchProgress({ current: 0, total: event.total, file: "" });
@@ -85,10 +87,21 @@ export default function ProjectDetailPage() {
       } else if (event.type === "complete") {
         setBatchStatus("done");
         setBatchProgress({ current: event.total, total: event.total, file: "" });
+      } else if (event.type === "cancelled") {
+        setBatchStatus("cancelled");
+        setBatchProgress(p => ({ ...p, total: event.total, file: "" }));
       }
     });
     await handle.start;
   }, [project, projectId]);
+
+  const onCancelBatch = useCallback(() => {
+    setBatchStatus("cancelled");
+    batchHandleRef.current?.cancel();
+  }, []);
+
+  // Stop listening when the page unmounts mid-batch
+  useEffect(() => () => { batchHandleRef.current?.cancel(); }, []);
 
   if (!project) {
     return <div className="placeholder">{error ? error : "加载中..."}</div>;
@@ -101,6 +114,9 @@ export default function ProjectDetailPage() {
         meta={`${project.images?.length || 0} 张图片`}
         onBack={() => navigate("/")}
       >
+        {batchStatus === "running" && (
+          <button className="danger" onClick={onCancelBatch}>⏹ 中止</button>
+        )}
         <button className="primary" onClick={onBatchTrace} disabled={batchStatus === "running"}>
           {batchStatus === "running" ? "批量处理中..." : "⚡ 批量处理"}
         </button>
@@ -132,7 +148,9 @@ export default function ProjectDetailPage() {
           <div className="progress-text">
             {batchStatus === "running"
               ? `${batchProgress.current}/${batchProgress.total} ${batchProgress.file}`
-              : `完成: ${batchProgress.current}/${batchProgress.total}`}
+              : batchStatus === "cancelled"
+                ? `已中止: ${batchProgress.current}/${batchProgress.total}`
+                : `完成: ${batchProgress.current}/${batchProgress.total}`}
           </div>
         </div>
       )}

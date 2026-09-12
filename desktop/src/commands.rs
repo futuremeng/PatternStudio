@@ -1,6 +1,9 @@
 //! Tauri commands: in-process access to the tracing engine.
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use patternstudio_core::ir::LayeredDoc;
 use patternstudio_core::LayerAssignment;
 use patternstudio_patterns::{generate_sized, list_kinds};
@@ -304,6 +307,22 @@ fn default_n_units() -> u32 { 8 }
 fn default_complexity() -> u8 { 50 }
 fn default_size() -> u32 { 400 }
 
+fn batch_cancel_flags() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    static FLAGS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+    FLAGS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[tauri::command]
+pub fn cancel_batch_trace(job_id: String) -> Result<(), String> {
+    let flags = batch_cancel_flags().lock().unwrap();
+    if let Some(flag) = flags.get(&job_id) {
+        flag.store(true, Ordering::SeqCst);
+        Ok(())
+    } else {
+        Err("batch job not found".into())
+    }
+}
+
 #[tauri::command]
 pub async fn batch_trace(
     app: tauri::AppHandle,
@@ -333,6 +352,10 @@ pub async fn batch_trace(
     }
     image_files.sort_by(|a, b| a.0.cmp(&b.0));
 
+    let cancelled = Arc::new(AtomicBool::new(false));
+    batch_cancel_flags().lock().unwrap().insert(job_id.clone(), cancelled.clone());
+    let job_id_cleanup = job_id.clone();
+
     tauri::async_runtime::spawn(async move {
         let start = std::time::Instant::now();
         let total = image_files.len();
@@ -347,6 +370,17 @@ pub async fn batch_trace(
         let mut failed = 0usize;
 
         for (i, (name, file_path)) in image_files.iter().enumerate() {
+            if cancelled.load(Ordering::SeqCst) {
+                let _ = app.emit("batch-trace", serde_json::json!({
+                    "type": "cancelled",
+                    "index": i,
+                    "total": total,
+                    "success": success,
+                    "failed": failed,
+                    "total_elapsed_ms": start.elapsed().as_millis() as u64,
+                }));
+                break;
+            }
             let elapsed = start.elapsed().as_millis() as u64;
             let _ = app.emit("batch-trace", serde_json::json!({
                 "type": "processing",
@@ -397,13 +431,16 @@ pub async fn batch_trace(
             }
         }
 
-        let _ = app.emit("batch-trace", serde_json::json!({
-            "type": "complete",
-            "total": total,
-            "success": success,
-            "failed": failed,
-            "total_elapsed_ms": start.elapsed().as_millis() as u64,
-        }));
+        if !cancelled.load(Ordering::SeqCst) {
+            let _ = app.emit("batch-trace", serde_json::json!({
+                "type": "complete",
+                "total": total,
+                "success": success,
+                "failed": failed,
+                "total_elapsed_ms": start.elapsed().as_millis() as u64,
+            }));
+        }
+        batch_cancel_flags().lock().unwrap().remove(&job_id_cleanup);
     });
 
     Ok(job_id)

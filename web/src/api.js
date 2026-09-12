@@ -111,23 +111,44 @@ export async function getImageUrl(projectId, filename) {
   return `${BASE}/projects/${projectId}/images/${encodeURIComponent(filename)}`;
 }
 
+export async function cancelBatchTrace(projectId, jobId) {
+  if (isTauri()) {
+    await tauriInvoke("cancel_batch_trace", { jobId });
+    return;
+  }
+  await fetch(`${BASE}/projects/${projectId}/batch-trace/${jobId}/cancel`, { method: "POST" });
+}
+
 export function startBatchTrace(projectId, params, files) {
   if (isTauri()) {
     let unlisten = null;
     let onEvent = () => {};
+    let jobId = null;
     const start = tauriInvoke("batch_trace", { folderPath: projectId, params, files })
-      .then(() => tauriListen("batch-trace", (event) => { onEvent(event.payload); })
-        .then(u => { unlisten = u; }));
-    return { start, setOnEvent: (fn) => { onEvent = fn; }, cancel: () => { if (unlisten) unlisten(); } };
+      .then((id) => {
+        jobId = id;
+        return tauriListen("batch-trace", (event) => { onEvent(event.payload); })
+          .then(u => { unlisten = u; });
+      });
+    return {
+      start,
+      setOnEvent: (fn) => { onEvent = fn; },
+      cancel: () => {
+        if (jobId) cancelBatchTrace(projectId, jobId).catch(() => {});
+        if (unlisten) unlisten();
+      },
+    };
   }
   let eventSource = null;
   let onEvent = () => {};
+  let jobId = null;
   const start = fetch(`${BASE}/projects/${projectId}/batch-trace`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ params, files }),
   }).then(async res => {
     const { job_id } = await res.json();
+    jobId = job_id;
     eventSource = new EventSource(`${BASE}/projects/${projectId}/batch-trace/${job_id}/events`);
     // Server sends named SSE events (start/progress/complete); onmessage
     // only receives unnamed ones, so listen per event name.
@@ -143,7 +164,14 @@ export function startBatchTrace(projectId, params, files) {
     eventSource.onerror = () => { eventSource.close(); };
     return job_id;
   });
-  return { start, setOnEvent: (fn) => { onEvent = fn; }, cancel: () => { if (eventSource) eventSource.close(); } };
+  return {
+    start,
+    setOnEvent: (fn) => { onEvent = fn; },
+    cancel: () => {
+      if (jobId) cancelBatchTrace(projectId, jobId).catch(() => {});
+      if (eventSource) eventSource.close();
+    },
+  };
 }
 
 export async function generatePattern(params) {

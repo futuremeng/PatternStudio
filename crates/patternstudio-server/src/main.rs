@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -27,6 +28,7 @@ struct AppState {
     assets: Arc<Mutex<HashMap<String, PathBuf>>>,
     projects: Arc<Mutex<HashMap<String, Project>>>,
     jobs: Arc<Mutex<HashMap<String, Option<tokio::sync::mpsc::Receiver<Event>>>>>,
+    cancels: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     projects_file: PathBuf,
 }
 
@@ -447,6 +449,9 @@ async fn start_batch_trace(
     };
     let folder = project.path.clone();
     let params = req.params.unwrap_or_default();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    state.cancels.lock().unwrap().insert(job_id.clone(), cancelled.clone());
+    let job_id_cleanup = job_id.clone();
 
     tokio::spawn(async move {
         let start = Instant::now();
@@ -456,6 +461,15 @@ async fn start_batch_trace(
         let mut success = 0usize;
         let mut failed = 0usize;
         for (i, file) in files.iter().enumerate() {
+            if cancelled.load(Ordering::SeqCst) {
+                let _ = tx.send(Event::default().event("progress")
+                    .data(serde_json::json!({
+                        "index": i, "total": total,
+                        "status": "cancelled", "success": success, "failed": failed,
+                        "total_elapsed_ms": start.elapsed().as_millis() as u64
+                    }).to_string())).await;
+                break;
+            }
             let elapsed = start.elapsed().as_millis() as u64;
             let _ = tx.send(Event::default().event("progress")
                 .data(serde_json::json!({
@@ -490,14 +504,30 @@ async fn start_batch_trace(
             }
             if tx.is_closed() { break; }
         }
-        let _ = tx.send(Event::default().event("complete")
-            .data(serde_json::json!({
-                "total": total, "success": success, "failed": failed,
-                "total_elapsed_ms": start.elapsed().as_millis() as u64
-            }).to_string())).await;
+        if !cancelled.load(Ordering::SeqCst) {
+            let _ = tx.send(Event::default().event("complete")
+                .data(serde_json::json!({
+                    "total": total, "success": success, "failed": failed,
+                    "total_elapsed_ms": start.elapsed().as_millis() as u64
+                }).to_string())).await;
+        }
+        state.cancels.lock().unwrap().remove(&job_id_cleanup);
     });
 
     Ok(Json(serde_json::json!({ "job_id": job_id })))
+}
+
+async fn cancel_batch_trace(
+    State(state): State<AppState>,
+    UrlPath((_project_id, job_id)): UrlPath<(String, String)>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let flags = state.cancels.lock().unwrap();
+    if let Some(flag) = flags.get(&job_id) {
+        flag.store(true, Ordering::SeqCst);
+        Ok(Json(serde_json::json!({ "cancelled": true })))
+    } else {
+        Err((StatusCode::NOT_FOUND, "job not found".into()))
+    }
 }
 
 async fn batch_trace_events(
@@ -523,6 +553,7 @@ async fn main() {
         assets: Arc::new(Mutex::new(HashMap::new())),
         projects: Arc::new(Mutex::new(projects)),
         jobs: Arc::new(Mutex::new(HashMap::new())),
+        cancels: Arc::new(Mutex::new(HashMap::new())),
         projects_file,
     };
     let app = Router::new()
@@ -536,6 +567,7 @@ async fn main() {
         .route("/api/v1/projects/{id}/images/{filename}", get(serve_image))
         .route("/api/v1/projects/{id}/batch-trace", post(start_batch_trace))
         .route("/api/v1/projects/{id}/batch-trace/{job_id}/events", get(batch_trace_events))
+        .route("/api/v1/projects/{id}/batch-trace/{job_id}/cancel", post(cancel_batch_trace))
         .fallback_service(ServeDir::new("web/dist").append_index_html_on_directories(true))
         .layer(CorsLayer::permissive())
         .with_state(state);
