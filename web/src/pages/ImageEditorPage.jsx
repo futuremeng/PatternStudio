@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getImageUrl, prepareSource, traceSource, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams } from "../api.js";
 import { getCachedTrace, setCachedTrace, stableStringify } from "../traceCache.js";
@@ -30,6 +30,43 @@ function buildDefaultConfigs() {
   }));
 }
 
+// --- Preview view-control icons (inline SVG, 16px) ---
+const IconMaximize = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" />
+  </svg>
+);
+const IconRestore = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" />
+  </svg>
+);
+const IconSelect = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+    <path d="M4 4l0 14 4.5-4.5 3 6.5 2.5-1.2-3-6.3 6 0z" />
+  </svg>
+);
+const IconFitWidth = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 8l-4 4 4 4M14 8l4 4-4 4" />
+  </svg>
+);
+const IconZoomIn = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+const IconZoomOut = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <path d="M5 12h14" />
+  </svg>
+);
+const IconFit = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4" y="4" width="16" height="16" rx="2" />
+  </svg>
+);
+
 export default function ImageEditorPage() {
   const { projectId, filename } = useParams();
   const navigate = useNavigate();
@@ -53,6 +90,64 @@ export default function ImageEditorPage() {
   const resultRef = useRef(null);
   const lastUserActiveRef = useRef(0);
   const imageId = `${projectId}/${filename}`;
+
+  // --- Preview view controls: maximize, zoom, fit ---
+  const [maximized, setMaximized] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [tool, setTool] = useState("select");
+  const viewportRef = useRef(null);
+  const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 });
+
+  // Track the visible preview size so we can fit the image at zoom = 1 and
+  // scale it precisely for the zoom / fit-width / fit controls. Measured in a
+  // layout effect so the first paint already has a correct size.
+  useLayoutEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const measure = () => {
+      const r = el.getBoundingClientRect();
+      setViewportSize({ w: r.width, h: r.height });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Reset the view when switching to a different image.
+  useEffect(() => { setZoom(1); }, [imageId]);
+
+  const toggleMaximize = useCallback(() => setMaximized(m => !m), []);
+  const zoomIn = useCallback(() => setZoom(z => Math.min(8, z * 1.25)), []);
+  const zoomOut = useCallback(() => setZoom(z => Math.max(0.1, z / 1.25)), []);
+  const fitScreen = useCallback(() => setZoom(1), []);
+
+  // Fit metrics derived from the image's natural size and the viewport.
+  const imgW = result?.width || 0;
+  const imgH = result?.height || 0;
+  const isSide = compareMode === "side";
+  const PAD = 16; // matches .preview-stage padding
+  const GAP = 16; // matches .before-after gap (fixed, does not scale)
+  const availW = Math.max(0, viewportSize.w - PAD * 2);
+  const availH = Math.max(0, viewportSize.h - PAD * 2);
+  // Scale at which the content exactly fills the viewport (zoom = 1).
+  const fitScale = imgW > 0 && imgH > 0 && availW > 0 && availH > 0
+    ? (isSide
+        ? Math.min(Math.max(0, availW - GAP) / (imgW * 2), availH / imgH)
+        : Math.min(availW / imgW, availH / imgH))
+    : 0;
+  // Scale at which the content exactly fills the viewport width (for 全宽).
+  const widthScale = imgW > 0 && availW > 0
+    ? (isSide ? Math.max(0, availW - GAP) / (imgW * 2) : availW / imgW)
+    : 0;
+  const hasDims = fitScale > 0;
+  const ds = hasDims ? fitScale * zoom : 0;
+  const boxStyle = hasDims ? { width: imgW * ds, height: imgH * ds } : undefined;
+  const imgStyle = hasDims ? boxStyle : { maxHeight: "70vh" };
+
+  const fitWidth = useCallback(() => {
+    if (fitScale > 0 && widthScale > 0) setZoom(widthScale / fitScale);
+  }, [fitScale, widthScale]);
 
   useEffect(() => { configsRef.current = configs; }, [configs]);
   useEffect(() => { busyRef.current = busy; }, [busy]);
@@ -272,7 +367,7 @@ export default function ImageEditorPage() {
   }, [result, filename]);
 
   return (
-    <div className="editor-page">
+    <div className={`editor-page${maximized ? " maximized" : ""}`}>
       <AppHeader
         title={filename}
         onBack={() => navigate(`/project/${encodeURIComponent(projectId)}`)}
@@ -282,6 +377,17 @@ export default function ImageEditorPage() {
           <button className={compareMode === "overlay" ? "active" : ""} onClick={() => setCompareMode("overlay")}>叠加</button>
         </div>
         <button onClick={onDownload} disabled={!result?.svg}>下载 SVG</button>
+        {result?.width > 0 && (
+          <span className="page-meta">{result.width} x {result.height} px</span>
+        )}
+        <button
+          className="icon-btn"
+          onClick={toggleMaximize}
+          title={maximized ? "还原" : "最大化"}
+          aria-label={maximized ? "还原" : "最大化"}
+        >
+          {maximized ? <IconRestore /> : <IconMaximize />}
+        </button>
       </AppHeader>
 
       <div className="editor-main">
@@ -290,52 +396,76 @@ export default function ImageEditorPage() {
         </aside>
 
         <div className="editor-content">
-          {compareMode === "side" ? (
-            <div className="before-after">
-              <div className="ba-panel">
-                <span className="label">原图</span>
-                {imageUrl ? <img src={imageUrl} alt="original" /> : <div className="placeholder">加载中</div>}
-              </div>
-              <div className="ba-panel">
-                <span className="label">矢量</span>
-                {busy && result?.svg && <span className="busy-badge">处理中...</span>}
-                {result?.svg ? (
-                  <div className="svg-frame" dangerouslySetInnerHTML={{ __html: result.svg }} />
-                ) : (
-                  <div className="placeholder">{busy ? "处理中..." : "点击下方配置开始"}</div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="overlay-wrap">
-              {busy && result?.svg && <span className="busy-badge">处理中...</span>}
-              {imageUrl && result?.svg ? (
-                <div
-                  className="overlay-compare"
-                  ref={overlayRef}
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    overlayDragging.current = true;
-                    updateOverlayPos(e.clientX);
-                  }}
-                >
-                  <img src={imageUrl} alt="original" />
-                  <div className="overlay-top" style={{ clipPath: `inset(0 0 0 ${overlayPos}%)` }}>
-                    <div className="overlay-svg" dangerouslySetInnerHTML={{ __html: result.svg }} />
+          <div className="preview-viewport" ref={viewportRef}>
+            <div className="preview-stage">
+              {compareMode === "side" ? (
+                <div className="before-after">
+                  <div className="ba-panel">
+                    <span className="label">原图</span>
+                    {imageUrl ? <img src={imageUrl} alt="original" style={imgStyle} /> : <div className="placeholder">加载中</div>}
                   </div>
-                  <span className="overlay-tag overlay-tag-left">原图</span>
-                  <span className="overlay-tag overlay-tag-right">矢量</span>
-                  <div className="overlay-divider" style={{ left: `${overlayPos}%` }}>
-                    <div className="overlay-handle">‹›</div>
+                  <div className="ba-panel">
+                    <span className="label">矢量</span>
+                    {busy && result?.svg && <span className="busy-badge">处理中...</span>}
+                    {result?.svg ? (
+                      <div className="svg-frame" style={boxStyle} dangerouslySetInnerHTML={{ __html: result.svg }} />
+                    ) : (
+                      <div className="placeholder">{busy ? "处理中..." : "点击下方配置开始"}</div>
+                    )}
                   </div>
                 </div>
               ) : (
-                <div className="placeholder">{busy ? "处理中..." : "点击下方配置开始"}</div>
+                <div className="overlay-wrap">
+                  {busy && result?.svg && <span className="busy-badge">处理中...</span>}
+                  {imageUrl && result?.svg ? (
+                    <div
+                      className="overlay-compare"
+                      ref={overlayRef}
+                      style={boxStyle}
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        overlayDragging.current = true;
+                        updateOverlayPos(e.clientX);
+                      }}
+                    >
+                      <img src={imageUrl} alt="original" />
+                      <div className="overlay-top" style={{ clipPath: `inset(0 0 0 ${overlayPos}%)` }}>
+                        <div className="overlay-svg" dangerouslySetInnerHTML={{ __html: result.svg }} />
+                      </div>
+                      <span className="overlay-tag overlay-tag-left">原图</span>
+                      <span className="overlay-tag overlay-tag-right">矢量</span>
+                      <div className="overlay-divider" style={{ left: `${overlayPos}%` }}>
+                        <div className="overlay-handle">‹›</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="placeholder">{busy ? "处理中..." : "点击下方配置开始"}</div>
+                  )}
+                </div>
               )}
             </div>
-          )}
+          </div>
+
+          <div className="preview-controls">
+            <button className={tool === "select" ? "active" : ""} onClick={() => setTool("select")} title="选中" aria-label="选中">
+              <IconSelect />
+            </button>
+            <button onClick={fitWidth} title="全宽" aria-label="全宽">
+              <IconFitWidth />
+            </button>
+            <button onClick={zoomIn} title="放大" aria-label="放大">
+              <IconZoomIn />
+            </button>
+            <button onClick={zoomOut} title="缩小" aria-label="缩小">
+              <IconZoomOut />
+            </button>
+            <button onClick={fitScreen} title="比例" aria-label="比例">
+              <IconFit />
+            </button>
+          </div>
+
           {error && (
-            <div className="error" style={{ padding: "0 1rem" }}>
+            <div className="error preview-error">
               {error}
               <button className="error-retry" onClick={() => setRetryTick(t => t + 1)}>重试</button>
             </div>
