@@ -392,7 +392,22 @@ body {
 .strategy-note {
   font-size: 0.72rem; color: var(--text2); line-height: 1.4;
   background: var(--surface2); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 0.4rem 0.5rem;
+  border-radius: var(--radius); padding: 0.5rem 0.6rem;
+}
+.strategy-header {
+  display: flex; align-items: center; gap: 0.35rem;
+  margin-bottom: 0.25rem;
+}
+.strategy-icon { font-size: 0.8rem; opacity: 0.7; }
+.strategy-type {
+  font-weight: 600; color: var(--text); font-size: 0.75rem;
+}
+.strategy-meta {
+  margin-left: auto; font-size: 0.65rem; color: var(--text2);
+  opacity: 0.8;
+}
+.strategy-reason {
+  font-size: 0.7rem; color: var(--text2);
 }
 .layer-card .info .meta { font-size: 0.7rem; color: var(--text2); display: flex; align-items: center; gap: 0.3rem; }
 .layer-card .color-dot {

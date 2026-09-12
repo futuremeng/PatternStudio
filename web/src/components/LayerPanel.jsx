@@ -7,6 +7,13 @@ const PROFILE_TITLES = {
   L2: "L2 细：细节层 — 更高坐标精度 + 冗余段清理",
 };
 
+const STRATEGY_LABELS = {
+  none: "单层",
+  color: "按颜色分层",
+  complexity: "按复杂度分层",
+  hybrid: "混合分层",
+};
+
 function LayerCard({ layer, selected, onToggle }) {
   return (
     <div
@@ -88,8 +95,13 @@ export default function LayerPanel({ layers, strategyInfo }) {
       </div>
 
       {strategyInfo?.reason && (
-        <div className="strategy-note" title={`策略: ${strategyInfo.strategy} · 层数: ${strategyInfo.layers} · 复杂度阈值: ${strategyInfo.complexityThreshold}%`}>
-          {strategyInfo.reason}
+        <div className="strategy-note">
+          <div className="strategy-header">
+            <span className="strategy-icon">⚙</span>
+            <span className="strategy-type">{STRATEGY_LABELS[strategyInfo.strategy] || strategyInfo.strategy}</span>
+            <span className="strategy-meta">{strategyInfo.layers} 层 · 阈值 {strategyInfo.complexityThreshold}%</span>
+          </div>
+          <div className="strategy-reason">{strategyInfo.reason}</div>
         </div>
       )}
 
