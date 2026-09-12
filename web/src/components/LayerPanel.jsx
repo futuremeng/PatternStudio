@@ -99,7 +99,7 @@ export default function LayerPanel({ layers, strategyInfo, profileMs }) {
           <div className="strategy-header">
             <span className="strategy-icon">⚙</span>
             <span className="strategy-type">{STRATEGY_LABELS[strategyInfo.strategy] || strategyInfo.strategy}</span>
-            <span className="strategy-meta">
+            <span className="strategy-meta" title="层数 · 检测到的颜色数 · 细节预算(0-100，由简化/精度/阈值等参数综合计算)">
               {strategyInfo.layers} 层 · {strategyInfo.distinctColors} 色 · 预算 {strategyInfo.detailBudget}
               {profileMs != null && ` · ${profileMs}ms`}
             </span>
