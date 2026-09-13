@@ -20,7 +20,7 @@ export default {
 
   // Project detail page
   "detail.presetTitle": "Batch preset: choose the output type to generate",
-  "detail.fixed": "Fixed",
+  "detail.fixed": "Preset",
   "detail.smart": "✨ Smart",
   "detail.smartTitle": "Smart tuning: find the best parameters for each image within the selected preset",
   "detail.abort": "⏹ Abort",

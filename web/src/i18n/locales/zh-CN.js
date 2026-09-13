@@ -20,7 +20,7 @@ export default {
 
   // Project detail page
   "detail.presetTitle": "批量预设：选择要生成的输出类型",
-  "detail.fixed": "固定",
+  "detail.fixed": "预设",
   "detail.smart": "✨ 智能",
   "detail.smartTitle": "智能调参：在所选预设内为每张图试算最佳参数",
   "detail.abort": "⏹ 中止",

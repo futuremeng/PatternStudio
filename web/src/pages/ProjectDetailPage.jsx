@@ -328,7 +328,7 @@ export default function ProjectDetailPage() {
         </select>
         <div className="seg-control" title={t("detail.smartTitle")}>
           <button className={!batchSmart ? "active" : ""} onClick={() => { setBatchSmart(false); setBatchStatus(null); }}>{t("detail.fixed")}</button>
-          <button className={batchSmart ? "active" : ""} onClick={() => { setBatchSmart(true); setBatchStatus(null); }}>{t("detail.smart")}</button>
+          <button className={batchSmart ? "active seg-wide" : "seg-wide"} onClick={() => { setBatchSmart(true); setBatchStatus(null); }}>{t("detail.smart")}</button>
         </div>
         {batchStatus === "running" && (
           <button className="danger" onClick={onCancelBatch}>{t("detail.abort")}</button>

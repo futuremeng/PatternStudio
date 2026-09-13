@@ -20,7 +20,7 @@ export default {
 
   // Project detail page
   "detail.presetTitle": "バッチプリセット：生成する出力タイプを選択",
-  "detail.fixed": "固定",
+  "detail.fixed": "プリセット",
   "detail.smart": "✨ スマート",
   "detail.smartTitle": "スマート調整：選択したプリセット内で各画像の最適パラメータを試行",
   "detail.abort": "⏹ 中止",

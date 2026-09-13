@@ -20,7 +20,7 @@ export default {
 
   // Project detail page
   "detail.presetTitle": "Batch-Voreinstellung: zu generierender Ausgabetyp",
-  "detail.fixed": "Fest",
+  "detail.fixed": "Preset",
   "detail.smart": "✨ Smart",
   "detail.smartTitle": "Smart-Tuning: beste Parameter pro Bild innerhalb der gewählten Voreinstellung",
   "detail.abort": "⏹ Abbrechen",

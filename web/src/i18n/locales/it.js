@@ -20,7 +20,7 @@ export default {
 
   // Project detail page
   "detail.presetTitle": "Preset batch: scegli il tipo di output da generare",
-  "detail.fixed": "Fisso",
+  "detail.fixed": "Preset",
   "detail.smart": "✨ Smart",
   "detail.smartTitle": "Regolazione smart: trova i parametri migliori per ogni immagine nel preset scelto",
   "detail.abort": "⏹ Annulla",

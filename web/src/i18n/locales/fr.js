@@ -20,7 +20,7 @@ export default {
 
   // Project detail page
   "detail.presetTitle": "Préréglage par lot : choisissez le type de sortie à générer",
-  "detail.fixed": "Fixe",
+  "detail.fixed": "Préréglage",
   "detail.smart": "✨ Intelligent",
   "detail.smartTitle": "Réglage intelligent : trouve les meilleurs paramètres pour chaque image dans le préréglage choisi",
   "detail.abort": "⏹ Annuler",

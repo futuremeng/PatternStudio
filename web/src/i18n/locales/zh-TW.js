@@ -20,7 +20,7 @@ export default {
 
   // Project detail page
   "detail.presetTitle": "批次預設：選擇要輸出的類型",
-  "detail.fixed": "固定",
+  "detail.fixed": "預設",
   "detail.smart": "✨ 智慧",
   "detail.smartTitle": "智慧調參：在所選預設內為每張圖試算最佳參數",
   "detail.abort": "⏹ 中止",
