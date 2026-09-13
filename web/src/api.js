@@ -1,6 +1,7 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 import { translate } from "./i18n/index.jsx";
+import { clearProjectCache } from "./traceCache.js";
 
 const BASE = "/api/v1";
 
@@ -185,10 +186,16 @@ export async function listProjects() {
 export async function deleteProject(projectId) {
   if (isTauri()) {
     await tauriInvoke("remove_recent_project", { path: projectId });
-    return;
+  } else {
+    const res = await fetch(`${BASE}/projects/${projectId}`, { method: "DELETE" });
+    if (!res.ok && res.status !== 204) throw new Error(`Failed to delete project`);
   }
-  const res = await fetch(`${BASE}/projects/${projectId}`, { method: "DELETE" });
-  if (!res.ok && res.status !== 204) throw new Error(`Failed to delete project`);
+  // Drop this project's cached trace results once it is gone. On desktop the
+  // project id is the folder path, so without this, re-opening the same
+  // folder (e.g. after replacing its images) would serve stale results.
+  // Also drop the cached image list so thumbnails re-list the folder.
+  await clearProjectCache(projectId);
+  imageListCache.delete(projectId);
 }
 
 // Cache list_images results per folder so thumbnails don't re-list the

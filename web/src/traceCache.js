@@ -131,6 +131,41 @@ export async function getCachedTrace(imageId, params) {
 }
 
 /**
+ * Delete every cached trace result that belongs to a project.
+ *
+ * Called when a project is removed. On desktop the project id is the folder
+ * path, so re-opening the same folder (e.g. after replacing its images)
+ * would otherwise hit stale cache entries and show old trace results.
+ * Matches on the key prefix `${projectId}/` (key = imageId::params and
+ * imageId = `${projectId}/${filename}`).
+ */
+export async function clearProjectCache(projectId) {
+  if (!projectId) return;
+  const prefix = projectId + "/";
+  // In-memory fallback first (synchronous, always safe).
+  for (const key of [...memFallback.keys()]) {
+    if (key.startsWith(prefix)) memFallback.delete(key);
+  }
+  if (!idbSupported()) return;
+  try {
+    const db = await openDB();
+    const t = db.transaction([META, RESULTS], "readwrite");
+    // Scan the small meta store (not results, whose records hold the full
+    // SVG strings) and delete matching keys from both stores.
+    const metas = await reqP(t.objectStore(META).getAll());
+    for (const m of metas) {
+      if (typeof m.key === "string" && m.key.startsWith(prefix)) {
+        t.objectStore(RESULTS).delete(m.key);
+        t.objectStore(META).delete(m.key);
+      }
+    }
+    await txDone(t);
+  } catch (e) {
+    idbBroken = true;
+  }
+}
+
+/**
  * Store a trace result under (imageId, params).
  */
 export async function setCachedTrace(imageId, params, result) {
