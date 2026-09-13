@@ -560,17 +560,32 @@ export default function ImageEditorPage() {
     queueRef.current?.enqueueInteractive(params);
   }, [params, imageUrl, imageId]);
 
-  // Pre-warm the remaining presets in the background after each interactive
-  // trace settles, so switching between presets is instant. The presets are
-  // enqueued as background tasks: the queue runs them serially only while
-  // idle, drops them the moment the user interacts, and warm presets are a
-  // cheap cache read — so re-planning after every settle is harmless.
+  // Pre-warm in the background after each interactive trace settles: the
+  // system presets plus any user-saved configs whose trace is not cached yet
+  // (so selecting them is instant and their thumbnails fill in without a
+  // reload). Tasks run serially only while idle and are dropped the moment
+  // the user interacts. `planned` (per image + settle) stops the configs
+  // re-renders caused by our own thumbnail updates from re-adding
+  // already-completed tasks; a new settle resets it, so tasks dropped by user
+  // interaction are retried later.
+  const prewarmPlanRef = useRef({ imageId: null, result: null, sigs: new Set() });
   useEffect(() => {
     if (!result || busy) return;
-    for (const key of PREWARM_ORDER) {
-      queueRef.current?.enqueueBackground({ ...DEFAULT_PARAMS, ...presetFullParams(key) });
+    if (prewarmPlanRef.current.imageId !== imageId || prewarmPlanRef.current.result !== result) {
+      prewarmPlanRef.current = { imageId, result, sigs: new Set() };
     }
-  }, [result, busy, imageId]);
+    const sigs = prewarmPlanRef.current.sigs;
+    const plan = (p) => {
+      const sig = stableStringify(p);
+      if (sigs.has(sig)) return;
+      sigs.add(sig);
+      queueRef.current?.enqueueBackground(p);
+    };
+    for (const key of PREWARM_ORDER) plan({ ...DEFAULT_PARAMS, ...presetFullParams(key) });
+    for (const c of configs) {
+      if (c.saved && !c.result) plan({ ...DEFAULT_PARAMS, ...c.params });
+    }
+  }, [result, busy, imageId, configs]);
 
   const onParamsChange = useCallback((updater) => {
     setParams(updater);
