@@ -47,6 +47,13 @@ const IconFitWidth = () => (
     <path d="M10 8l-4 4 4 4M14 8l4 4-4 4" />
   </svg>
 );
+const IconCompare = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+    <rect x="11" y="4" width="2" height="16" rx="1" />
+    <path d="M8 12L3 7v10z" />
+    <path d="M16 12l5-5v10z" />
+  </svg>
+);
 const IconZoomIn = () => (
   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <path d="M12 5v14M5 12h14" />
@@ -640,10 +647,6 @@ export default function ImageEditorPage() {
         title={filename}
         onBack={() => navigate(`/project/${encodeURIComponent(projectId)}`)}
       >
-        <div className="seg-control">
-          <button className={compareMode === "side" ? "active" : ""} onClick={() => setCompareMode("side")}>对照</button>
-          <button className={compareMode === "overlay" ? "active" : ""} onClick={() => setCompareMode("overlay")}>叠加</button>
-        </div>
         <button onClick={onDownload} disabled={!result?.svg}>下载 SVG</button>
         {result?.width > 0 && (
           <span className="page-meta">{result.width} x {result.height} px</span>
@@ -731,8 +734,8 @@ export default function ImageEditorPage() {
             <button className={tool === "select" ? "active" : ""} onClick={() => setTool(tool === "select" ? "none" : "select")} title={tool === "select" ? "Disable Selection" : "Select Patches"} aria-label={tool === "select" ? "Disable Selection" : "Select Patches"}>
               <IconSelect />
             </button>
-            <button onClick={fitWidth} title="全宽" aria-label="全宽">
-              <IconFitWidth />
+            <button onClick={() => setCompareMode(compareMode === "side" ? "overlay" : "side")} title={compareMode === "side" ? "切换为叠加" : "切换为对照"} aria-label="切换对照模式">
+              <IconCompare />
             </button>
             <button onClick={zoomIn} title="放大" aria-label="放大">
               <IconZoomIn />
