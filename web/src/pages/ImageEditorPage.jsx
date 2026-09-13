@@ -135,6 +135,56 @@ export default function ImageEditorPage() {
   const zoomOut = useCallback(() => setZoom(z => Math.max(0.1, z / 1.25)), []);
   const fitScreen = useCallback(() => setZoom(1), []);
 
+  // Ctrl/Cmd + wheel zoom on the preview viewport; plain wheel scrolls natively.
+  const panDragRef = useRef(null); // { startX, startY, scrollLeft, scrollTop }
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      if (!e.ctrlKey && !e.metaKey) return; // let plain wheel scroll
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      setZoom(z => Math.min(8, Math.max(0.1, z * factor)));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+
+    // Drag-to-pan when zoomed in
+    const onPointerDown = (e) => {
+      if (e.button !== 0) return;
+      if (el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight) return;
+      panDragRef.current = {
+        startX: e.clientX, startY: e.clientY,
+        scrollLeft: el.scrollLeft, scrollTop: el.scrollTop,
+      };
+      el.style.cursor = "grabbing";
+      el.setPointerCapture(e.pointerId);
+    };
+    const onPointerMove = (e) => {
+      const d = panDragRef.current;
+      if (!d) return;
+      el.scrollLeft = d.scrollLeft - (e.clientX - d.startX);
+      el.scrollTop = d.scrollTop - (e.clientY - d.startY);
+    };
+    const onPointerUp = (e) => {
+      if (!panDragRef.current) return;
+      panDragRef.current = null;
+      el.style.cursor = "";
+      el.releasePointerCapture(e.pointerId);
+    };
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointermove", onPointerMove);
+    el.addEventListener("pointerup", onPointerUp);
+    el.addEventListener("pointercancel", onPointerUp);
+
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", onPointerUp);
+      el.removeEventListener("pointercancel", onPointerUp);
+    };
+  }, []);
+
   // Fit metrics derived from the image's natural size and the viewport.
   // Fall back to the source image's natural size so the layout (and the
   // vector placeholder) is stable before the first trace result arrives.
