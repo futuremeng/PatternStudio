@@ -251,6 +251,20 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
       // grid. A tile is 20 user units, i.e. 20 * scale px on screen, which
       // keeps a constant number of tiles across the artboard at any zoom.
       rootEl.style.setProperty("--adv-s", `${20 * scale}px`);
+      // The library appends #selectorParentGroup to #svgroot (a sibling of
+      // #svgcontent), so it does NOT inherit the viewBox scaling applied to
+      // #svgcontent. Without a compensating transform, selection rectangles
+      // are drawn in unscaled user-space coordinates and misalign with the
+      // visually-scaled shapes. Apply the same affine mapping the viewBox
+      // performs: translate the origin, then scale.
+      const { x: vx, y: vy } = dimsRef.current;
+      const selGroup = rootEl.querySelector("#selectorParentGroup");
+      if (selGroup) {
+        selGroup.setAttribute(
+          "transform",
+          `translate(${-vx * scale}, ${-vy * scale}) scale(${scale})`
+        );
+      }
     }
   }, [containerSize, zoom, svgString, dimsVersion]);
 
