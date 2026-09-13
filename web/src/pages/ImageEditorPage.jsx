@@ -89,13 +89,20 @@ export default function ImageEditorPage() {
   // --- Preview view controls: maximize, zoom, fit ---
   const [maximized, setMaximized] = useState(false);
   const [zoom, setZoom] = useState(1);
-  const [tool, setTool] = useState("select");
+  const [tool, setTool] = useState("none");
   const viewportRef = useRef(null);
   const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 });
   // Natural size of the source image (known as soon as it loads, before the
   // first trace finishes). Used to size the vector placeholder and enable
   // zoom/fit controls from the very first paint.
   const [srcSize, setSrcSize] = useState({ w: 0, h: 0 });
+
+  // --- Patch selection & dragging ---
+  const svgContainerRef = useRef(null);
+  const pathTransformsRef = useRef(new Map()); // pathIdx → { dx, dy } in SVG coords
+  const dragRef = useRef(null); // { idx, startClientX, startClientY, origDx, origDy }
+  const justDraggedRef = useRef(false);
+  const selectedPathIdxRef = useRef(null);
 
   // Track the visible preview size so we can fit the image at zoom = 1 and
   // scale it precisely for the zoom / fit-width / fit controls. Measured in a
@@ -211,6 +218,161 @@ export default function ImageEditorPage() {
       window.removeEventListener("pointerup", onUp);
     };
   }, [updateOverlayPos]);
+
+  // --- Patch selection & dragging helpers ---
+
+  const getSvgAndPaths = useCallback(() => {
+    const container = svgContainerRef.current;
+    if (!container) return null;
+    const svg = container.querySelector("svg");
+    if (!svg) return null;
+    return { svg, paths: Array.from(svg.querySelectorAll("path")) };
+  }, []);
+
+  const clearPatchSelection = useCallback(() => {
+    selectedPathIdxRef.current = null;
+    const res = getSvgAndPaths();
+    if (!res) return;
+    const { svg, paths } = res;
+    paths.forEach(p => {
+      p.style.stroke = "";
+      p.style.strokeWidth = "";
+      p.style.cursor = "";
+    });
+    svg.querySelectorAll(".patch-cp").forEach(el => el.remove());
+  }, [getSvgAndPaths]);
+
+  const highlightPath = useCallback((idx) => {
+    const res = getSvgAndPaths();
+    if (!res) return;
+    res.paths.forEach((p, i) => {
+      if (i === idx) {
+        p.style.stroke = "#6c5ce7";
+        p.style.strokeWidth = "2";
+        p.style.cursor = "move";
+      } else {
+        p.style.stroke = "";
+        p.style.strokeWidth = "";
+        p.style.cursor = "pointer";
+      }
+    });
+  }, [getSvgAndPaths]);
+
+  const renderControlPoints = useCallback((idx) => {
+    const res = getSvgAndPaths();
+    if (!res) return;
+    const { svg, paths } = res;
+    svg.querySelectorAll(".patch-cp").forEach(el => el.remove());
+    if (idx == null || !paths[idx]) return;
+    const path = paths[idx];
+    const t = pathTransformsRef.current.get(idx) || { dx: 0, dy: 0 };
+    const bb = path.getBBox();
+    const r = Math.max(3, Math.min(bb.width, bb.height) * 0.015);
+    const mx = bb.x + bb.width / 2 + t.dx;
+    const my = bb.y + bb.height / 2 + t.dy;
+    const pts = [
+      [bb.x + t.dx, bb.y + t.dy], [mx, bb.y + t.dy],
+      [bb.x + bb.width + t.dx, bb.y + t.dy], [bb.x + bb.width + t.dx, my],
+      [bb.x + bb.width + t.dx, bb.y + bb.height + t.dy], [mx, bb.y + bb.height + t.dy],
+      [bb.x + t.dx, bb.y + bb.height + t.dy], [bb.x + t.dx, my],
+    ];
+    for (const [px, py] of pts) {
+      const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      c.setAttribute("cx", px); c.setAttribute("cy", py); c.setAttribute("r", r);
+      c.setAttribute("fill", "#6c5ce7"); c.setAttribute("stroke", "#fff");
+      c.setAttribute("stroke-width", (r * 0.35).toFixed(1));
+      c.classList.add("patch-cp"); c.style.pointerEvents = "none";
+      svg.appendChild(c);
+    }
+  }, [getSvgAndPaths]);
+
+  // Reset patch selection when the SVG changes (new trace result).
+  useEffect(() => {
+    selectedPathIdxRef.current = null;
+    pathTransformsRef.current.clear();
+  }, [result?.svg]);
+
+  // Attach pointer interactions to SVG paths for patch selection & dragging.
+  useEffect(() => {
+    if (tool !== "select" || !result?.svg) return;
+    const res = getSvgAndPaths();
+    if (!res) return;
+    const { svg, paths } = res;
+    if (!paths.length) return;
+
+    // Re-apply existing transforms & highlight (e.g. after compare-mode switch)
+    pathTransformsRef.current.forEach((t, idx) => {
+      if (paths[idx]) paths[idx].setAttribute("transform", `translate(${t.dx}, ${t.dy})`);
+    });
+    if (selectedPathIdxRef.current != null && paths[selectedPathIdxRef.current]) {
+      highlightPath(selectedPathIdxRef.current);
+      renderControlPoints(selectedPathIdxRef.current);
+    }
+
+    const onPathPointerDown = (e) => {
+      if (e.button !== 0) return;
+      const idx = paths.indexOf(e.target);
+      if (idx === -1) return;
+      e.preventDefault();
+      e.stopPropagation();
+      selectedPathIdxRef.current = idx;
+      highlightPath(idx);
+      renderControlPoints(idx);
+      const t = pathTransformsRef.current.get(idx) || { dx: 0, dy: 0 };
+      dragRef.current = { idx, sx: e.clientX, sy: e.clientY, ox: t.dx, oy: t.dy };
+
+      const onMove = (me) => {
+        const d = dragRef.current;
+        if (!d) return;
+        const rect = svg.getBoundingClientRect();
+        const vb = svg.viewBox.baseVal;
+        if (!vb || vb.width === 0 || rect.width === 0) return;
+        const dx = d.ox + (me.clientX - d.sx) * (vb.width / rect.width);
+        const dy = d.oy + (me.clientY - d.sy) * (vb.height / rect.height);
+        pathTransformsRef.current.set(d.idx, { dx, dy });
+        paths[d.idx].setAttribute("transform", `translate(${dx}, ${dy})`);
+        renderControlPoints(d.idx);
+      };
+      const onUp = () => {
+        if (dragRef.current) {
+          justDraggedRef.current = true;
+          setTimeout(() => { justDraggedRef.current = false; }, 0);
+        }
+        dragRef.current = null;
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    };
+
+    const onSvgClick = (e) => {
+      if (justDraggedRef.current) return;
+      if (e.target === svg) clearPatchSelection();
+    };
+    const onKeyDown = (e) => { if (e.key === "Escape") clearPatchSelection(); };
+
+    paths.forEach(p => {
+      p.style.pointerEvents = "auto";
+      p.style.cursor = "pointer";
+      p.style.touchAction = "none";
+      p.addEventListener("pointerdown", onPathPointerDown);
+    });
+    svg.addEventListener("click", onSvgClick);
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      paths.forEach(p => {
+        p.style.pointerEvents = "";
+        p.style.cursor = "";
+        p.style.touchAction = "";
+        p.removeEventListener("pointerdown", onPathPointerDown);
+      });
+      svg.removeEventListener("click", onSvgClick);
+      window.removeEventListener("keydown", onKeyDown);
+      dragRef.current = null;
+    };
+  }, [tool, result?.svg, compareMode, getSvgAndPaths, highlightPath, renderControlPoints, clearPatchSelection]);
 
   /**
    * Write a trace result back to any config whose params match, so the
@@ -512,7 +674,7 @@ export default function ImageEditorPage() {
                     <span className="label">矢量</span>
                     {busy && result?.svg && <span className="busy-badge">处理中...</span>}
                     {result?.svg ? (
-                      <div className="svg-frame" style={boxStyle} dangerouslySetInnerHTML={{ __html: result.svg }} />
+                      <div className={`svg-frame${tool === "select" ? " select-mode" : ""}`} ref={svgContainerRef} style={boxStyle} dangerouslySetInnerHTML={{ __html: result.svg }} />
                     ) : (
                       <div className="placeholder" style={boxStyle}>{busy ? "处理中..." : "点击下方配置开始"}</div>
                     )}
@@ -534,7 +696,7 @@ export default function ImageEditorPage() {
                     >
                       <img src={imageUrl} alt="original" />
                       <div className="overlay-top" style={{ clipPath: `inset(0 0 0 ${overlayPos}%)` }}>
-                        <div className="overlay-svg" dangerouslySetInnerHTML={{ __html: result.svg }} />
+                        <div className={`overlay-svg${tool === "select" ? " select-mode" : ""}`} ref={svgContainerRef} dangerouslySetInnerHTML={{ __html: result.svg }} />
                       </div>
                       <span className="overlay-tag overlay-tag-left">原图</span>
                       <span className="overlay-tag overlay-tag-right">矢量</span>
@@ -551,7 +713,7 @@ export default function ImageEditorPage() {
           </div>
 
           <div className="preview-controls">
-            <button className={tool === "select" ? "active" : ""} onClick={() => setTool("select")} title="选中" aria-label="选中">
+            <button className={tool === "select" ? "active" : ""} onClick={() => setTool(tool === "select" ? "none" : "select")} title={tool === "select" ? "Disable Selection" : "Select Patches"} aria-label={tool === "select" ? "Disable Selection" : "Select Patches"}>
               <IconSelect />
             </button>
             <button onClick={fitWidth} title="全宽" aria-label="全宽">
