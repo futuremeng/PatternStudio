@@ -1,6 +1,22 @@
 import React, { useState } from "react";
-import { downloadSvg } from "../api.js";
+import JSZip from "jszip";
+import { downloadSvg, downloadBlob } from "../api.js";
 import { useI18n } from "../i18n/index.jsx";
+
+// Rebuild a layer's preview SVG as a standalone file with explicit width/height.
+function layerToStandaloneSvg(previewSvg) {
+  const innerMatch = previewSvg.match(/<svg[^>]*>([\s\S]*)<\/svg>/);
+  const inner = innerMatch ? innerMatch[1] : "";
+  const vbMatch = previewSvg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
+  const w = vbMatch ? vbMatch[1] : "100";
+  const h = vbMatch ? vbMatch[2] : "100";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">${inner}</svg>\n`;
+}
+
+// Make a layer name safe to use as a file name inside the export ZIP.
+function sanitizeFilename(name) {
+  return name.replace(/[\\/:*?"<>|]/g, "_").trim() || "layer";
+}
 
 function LayerCard({ layer, selected, onToggle }) {
   const { t } = useI18n();
@@ -41,9 +57,10 @@ function LayerCard({ layer, selected, onToggle }) {
   );
 }
 
-export default function LayerPanel({ layers, strategyInfo, profileMs }) {
+export default function LayerPanel({ layers, strategyInfo, profileMs, onSaveAsLayer, canSaveAsLayer }) {
   const { t } = useI18n();
   const [selected, setSelected] = useState(new Set());
+  const [exporting, setExporting] = useState(false);
 
   const STRATEGY_LABELS = {
     none: t("layer.strategyNone"),
@@ -73,22 +90,27 @@ export default function LayerPanel({ layers, strategyInfo, profileMs }) {
   const selectAll = () => setSelected(new Set(layers.map(l => l.name)));
   const selectNone = () => setSelected(new Set());
 
-  const exportSelected = () => {
-    if (selected.size === 0) return;
-    // Build SVG from selected layers' preview SVGs
+  // Export the selected layers: a single layer downloads its own .svg directly,
+  // while multiple layers are bundled (each as its own .svg) into one ZIP.
+  const exportSelected = async () => {
+    if (selected.size === 0 || exporting) return;
     const selectedLayers = layers.filter(l => selected.has(l.name));
-    const svgParts = selectedLayers.map(l => l.previewSvg);
-    // Combine into a single SVG (simplified: just concatenate the path elements)
-    const combined = svgParts.map(s => {
-      // Extract content between <svg> and </svg>
-      const match = s.match(/<svg[^>]*>(.*)<\/svg>/s);
-      return match ? match[1] : "";
-    }).join("\n");
-    const width = selectedLayers[0]?.previewSvg?.match(/viewBox="0 0 (\d+) (\d+)"/);
-    const w = width ? width[1] : "100";
-    const h = width ? width[2] : "100";
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${w}" width="${w}" height="${h}">${combined}</svg>`;
-    downloadSvg(svg, "selected-layers.svg");
+    setExporting(true);
+    try {
+      if (selectedLayers.length === 1) {
+        const layer = selectedLayers[0];
+        await downloadSvg(layerToStandaloneSvg(layer.previewSvg), `${sanitizeFilename(layer.name)}.svg`);
+        return;
+      }
+      const zip = new JSZip();
+      for (const layer of selectedLayers) {
+        zip.file(`${sanitizeFilename(layer.name)}.svg`, layerToStandaloneSvg(layer.previewSvg));
+      }
+      const blob = await zip.generateAsync({ type: "blob" });
+      await downloadBlob(blob, "selected-layers.zip");
+    } finally {
+      setExporting(false);
+    }
   };
 
   if (layers.length === 0) {
@@ -104,6 +126,16 @@ export default function LayerPanel({ layers, strategyInfo, profileMs }) {
           <button onClick={selectNone} style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}>{t("layer.clear")}</button>
         </div>
       </div>
+
+      {canSaveAsLayer && (
+        <button
+          className="save-layer-btn"
+          onClick={onSaveAsLayer}
+          title={t("layer.saveAsLayerHint")}
+        >
+          {t("layer.saveAsLayer")}
+        </button>
+      )}
 
       {strategyReason && (
         <div className="strategy-note">
@@ -135,7 +167,7 @@ export default function LayerPanel({ layers, strategyInfo, profileMs }) {
       <button
         className="primary"
         onClick={exportSelected}
-        disabled={selected.size === 0}
+        disabled={selected.size === 0 || exporting}
       >
         {t("layer.exportSelected", { n: selected.size })}
       </button>

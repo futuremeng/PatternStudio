@@ -187,4 +187,7 @@ export default {
   "layer.metaTitle": "レイヤー数 · 検出された色数 · 詳細予算 (0-100、簡易化/精度/しきい値などのパラメータから総合計算)",
   "layer.meta": "{layers} レイヤー · {colors} 色 · 予算 {budget}",
   "layer.exportSelected": "選択したレイヤーをエクスポート ({n})",
+  "layer.editedLayer": "編集レイヤー {n}",
+  "layer.saveAsLayer": "新しいレイヤーとして保存",
+  "layer.saveAsLayerHint": "現在の編集済みキャンバス（移動/削除を含む）を新しいエクスポート可能なレイヤーとして保存",
 };

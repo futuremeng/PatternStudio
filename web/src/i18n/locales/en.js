@@ -187,4 +187,7 @@ export default {
   "layer.metaTitle": "Layers · detected colors · detail budget (0-100, computed from simplify/precision/threshold params)",
   "layer.meta": "{layers} layers · {colors} colors · budget {budget}",
   "layer.exportSelected": "Export selected layers ({n})",
+  "layer.editedLayer": "Edited layer {n}",
+  "layer.saveAsLayer": "Save as new layer",
+  "layer.saveAsLayerHint": "Snapshot the current edited canvas (moves/deletes included) as a new exportable layer",
 };

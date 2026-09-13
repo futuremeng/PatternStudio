@@ -588,6 +588,13 @@ body {
   width: 12px; height: 12px; border-radius: 50%;
   border: 1px solid var(--border); flex-shrink: 0;
 }
+.save-layer-btn {
+  width: 100%;
+  border-style: dashed;
+  color: var(--accent2);
+  font-size: 0.8rem;
+}
+.save-layer-btn:hover { background: rgba(108, 92, 231, 0.08); }
 
 button {
   padding: 0.45rem 0.9rem; border: 1px solid var(--border);

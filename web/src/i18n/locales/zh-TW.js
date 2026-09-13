@@ -187,4 +187,7 @@ export default {
   "layer.metaTitle": "層數 · 檢測到的顏色數 · 細節預算(0-100，由簡化/精度/閾值等參數綜合計算)",
   "layer.meta": "{layers} 層 · {colors} 色 · 預算 {budget}",
   "layer.exportSelected": "導出選中圖層 ({n})",
+  "layer.editedLayer": "編輯圖層 {n}",
+  "layer.saveAsLayer": "儲存為新圖層",
+  "layer.saveAsLayerHint": "將目前編輯後的畫布（含移動/刪除）存為一個可匯出的新圖層",
 };

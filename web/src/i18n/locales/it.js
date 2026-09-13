@@ -187,4 +187,7 @@ export default {
   "layer.metaTitle": "Livelli · colori rilevati · budget di dettaglio (0-100, calcolato dai parametri di semplificazione/precisione/soglie)",
   "layer.meta": "{layers} livelli · {colors} colori · budget {budget}",
   "layer.exportSelected": "Esporta livelli selezionati ({n})",
+  "layer.editedLayer": "Livello modificato {n}",
+  "layer.saveAsLayer": "Salva come nuovo livello",
+  "layer.saveAsLayerHint": "Salva la tela corrente modificata (con spostamenti/eliminazioni) come nuovo livello esportabile",
 };

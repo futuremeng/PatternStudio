@@ -741,3 +741,18 @@ pub fn save_svg(content: String, suggested_name: String) -> Result<String, Strin
         Ok(String::new())
     }
 }
+
+/// Save arbitrary binary bytes (e.g. a ZIP of exported layer SVGs) to a
+/// user-chosen path. Returns the saved path, or an empty string if cancelled.
+#[tauri::command]
+pub fn save_bytes(data: Vec<u8>, suggested_name: String) -> Result<String, String> {
+    let path = rfd::FileDialog::new()
+        .set_file_name(&suggested_name)
+        .save_file();
+    if let Some(p) = path {
+        std::fs::write(&p, data).map_err(|e| e.to_string())?;
+        Ok(p.to_string_lossy().to_string())
+    } else {
+        Ok(String::new())
+    }
+}

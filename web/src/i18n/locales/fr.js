@@ -187,4 +187,7 @@ export default {
   "layer.metaTitle": "Calques · couleurs détectées · budget de détail (0-100, calculé à partir des paramètres de simplification/précision/seuils)",
   "layer.meta": "{layers} calques · {colors} couleurs · budget {budget}",
   "layer.exportSelected": "Exporter les calques sélectionnés ({n})",
+  "layer.editedLayer": "Calque modifié {n}",
+  "layer.saveAsLayer": "Enregistrer en nouveau calque",
+  "layer.saveAsLayerHint": "Capturer le canevas actuel modifié (déplacements/suppressions inclus) en nouveau calque exportable",
 };

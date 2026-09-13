@@ -187,4 +187,7 @@ export default {
   "layer.metaTitle": "Ebenen · erkannte Farben · Detail-Budget (0-100, berechnet aus Vereinfachung/Präzision/Schwellwerten)",
   "layer.meta": "{layers} Ebenen · {colors} Farben · Budget {budget}",
   "layer.exportSelected": "Ausgewählte Ebenen exportieren ({n})",
+  "layer.editedLayer": "Bearbeitete Ebene {n}",
+  "layer.saveAsLayer": "Als neue Ebene speichern",
+  "layer.saveAsLayerHint": "Aktuelle bearbeitete Leinwand (inkl. Verschiebungen/Löschungen) als neue exportierbare Ebene speichern",
 };

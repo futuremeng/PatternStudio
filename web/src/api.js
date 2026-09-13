@@ -327,6 +327,24 @@ export async function downloadSvg(svg, name) {
   URL.revokeObjectURL(a.href);
 }
 
+/**
+ * Download arbitrary binary bytes (e.g. a ZIP of exported layer SVGs).
+ * In the Tauri desktop app this opens a native save dialog via `save_bytes`;
+ * in the browser it triggers a regular blob download.
+ */
+export async function downloadBlob(blob, name) {
+  if (isTauri()) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    await tauriInvoke("save_bytes", { data: Array.from(bytes), suggestedName: name });
+    return;
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 /** Base trace params; presets and user tweaks are merged on top of this. */
 export const DEFAULT_PARAMS = {
   preset: "poster",

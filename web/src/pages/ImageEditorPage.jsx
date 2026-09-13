@@ -17,6 +17,52 @@ const MAX_USER_CONFIGS = 12;
 // in priority order. The currently-active preset is already cached and skipped.
 const PREWARM_ORDER = ["color", "lineArt", "bw", "gradient", "lowPoly"];
 
+// Serialize the current (edited) preview SVG into a standalone SVG whose single
+// <g> holds every path exactly as it is now — moves applied, deleted patches
+// removed, and selection highlights / control points / marquee stripped out.
+// Used to snapshot the user's edits as a new, exportable layer.
+function serializeEditedSvg(svg) {
+  const vb = svg.viewBox.baseVal;
+  const W = vb.width;
+  const H = vb.height;
+  const serializer = new XMLSerializer();
+  const parts = [];
+  svg.querySelectorAll("path").forEach((p) => {
+    const clone = p.cloneNode(true);
+    clone.removeAttribute("style"); // drop inline selection highlight
+    // XMLSerializer re-declares the SVG namespace on each element; the root
+    // <svg> already declares it, so strip the redundant attribute for a clean file.
+    const str = serializer
+      .serializeToString(clone)
+      .replace(/ xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g, "");
+    parts.push("    " + str);
+  });
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">\n` +
+    `  <g id="edited-layer" data-role="edited">\n` +
+    parts.join("\n") +
+    `\n  </g>\n</svg>\n`
+  );
+}
+
+// Most common non-"none" fill color among a set of path elements.
+function dominantFill(paths) {
+  const counts = {};
+  for (const p of paths) {
+    const f = p.getAttribute("fill");
+    if (f && f !== "none") counts[f] = (counts[f] || 0) + 1;
+  }
+  let best = null;
+  let bestN = 0;
+  for (const [c, n] of Object.entries(counts)) {
+    if (n > bestN) {
+      best = c;
+      bestN = n;
+    }
+  }
+  return best || "#8b92a5";
+}
+
 // The last selected system preset, persisted so that any image opened from
 // the list (same or different project) starts with it. The desktop app
 // embeds this same frontend, so it shares the choice.
@@ -95,6 +141,9 @@ export default function ImageEditorPage() {
     return key ? presetFullParams(key) : DEFAULT_PARAMS;
   });
   const [result, setResult] = useState(null);
+  // Layers the user has snapshotted from the edited preview (see saveAsLayer).
+  // Kept separate from result.layers so a re-trace can reset them cleanly.
+  const [savedLayers, setSavedLayers] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [configs, setConfigs] = useState(() => buildDefaultConfigs(presetLabel));
@@ -314,6 +363,30 @@ export default function ImageEditorPage() {
     if (!svg) return null;
     return { svg, paths: Array.from(svg.querySelectorAll("path")) };
   }, []);
+
+  // Snapshot the current edited preview as a new, exportable layer.
+  const saveAsLayer = useCallback(() => {
+    const res = getSvgAndPaths();
+    if (!res) return;
+    const svgStr = serializeEditedSvg(res.svg);
+    setSavedLayers((prev) => [
+      ...prev,
+      {
+        name: t("layer.editedLayer", { n: prev.length + 1 }),
+        role: "edited",
+        shapeCount: res.paths.length,
+        dominantColor: dominantFill(res.paths),
+        previewSvg: svgStr,
+        profile: null,
+      },
+    ]);
+  }, [getSvgAndPaths, t]);
+
+  // A new trace (or cached/preset result) replaces the working canvas, so any
+  // previously-saved edited layers no longer apply — clear them.
+  useEffect(() => {
+    setSavedLayers([]);
+  }, [result]);
 
   const clearPatchSelection = useCallback(() => {
     selectedPathIdxsRef.current = new Set();
@@ -993,7 +1066,13 @@ export default function ImageEditorPage() {
         </div>
 
         <aside className="editor-layers">
-          <LayerPanel layers={result?.layers || []} strategyInfo={result?.strategyInfo} profileMs={result?.profileMs} />
+          <LayerPanel
+            layers={[...(result?.layers || []), ...savedLayers]}
+            strategyInfo={result?.strategyInfo}
+            profileMs={result?.profileMs}
+            onSaveAsLayer={saveAsLayer}
+            canSaveAsLayer={!!result?.svg}
+          />
         </aside>
       </div>
 

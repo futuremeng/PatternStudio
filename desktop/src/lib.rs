@@ -9,8 +9,8 @@ pub mod commands;
 pub fn run() {
     use commands::{
         add_recent_project, batch_trace, cancel_batch_trace, generate_pattern, list_images,
-        list_patterns, open_folder, read_image, recent_projects, remove_recent_project, save_svg,
-        smart_file, trace_bytes, trace_file,
+        list_patterns, open_folder, read_image, recent_projects, remove_recent_project, save_bytes,
+        save_svg, smart_file, trace_bytes, trace_file,
     };
 
     tauri::Builder::default()
@@ -26,6 +26,7 @@ pub fn run() {
             generate_pattern,
             list_patterns,
             save_svg,
+            save_bytes,
             recent_projects,
             add_recent_project,
             remove_recent_project
