@@ -422,22 +422,16 @@ body {
   text-align: center;
   outline: none;
 }
-/* Thumbnail kind tags: 预设 / 已保存 / 临时, overlaid on the mini preview.
-   Positioned at the bottom-left corner of the 64px preview (thumb padding 0.4rem). */
-.thumb-tag {
-  position: absolute;
-  top: calc(0.4rem + 64px - 15px);
-  left: 0.4rem;
-  padding: 0 4px;
-  border-radius: 3px;
-  font-size: 0.6rem;
-  line-height: 15px;
-  white-space: nowrap;
+/* Top-left kind icon for system presets (user configs use the save button
+   in the same spot: ✚ = temp, ✓ = saved). */
+.config-kind-icon {
+  position: absolute; top: -6px; left: -6px;
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text2); font-size: 0.7rem; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
   pointer-events: none;
 }
-.thumb-tag-preset { background: rgba(15, 17, 23, 0.55); color: var(--text); }
-.thumb-tag-saved { background: var(--success); color: #fff; }
-.thumb-tag-temp { background: rgba(15, 17, 23, 0.55); color: var(--warning); }
 /* Preview border hints: saved = solid green, temp = dashed */
 .mode-thumb.kind-saved .svg-mini { border-color: var(--success); }
 .mode-thumb.kind-temp .svg-mini { border-style: dashed; }

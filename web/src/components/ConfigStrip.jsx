@@ -65,7 +65,6 @@ export default function ConfigStrip({
             ) : (
               <div className="svg-mini placeholder-mini">{config.label}</div>
             )}
-            <span className={`thumb-tag thumb-tag-${kind}`}>{KIND_META[kind]}</span>
             {editingId === config.id ? (
               <input
                 className="mode-label-input"
@@ -91,7 +90,9 @@ export default function ConfigStrip({
                 {config.label}
               </span>
             )}
-            {!config.isDefault && (
+            {config.isDefault ? (
+              <span className="config-kind-icon" title="系统预设">⚙</span>
+            ) : (
               <>
                 <button
                   className={`config-save${config.saved ? " saved" : ""}`}
