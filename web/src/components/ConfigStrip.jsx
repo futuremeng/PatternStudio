@@ -101,13 +101,15 @@ export default function ConfigStrip({
                 >
                   {config.saved ? "✓" : "✚"}
                 </button>
-                <button
-                  className="config-delete"
-                  title="删除此配置"
-                  onClick={e => { e.stopPropagation(); onConfigDelete(config.id); }}
-                >
-                  ×
-                </button>
+                {!config.saved && (
+                  <button
+                    className="config-delete"
+                    title="删除此配置"
+                    onClick={e => { e.stopPropagation(); onConfigDelete(config.id); }}
+                  >
+                    ×
+                  </button>
+                )}
               </>
             )}
           </div>
