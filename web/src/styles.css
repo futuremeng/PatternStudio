@@ -357,6 +357,11 @@ body {
 .editor-page.maximized .editor-sidebar,
 .editor-page.maximized .editor-layers { display: none; }
 
+/* Advanced edit: hide the parameter panel + config strip so the canvas
+   fills the window; the layer panel stays visible. */
+.editor-page.advanced .editor-sidebar,
+.editor-page.advanced .mode-strip { display: none; }
+
 /* Square icon button used in the header (maximize / restore). */
 .icon-btn {
   width: 32px; height: 32px; padding: 0;
@@ -622,5 +627,69 @@ button.danger { color: var(--error); }
 .back-btn {
   background: none; border: none; color: var(--text2);
   font-size: 1rem; cursor: pointer; padding: 0.3rem 0.5rem;
+}
+
+/* --- Advanced SVG Editor --- */
+.advanced-editor {
+  display: flex; flex-direction: column;
+  width: 100%; height: 100%;
+  background: var(--surface);
+}
+.advanced-toolbar {
+  display: flex; align-items: center; gap: 0.3rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.advanced-toolbar .toolbar-group {
+  display: flex; align-items: center; gap: 0.2rem;
+}
+.advanced-toolbar .toolbar-sep {
+  width: 1px; height: 20px; background: var(--border); margin: 0 0.3rem;
+}
+.advanced-toolbar .toolbar-spacer { flex: 1; }
+.advanced-toolbar button {
+  width: 32px; height: 32px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: 6px;
+  background: none; color: var(--text); cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.advanced-toolbar button:hover { background: var(--surface); border-color: var(--border); }
+.advanced-toolbar button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.advanced-toolbar button:disabled { opacity: 0.35; cursor: not-allowed; }
+.advanced-toolbar button.danger:hover { background: rgba(255, 107, 107, 0.15); border-color: var(--error); color: var(--error); }
+.advanced-toolbar button.complete { background: var(--success); border-color: var(--success); color: #fff; }
+.advanced-toolbar button.complete:hover { background: #00d2a0; }
+/* The close button keeps a visible frame at all times (like the other
+   outlined buttons); it turns red on hover. */
+.advanced-toolbar button.cancel { color: var(--text2); border-color: var(--border); }
+.advanced-toolbar button.cancel:hover { background: rgba(255, 107, 107, 0.1); border-color: var(--error); color: var(--error); }
+/* The canvas element is sized by the editor (fit * zoom); center it when it
+   is smaller than the container, and let the container scroll when zoomed in. */
+.advanced-canvas-container {
+  flex: 1; overflow: auto; position: relative;
+  display: flex;
+  background: #ffffff;
+  background-image:
+    linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
+    linear-gradient(-45deg, #f0f0f0 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #f0f0f0 75%),
+    linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+}
+.advanced-canvas-container svg {
+  display: block; margin: auto; flex: none;
+}
+/* Override svgcanvas default selection colors to match our theme */
+.advanced-canvas-container .selection-box,
+.advanced-canvas-container .selection-outline {
+  stroke: var(--accent) !important;
+}
+.advanced-canvas-container .resize-box {
+  fill: var(--accent) !important;
+  stroke: #fff !important;
 }
 .back-btn:hover { color: var(--text); }

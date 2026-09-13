@@ -8,6 +8,7 @@ import ParameterPanel from "../components/ParameterPanel.jsx";
 import LayerPanel from "../components/LayerPanel.jsx";
 import ConfigStrip from "../components/ConfigStrip.jsx";
 import AppHeader from "../components/AppHeader.jsx";
+import AdvancedSvgEditor from "../components/AdvancedSvgEditor.jsx";
 import { useI18n } from "../i18n/index.jsx";
 
 // Wait this long after a trace settles before snapshotting a user config (ms)
@@ -130,6 +131,11 @@ const IconFit = () => (
     <rect x="4" y="4" width="16" height="16" rx="2" />
   </svg>
 );
+const IconAdvanced = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+  </svg>
+);
 
 export default function ImageEditorPage() {
   const { t, presetLabel, locale } = useI18n();
@@ -169,8 +175,17 @@ export default function ImageEditorPage() {
   const [zoom, setZoom] = useState(1);
   const [actualSize, setActualSize] = useState(false);
   const [tool, setTool] = useState("none");
+  const [advancedMode, setAdvancedMode] = useState(false);
   const viewportRef = useRef(null);
   const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 });
+  // Imperative handle of the advanced editor (zoomIn/zoomOut/zoomFit).
+  const advEditorRef = useRef(null);
+  // Mirror of advancedMode for the (mount-once) wheel listener below.
+  const advancedModeRef = useRef(false);
+  useEffect(() => { advancedModeRef.current = advancedMode; }, [advancedMode]);
+  // Set before a non-retrace result update (advanced editor "done") so the
+  // saved-layers reset effect below skips that one change.
+  const skipLayerResetRef = useRef(false);
   // Natural size of the source image (known as soon as it loads, before the
   // first trace finishes). Used to size the vector placeholder and enable
   // zoom/fit controls from the very first paint.
@@ -199,7 +214,7 @@ export default function ImageEditorPage() {
   }, []);
 
   // Reset the view when switching to a different image.
-  useEffect(() => { setZoom(1); setActualSize(false); }, [imageId]);
+  useEffect(() => { setZoom(1); setActualSize(false); setAdvancedMode(false); }, [imageId]);
 
   const toggleMaximize = useCallback(() => setMaximized(m => !m), []);
   const zoomIn = useCallback(() => { setActualSize(false); setZoom(z => Math.min(8, z * 1.25)); }, []);
@@ -214,6 +229,12 @@ export default function ImageEditorPage() {
     const onWheel = (e) => {
       if (!e.ctrlKey && !e.metaKey) return; // let plain wheel scroll
       e.preventDefault();
+      // In advanced mode the wheel zooms the SvgCanvas instead of the preview.
+      if (advancedModeRef.current) {
+        if (e.deltaY < 0) advEditorRef.current?.zoomIn();
+        else advEditorRef.current?.zoomOut();
+        return;
+      }
       const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
       setZoom(z => Math.min(8, Math.max(0.1, z * factor)));
     };
@@ -383,10 +404,35 @@ export default function ImageEditorPage() {
   }, [getSvgAndPaths, t]);
 
   // A new trace (or cached/preset result) replaces the working canvas, so any
-  // previously-saved edited layers no longer apply — clear them.
+  // previously-saved edited layers no longer apply — clear them. The one
+  // exception is the advanced editor's "done" (a non-retrace svg update),
+  // which flags skipLayerResetRef so its snapshots survive.
   useEffect(() => {
+    if (skipLayerResetRef.current) {
+      skipLayerResetRef.current = false;
+      return;
+    }
     setSavedLayers([]);
   }, [result]);
+
+  // Snapshot the advanced editor's canvas as a new, exportable layer.
+  const saveAdvancedAsLayer = useCallback((svgStr) => {
+    try {
+      const doc = new DOMParser().parseFromString(svgStr, "image/svg+xml");
+      const paths = Array.from(doc.querySelectorAll("path"));
+      setSavedLayers((prev) => [
+        ...prev,
+        {
+          name: t("layer.advLayer", { n: prev.length + 1 }),
+          role: "edited",
+          shapeCount: paths.length,
+          dominantColor: dominantFill(paths),
+          previewSvg: svgStr,
+          profile: null,
+        },
+      ]);
+    } catch { /* ignore an unparseable snapshot */ }
+  }, [t]);
 
   const clearPatchSelection = useCallback(() => {
     selectedPathIdxsRef.current = new Set();
@@ -939,7 +985,7 @@ export default function ImageEditorPage() {
     : smartInfo?.reason;
 
   return (
-    <div className={`editor-page${maximized ? " maximized" : ""}`}>
+    <div className={`editor-page${maximized ? " maximized" : ""}${advancedMode ? " advanced" : ""}`}>
       <AppHeader
         title={filename}
         onBack={() => navigate(`/project/${encodeURIComponent(projectId)}`)}
@@ -971,6 +1017,21 @@ export default function ImageEditorPage() {
 
         <div className="editor-content">
           <div className="preview-viewport" ref={viewportRef}>
+            {advancedMode && result?.svg ? (
+              <AdvancedSvgEditor
+                ref={advEditorRef}
+                svgString={result.svg}
+                onComplete={(editedSvg) => {
+                  // Non-retrace result update: keep any layers the user
+                  // snapshotted from the advanced editor.
+                  skipLayerResetRef.current = true;
+                  setResult(prev => prev ? { ...prev, svg: editedSvg } : prev);
+                  setAdvancedMode(false);
+                }}
+                onCancel={() => setAdvancedMode(false)}
+                onSaveAsLayer={saveAdvancedAsLayer}
+              />
+            ) : (
             <div className="preview-stage">
               {compareMode === "side" ? (
                 <div className="before-after">
@@ -1025,36 +1086,57 @@ export default function ImageEditorPage() {
                 </div>
               )}
             </div>
+            )}
           </div>
 
           <div className="preview-controls">
-            <button className={tool === "select" ? "active" : ""} onClick={() => setTool(tool === "select" ? "none" : "select")} title={tool === "select" ? t("editor.disableSelection") : t("editor.selectPatches")} aria-label={tool === "select" ? t("editor.disableSelection") : t("editor.selectPatches")}>
-              <IconSelect />
-            </button>
-            <button onClick={() => setCompareMode(compareMode === "side" ? "overlay" : "side")} title={compareMode === "side" ? t("editor.switchToOverlay") : t("editor.switchToSide")} aria-label={t("editor.toggleCompare")}>
-              <IconCompare />
-            </button>
-            <button onClick={zoomIn} title={t("editor.zoomIn")} aria-label={t("editor.zoomIn")}>
-              <IconZoomIn />
-            </button>
-            <button onClick={zoomOut} title={t("editor.zoomOut")} aria-label={t("editor.zoomOut")}>
-              <IconZoomOut />
-            </button>
-            <button
-              onClick={() => {
-                if (actualSize) {
-                  setActualSize(false);
-                  setZoom(1);
-                } else if (fitScale > 0) {
-                  setActualSize(true);
-                  setZoom(1 / fitScale);
-                }
-              }}
-              title={actualSize ? t("editor.fit") : "1:1"}
-              aria-label={actualSize ? t("editor.fit") : "1:1"}
-            >
-              {actualSize ? <IconFit /> : <span style={{ fontSize: "0.65rem", fontWeight: 700 }}>1:1</span>}
-            </button>
+            {advancedMode ? (
+              // Same floating column, now driving the advanced editor's canvas.
+              <>
+                <button onClick={() => advEditorRef.current?.zoomIn()} title={t("editor.zoomIn")} aria-label={t("editor.zoomIn")}>
+                  <IconZoomIn />
+                </button>
+                <button onClick={() => advEditorRef.current?.zoomOut()} title={t("editor.zoomOut")} aria-label={t("editor.zoomOut")}>
+                  <IconZoomOut />
+                </button>
+                <button onClick={() => advEditorRef.current?.zoomFit()} title={t("editor.fit")} aria-label={t("editor.fit")}>
+                  <IconFit />
+                </button>
+              </>
+            ) : (
+              <>
+                <button className={tool === "select" ? "active" : ""} onClick={() => setTool(tool === "select" ? "none" : "select")} title={tool === "select" ? t("editor.disableSelection") : t("editor.selectPatches")} aria-label={tool === "select" ? t("editor.disableSelection") : t("editor.selectPatches")}>
+                  <IconSelect />
+                </button>
+                <button className={advancedMode ? "active" : ""} onClick={() => { if (!advancedMode && result?.svg) { setAdvancedMode(true); setTool("none"); } }} title={t("adv.enter")} aria-label={t("adv.enter")} disabled={!result?.svg || advancedMode}>
+                  <IconAdvanced />
+                </button>
+                <button onClick={() => setCompareMode(compareMode === "side" ? "overlay" : "side")} title={compareMode === "side" ? t("editor.switchToOverlay") : t("editor.switchToSide")} aria-label={t("editor.toggleCompare")}>
+                  <IconCompare />
+                </button>
+                <button onClick={zoomIn} title={t("editor.zoomIn")} aria-label={t("editor.zoomIn")}>
+                  <IconZoomIn />
+                </button>
+                <button onClick={zoomOut} title={t("editor.zoomOut")} aria-label={t("editor.zoomOut")}>
+                  <IconZoomOut />
+                </button>
+                <button
+                  onClick={() => {
+                    if (actualSize) {
+                      setActualSize(false);
+                      setZoom(1);
+                    } else if (fitScale > 0) {
+                      setActualSize(true);
+                      setZoom(1 / fitScale);
+                    }
+                  }}
+                  title={actualSize ? t("editor.fit") : "1:1"}
+                  aria-label={actualSize ? t("editor.fit") : "1:1"}
+                >
+                  {actualSize ? <IconFit /> : <span style={{ fontSize: "0.65rem", fontWeight: 700 }}>1:1</span>}
+                </button>
+              </>
+            )}
           </div>
 
           {error && (
@@ -1070,7 +1152,9 @@ export default function ImageEditorPage() {
             layers={[...(result?.layers || []), ...savedLayers]}
             strategyInfo={result?.strategyInfo}
             profileMs={result?.profileMs}
-            onSaveAsLayer={saveAsLayer}
+            // In advanced mode the preview stage is unmounted, so the panel's
+            // snapshot button delegates to the advanced editor's canvas.
+            onSaveAsLayer={advancedMode ? () => advEditorRef.current?.saveAsLayer() : saveAsLayer}
             canSaveAsLayer={!!result?.svg}
           />
         </aside>
@@ -1102,14 +1186,16 @@ export default function ImageEditorPage() {
           <button className="smart-banner-close" onClick={() => setSmartInfo(null)} aria-label={t("close")}>×</button>
         </div>
       )}
-      <ConfigStrip
-        configs={configs}
-        activeConfigId={activeConfigId}
-        onConfigSelect={onConfigSelect}
-        onConfigSave={onConfigSave}
-        onConfigDelete={onConfigDelete}
-        onConfigRename={onConfigRename}
-      />
+      {!advancedMode && (
+        <ConfigStrip
+          configs={configs}
+          activeConfigId={activeConfigId}
+          onConfigSelect={onConfigSelect}
+          onConfigSave={onConfigSave}
+          onConfigDelete={onConfigDelete}
+          onConfigRename={onConfigRename}
+        />
+      )}
     </div>
   );
 }
