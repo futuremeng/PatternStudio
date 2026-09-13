@@ -75,7 +75,7 @@ export default {
   "editor.presetMetrics": "預設 保真 {f} · 複雜度 {c}",
   "editor.presetMetricsTitle": "預設預設結果的指標（對照基準）",
   "editor.usePresetResult": "使用預設結果",
-  "editor.selectPatches": "選擇色塊",
+  "editor.selectPatches": "選擇色塊（⌘/Ctrl+點擊或框選可多選）",
   "editor.disableSelection": "取消選擇",
   "editor.switchToOverlay": "切換為疊加",
   "editor.switchToSide": "切換為對照",

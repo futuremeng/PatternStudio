@@ -75,7 +75,7 @@ export default {
   "editor.presetMetrics": "Voreinstellung Treue {f} · Komplexität {c}",
   "editor.presetMetricsTitle": "Kennwerte des Voreinstellungs-Ergebnisses (Vergleichsbasis)",
   "editor.usePresetResult": "Voreinstellungs-Ergebnis verwenden",
-  "editor.selectPatches": "Patches auswählen",
+  "editor.selectPatches": "Patches auswählen (⌘/Ctrl+Klick oder Ziehen zum Mehrfachauswählen)",
   "editor.disableSelection": "Auswahl deaktivieren",
   "editor.switchToOverlay": "In Überlagerung wechseln",
   "editor.switchToSide": "In Nebeneinander wechseln",

@@ -75,7 +75,7 @@ export default {
   "editor.presetMetrics": "预设 保真 {f} · 复杂度 {c}",
   "editor.presetMetricsTitle": "预设默认结果的指标（对照基准）",
   "editor.usePresetResult": "使用预设结果",
-  "editor.selectPatches": "选择色块",
+  "editor.selectPatches": "选择色块（⌘/Ctrl+点击或框选可多选）",
   "editor.disableSelection": "取消选择",
   "editor.switchToOverlay": "切换为叠加",
   "editor.switchToSide": "切换为对照",

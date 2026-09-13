@@ -75,7 +75,7 @@ export default {
   "editor.presetMetrics": "Preset fedeltà {f} · complessità {c}",
   "editor.presetMetricsTitle": "Metriche del risultato predefinito del preset (riferimento)",
   "editor.usePresetResult": "Usa il risultato del preset",
-  "editor.selectPatches": "Seleziona patch",
+  "editor.selectPatches": "Seleziona patch (⌘/Ctrl+clic o trascinamento per selezione multipla)",
   "editor.disableSelection": "Disattiva selezione",
   "editor.switchToOverlay": "Passa a sovrapposizione",
   "editor.switchToSide": "Passa a affiancato",

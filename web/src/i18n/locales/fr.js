@@ -75,7 +75,7 @@ export default {
   "editor.presetMetrics": "Préréglage fidélité {f} · complexité {c}",
   "editor.presetMetricsTitle": "Indicateurs du résultat par défaut du préréglage (référence)",
   "editor.usePresetResult": "Utiliser le résultat du préréglage",
-  "editor.selectPatches": "Sélectionner des zones",
+  "editor.selectPatches": "Sélectionner des zones (⌘/Ctrl+clic ou glisser pour multi-sélection)",
   "editor.disableSelection": "Désactiver la sélection",
   "editor.switchToOverlay": "Passer en superposition",
   "editor.switchToSide": "Passer en juxtaposition",

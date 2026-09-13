@@ -75,7 +75,7 @@ export default {
   "editor.presetMetrics": "Preset fidelity {f} · complexity {c}",
   "editor.presetMetricsTitle": "Metrics of the preset default result (comparison baseline)",
   "editor.usePresetResult": "Use preset result",
-  "editor.selectPatches": "Select patches",
+  "editor.selectPatches": "Select patches (⌘/Ctrl+click or drag to multi-select)",
   "editor.disableSelection": "Disable selection",
   "editor.switchToOverlay": "Switch to overlay",
   "editor.switchToSide": "Switch to side-by-side",

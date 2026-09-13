@@ -75,7 +75,7 @@ export default {
   "editor.presetMetrics": "プリセット 忠実度 {f} · 複雑度 {c}",
   "editor.presetMetricsTitle": "プリセット既定結果の指標（比較基準）",
   "editor.usePresetResult": "プリセット結果を使う",
-  "editor.selectPatches": "パッチを選択",
+  "editor.selectPatches": "パッチを選択（⌘/Ctrl+クリックまたはドラッグで複数選択）",
   "editor.disableSelection": "選択を無効化",
   "editor.switchToOverlay": "重ね表示に切り替え",
   "editor.switchToSide": "並列表示に切り替え",

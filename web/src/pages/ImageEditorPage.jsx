@@ -131,8 +131,7 @@ export default function ImageEditorPage() {
   const svgContainerRef = useRef(null);
   const pathTransformsRef = useRef(new Map()); // pathIdx → { dx, dy } in SVG coords
   const dragRef = useRef(null); // { idx, startClientX, startClientY, origDx, origDy }
-  const justDraggedRef = useRef(false);
-  const selectedPathIdxRef = useRef(null);
+  const selectedPathIdxsRef = useRef(new Set()); // Set of selected path indices
 
   // Track the visible preview size so we can fit the image at zoom = 1 and
   // scale it precisely for the zoom / fit-width / fit controls. Measured in a
@@ -317,7 +316,7 @@ export default function ImageEditorPage() {
   }, []);
 
   const clearPatchSelection = useCallback(() => {
-    selectedPathIdxRef.current = null;
+    selectedPathIdxsRef.current = new Set();
     const res = getSvgAndPaths();
     if (!res) return;
     const { svg, paths } = res;
@@ -329,11 +328,13 @@ export default function ImageEditorPage() {
     svg.querySelectorAll(".patch-cp").forEach(el => el.remove());
   }, [getSvgAndPaths]);
 
-  const highlightPath = useCallback((idx) => {
+  // Highlight every path in the current selection set.
+  const highlightPaths = useCallback(() => {
     const res = getSvgAndPaths();
     if (!res) return;
+    const sel = selectedPathIdxsRef.current;
     res.paths.forEach((p, i) => {
-      if (i === idx) {
+      if (sel.has(i)) {
         p.style.stroke = "#6c5ce7";
         p.style.strokeWidth = "2";
         p.style.cursor = "move";
@@ -345,37 +346,40 @@ export default function ImageEditorPage() {
     });
   }, [getSvgAndPaths]);
 
-  const renderControlPoints = useCallback((idx) => {
+  // Render the 8 control points for each selected path.
+  const renderControlPoints = useCallback(() => {
     const res = getSvgAndPaths();
     if (!res) return;
     const { svg, paths } = res;
     svg.querySelectorAll(".patch-cp").forEach(el => el.remove());
-    if (idx == null || !paths[idx]) return;
-    const path = paths[idx];
-    const t = pathTransformsRef.current.get(idx) || { dx: 0, dy: 0 };
-    const bb = path.getBBox();
-    const r = Math.max(3, Math.min(bb.width, bb.height) * 0.015);
-    const mx = bb.x + bb.width / 2 + t.dx;
-    const my = bb.y + bb.height / 2 + t.dy;
-    const pts = [
-      [bb.x + t.dx, bb.y + t.dy], [mx, bb.y + t.dy],
-      [bb.x + bb.width + t.dx, bb.y + t.dy], [bb.x + bb.width + t.dx, my],
-      [bb.x + bb.width + t.dx, bb.y + bb.height + t.dy], [mx, bb.y + bb.height + t.dy],
-      [bb.x + t.dx, bb.y + bb.height + t.dy], [bb.x + t.dx, my],
-    ];
-    for (const [px, py] of pts) {
-      const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      c.setAttribute("cx", px); c.setAttribute("cy", py); c.setAttribute("r", r);
-      c.setAttribute("fill", "#6c5ce7"); c.setAttribute("stroke", "#fff");
-      c.setAttribute("stroke-width", (r * 0.35).toFixed(1));
-      c.classList.add("patch-cp"); c.style.pointerEvents = "none";
-      svg.appendChild(c);
+    for (const idx of selectedPathIdxsRef.current) {
+      const path = paths[idx];
+      if (!path) continue;
+      const t = pathTransformsRef.current.get(idx) || { dx: 0, dy: 0 };
+      const bb = path.getBBox();
+      const r = Math.max(3, Math.min(bb.width, bb.height) * 0.015);
+      const mx = bb.x + bb.width / 2 + t.dx;
+      const my = bb.y + bb.height / 2 + t.dy;
+      const pts = [
+        [bb.x + t.dx, bb.y + t.dy], [mx, bb.y + t.dy],
+        [bb.x + bb.width + t.dx, bb.y + t.dy], [bb.x + bb.width + t.dx, my],
+        [bb.x + bb.width + t.dx, bb.y + bb.height + t.dy], [mx, bb.y + bb.height + t.dy],
+        [bb.x + t.dx, bb.y + bb.height + t.dy], [bb.x + t.dx, my],
+      ];
+      for (const [px, py] of pts) {
+        const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        c.setAttribute("cx", px); c.setAttribute("cy", py); c.setAttribute("r", r);
+        c.setAttribute("fill", "#6c5ce7"); c.setAttribute("stroke", "#fff");
+        c.setAttribute("stroke-width", (r * 0.35).toFixed(1));
+        c.classList.add("patch-cp"); c.style.pointerEvents = "none";
+        svg.appendChild(c);
+      }
     }
   }, [getSvgAndPaths]);
 
   // Reset patch selection when the SVG changes (new trace result).
   useEffect(() => {
-    selectedPathIdxRef.current = null;
+    selectedPathIdxsRef.current = new Set();
     pathTransformsRef.current.clear();
   }, [result?.svg]);
 
@@ -391,10 +395,41 @@ export default function ImageEditorPage() {
     pathTransformsRef.current.forEach((t, idx) => {
       if (paths[idx]) paths[idx].setAttribute("transform", `translate(${t.dx}, ${t.dy})`);
     });
-    if (selectedPathIdxRef.current != null && paths[selectedPathIdxRef.current]) {
-      highlightPath(selectedPathIdxRef.current);
-      renderControlPoints(selectedPathIdxRef.current);
+    if (selectedPathIdxsRef.current.size > 0) {
+      highlightPaths();
+      renderControlPoints();
     }
+
+    // Convert a client point to SVG user-space coordinates (same mapping the
+    // drag handler uses: viewBox scaled to the rendered svg size).
+    const clientToSvg = (clientX, clientY) => {
+      const rect = svg.getBoundingClientRect();
+      const vb = svg.viewBox.baseVal;
+      if (!vb || vb.width === 0 || rect.width === 0) return null;
+      return {
+        x: (clientX - rect.left) * (vb.width / rect.width),
+        y: (clientY - rect.top) * (vb.height / rect.height),
+      };
+    };
+
+    // Select every path whose (transformed) bounding box intersects the
+    // marquee rect. With `additive` the result is unioned with the current
+    // selection (⌘/Ctrl-drag); otherwise it replaces it.
+    const applyMarqueeSelection = (rect, additive) => {
+      const sel = additive ? new Set(selectedPathIdxsRef.current) : new Set();
+      paths.forEach((p, i) => {
+        const t = pathTransformsRef.current.get(i) || { dx: 0, dy: 0 };
+        let bb;
+        try { bb = p.getBBox(); } catch { return; } // skip detached/hidden paths
+        const x0 = bb.x + t.dx, y0 = bb.y + t.dy;
+        const x1 = bb.x + bb.width + t.dx, y1 = bb.y + bb.height + t.dy;
+        if (x1 < rect.x || x0 > rect.x + rect.w || y1 < rect.y || y0 > rect.y + rect.h) return;
+        sel.add(i);
+      });
+      selectedPathIdxsRef.current = sel;
+      highlightPaths();
+      renderControlPoints();
+    };
 
     const onPathPointerDown = (e) => {
       if (e.button !== 0) return;
@@ -402,9 +437,18 @@ export default function ImageEditorPage() {
       if (idx === -1) return;
       e.preventDefault();
       e.stopPropagation();
-      selectedPathIdxRef.current = idx;
-      highlightPath(idx);
-      renderControlPoints(idx);
+      // ⌘/Ctrl+click: toggle this path in/out of the selection, no dragging.
+      if (e.metaKey || e.ctrlKey) {
+        const sel = new Set(selectedPathIdxsRef.current);
+        if (sel.has(idx)) sel.delete(idx); else sel.add(idx);
+        selectedPathIdxsRef.current = sel;
+        highlightPaths();
+        renderControlPoints();
+        return;
+      }
+      selectedPathIdxsRef.current = new Set([idx]);
+      highlightPaths();
+      renderControlPoints();
       const t = pathTransformsRef.current.get(idx) || { dx: 0, dy: 0 };
       dragRef.current = { idx, sx: e.clientX, sy: e.clientY, ox: t.dx, oy: t.dy };
 
@@ -418,13 +462,9 @@ export default function ImageEditorPage() {
         const dy = d.oy + (me.clientY - d.sy) * (vb.height / rect.height);
         pathTransformsRef.current.set(d.idx, { dx, dy });
         paths[d.idx].setAttribute("transform", `translate(${dx}, ${dy})`);
-        renderControlPoints(d.idx);
+        renderControlPoints();
       };
       const onUp = () => {
-        if (dragRef.current) {
-          justDraggedRef.current = true;
-          setTimeout(() => { justDraggedRef.current = false; }, 0);
-        }
         dragRef.current = null;
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
@@ -433,24 +473,84 @@ export default function ImageEditorPage() {
       window.addEventListener("pointerup", onUp);
     };
 
-    const onSvgClick = (e) => {
-      if (justDraggedRef.current) return;
-      if (e.target === svg) clearPatchSelection();
+    // Marquee (rubber-band) selection: press on empty svg area and drag.
+    // Paths stop propagation on pointerdown, so this only fires for the
+    // background. A plain click on the background clears the selection.
+    const onSvgPointerDown = (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation(); // don't let the viewport start panning
+      const start = clientToSvg(e.clientX, e.clientY);
+      if (!start) return;
+      const additive = e.metaKey || e.ctrlKey;
+      let marquee = null;
+      let active = false;
+      let last = start;
+
+      const onMove = (me) => {
+        const cur = clientToSvg(me.clientX, me.clientY);
+        if (!cur) return;
+        last = cur;
+        if (!active) {
+          if (Math.hypot(me.clientX - e.clientX, me.clientY - e.clientY) < 3) return;
+          active = true;
+          marquee = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          marquee.setAttribute("class", "patch-marquee");
+          marquee.setAttribute("fill", "rgba(108, 92, 231, 0.12)");
+          marquee.setAttribute("stroke", "#6c5ce7");
+          marquee.setAttribute("stroke-width", "1");
+          marquee.setAttribute("stroke-dasharray", "4 3");
+          marquee.style.pointerEvents = "none";
+          svg.appendChild(marquee);
+        }
+        const x = Math.min(start.x, cur.x);
+        const y = Math.min(start.y, cur.y);
+        const w = Math.abs(cur.x - start.x);
+        const h = Math.abs(cur.y - start.y);
+        marquee.setAttribute("x", x);
+        marquee.setAttribute("y", y);
+        marquee.setAttribute("width", w);
+        marquee.setAttribute("height", h);
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        if (marquee) marquee.remove();
+        if (active) {
+          const x = Math.min(start.x, last.x);
+          const y = Math.min(start.y, last.y);
+          applyMarqueeSelection(
+            { x, y, w: Math.abs(last.x - start.x), h: Math.abs(last.y - start.y) },
+            additive
+          );
+        } else if (!additive) {
+          clearPatchSelection();
+        }
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
     };
+
     const onKeyDown = (e) => {
       if (e.key === "Escape") { clearPatchSelection(); return; }
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedPathIdxRef.current != null) {
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedPathIdxsRef.current.size > 0) {
         e.preventDefault();
-        const idx = selectedPathIdxRef.current;
         const current = getSvgAndPaths();
-        if (current && current.paths[idx]) {
-          current.paths[idx].remove();
+        if (!current) return;
+        // Remove in descending order so earlier indices stay valid.
+        const removed = [...selectedPathIdxsRef.current].sort((a, b) => b - a);
+        for (const idx of removed) {
+          if (current.paths[idx]) current.paths[idx].remove();
           pathTransformsRef.current.delete(idx);
         }
-        selectedPathIdxRef.current = null;
-        const after = getSvgAndPaths();
-        if (after) after.paths.forEach(p => { p.style.stroke = ""; p.style.strokeWidth = ""; p.style.cursor = ""; });
-        if (after) after.svg.querySelectorAll(".patch-cp").forEach(el => el.remove());
+        // Removing paths shifts the remaining indices: remap transforms and
+        // the selection set accordingly.
+        const remap = (i) => i - removed.filter(r => r < i).length;
+        const newTransforms = new Map();
+        pathTransformsRef.current.forEach((t, i) => newTransforms.set(remap(i), t));
+        pathTransformsRef.current = newTransforms;
+        selectedPathIdxsRef.current = new Set([...selectedPathIdxsRef.current].map(remap));
+        highlightPaths();
+        renderControlPoints();
       }
     };
 
@@ -460,7 +560,7 @@ export default function ImageEditorPage() {
       p.style.touchAction = "none";
       p.addEventListener("pointerdown", onPathPointerDown);
     });
-    svg.addEventListener("click", onSvgClick);
+    svg.addEventListener("pointerdown", onSvgPointerDown);
     window.addEventListener("keydown", onKeyDown);
 
     return () => {
@@ -470,11 +570,11 @@ export default function ImageEditorPage() {
         p.style.touchAction = "";
         p.removeEventListener("pointerdown", onPathPointerDown);
       });
-      svg.removeEventListener("click", onSvgClick);
+      svg.removeEventListener("pointerdown", onSvgPointerDown);
       window.removeEventListener("keydown", onKeyDown);
       dragRef.current = null;
     };
-  }, [tool, result?.svg, compareMode, getSvgAndPaths, highlightPath, renderControlPoints, clearPatchSelection]);
+  }, [tool, result?.svg, compareMode, getSvgAndPaths, highlightPaths, renderControlPoints, clearPatchSelection]);
 
   /**
    * Write a trace result back to any config whose params match, so the
