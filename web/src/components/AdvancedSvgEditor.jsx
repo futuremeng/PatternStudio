@@ -230,9 +230,28 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
     const fit = Math.min(availW / w, availH / h);
     if (!Number.isFinite(fit) || fit <= 0) return;
     const scale = fit * zoom;
+    const nw = Math.round(w * scale * 100) / 100;
+    const nh = Math.round(h * scale * 100) / 100;
     const svgEl = canvas.getSvgContent();
-    svgEl.setAttribute("width", String(Math.round(w * scale * 100) / 100));
-    svgEl.setAttribute("height", String(Math.round(h * scale * 100) / 100));
+    svgEl.setAttribute("width", String(nw));
+    svgEl.setAttribute("height", String(nh));
+    // The library wraps the content in an outer <svg id="svgroot"> whose
+    // width/height are fixed at the original document size. If only the inner
+    // content is scaled, the artwork grows/shrinks on window resize while the
+    // canvas wrapper stays put, so the two drift out of alignment. Keep the
+    // wrapper the same size as the scaled content so canvas and paths scale
+    // together.
+    const rootEl = canvas.getSvgRoot();
+    if (rootEl) {
+      rootEl.setAttribute("width", String(nw));
+      rootEl.setAttribute("height", String(nh));
+      // The checkerboard "canvas" artboard lives on this element (see
+      // styles.css). Scale its tile size with the render scale so the grid
+      // grows/shrinks in step with the artwork, like Photoshop's transparency
+      // grid. A tile is 20 user units, i.e. 20 * scale px on screen, which
+      // keeps a constant number of tiles across the artboard at any zoom.
+      rootEl.style.setProperty("--adv-s", `${20 * scale}px`);
+    }
   }, [containerSize, zoom, svgString, dimsVersion]);
 
   useImperativeHandle(

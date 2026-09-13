@@ -666,23 +666,39 @@ button.danger { color: var(--error); }
    outlined buttons); it turns red on hover. */
 .advanced-toolbar button.cancel { color: var(--text2); border-color: var(--border); }
 .advanced-toolbar button.cancel:hover { background: rgba(255, 107, 107, 0.1); border-color: var(--error); color: var(--error); }
-/* The canvas element is sized by the editor (fit * zoom); center it when it
-   is smaller than the container, and let the container scroll when zoomed in. */
+/* The workspace backdrop behind the artboard. The artboard itself (the
+   #svgroot element) carries the checkerboard "canvas" and is sized by the
+   editor (fit * zoom), so the canvas region grows/shrinks together with the
+   artwork — like Figma's artboard on a neutral canvas. */
 .advanced-canvas-container {
   flex: 1; overflow: auto; position: relative;
   display: flex;
-  background: #ffffff;
+  background: var(--surface2);
+}
+/* The artboard: a checkerboard "canvas" that scales with the artwork. The
+   tile size (--adv-s) is driven by the editor's zoom level (see
+   AdvancedSvgEditor's zoom effect) so the grid grows/shrinks in step with the
+   shapes, like Photoshop's transparency grid. The background is clipped to
+   the element's width/height, so it is exactly the artboard region. */
+.advanced-canvas-container > svg {
+  display: block; margin: auto; flex: none;
+  --adv-s: 20px;
+  background-color: #ffffff;
   background-image:
     linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
     linear-gradient(-45deg, #f0f0f0 25%, transparent 25%),
     linear-gradient(45deg, transparent 75%, #f0f0f0 75%),
     linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
-  background-size: 20px 20px;
-  background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+  background-size: var(--adv-s) var(--adv-s);
+  background-position:
+    0 0,
+    0 calc(var(--adv-s) / 2),
+    calc(var(--adv-s) / 2) calc(var(--adv-s) / -2),
+    calc(var(--adv-s) / -2) 0;
 }
-.advanced-canvas-container svg {
-  display: block; margin: auto; flex: none;
-}
+/* The library injects its own white #canvasBackground rect as the canvas
+   backdrop. We replace it with the checkerboard artboard above, so hide it. */
+.advanced-canvas-container #canvasBackground { display: none; }
 /* Override svgcanvas default selection colors to match our theme */
 .advanced-canvas-container .selection-box,
 .advanced-canvas-container .selection-outline {
