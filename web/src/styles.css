@@ -96,7 +96,7 @@
 }
 
 .theme-toggle {
-  width: 2.15rem; height: 2.15rem; padding: 0;
+  width: 32px; height: 32px; padding: 0;
   border-radius: 6px; border: 1px solid var(--border);
   background: var(--surface2); color: var(--text);
   font-size: 1rem; line-height: 1; cursor: pointer;
@@ -130,6 +130,25 @@ body {
 }
 .app-header .page-meta { color: var(--text2); font-size: 0.8rem; white-space: nowrap; }
 .app-header .header-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+/* Standard header controls: every button/select in the header shares a 32px
+   height, 6px radius, 1px border and surface2 background so the top bar looks
+   uniform on every page. (See docs/design/COLORS.md for the palette.) */
+.app-header button,
+.app-header select {
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+/* Ghost back button: no frame, but the same 32px height as its siblings. */
+.app-header .back-btn {
+  height: 32px; padding: 0 0.6rem;
+  background: none; border: none; color: var(--text2);
+}
+/* Primary header button keeps its accent fill but drops the standard frame. */
+.app-header .open-project-btn { border: none; }
 .main { flex: 1; overflow: hidden; }
 
 .project-list-page { display: flex; flex-direction: column; height: 100%; }
@@ -191,9 +210,9 @@ body {
 .project-info .count { font-size: 0.72rem; color: var(--text2); margin-top: 0.2rem; }
 .open-project-btn {
   display: flex; align-items: center; gap: 0.5rem;
-  padding: 0.6rem 1.2rem;
+  height: 32px; padding: 0 0.9rem;
   background: var(--accent); color: var(--on-accent); border: none;
-  border-radius: var(--radius); font-size: 0.9rem; cursor: pointer;
+  border-radius: 6px; font-size: 0.85rem; cursor: pointer;
 }
 .open-project-btn:hover { background: var(--accent-hover); }
 .empty-state {
@@ -632,16 +651,16 @@ body {
 .seg-control button.active { background: var(--accent); color: #fff; }
 
 .batch-preset-select {
-  padding: 0.35rem 0.5rem; border-radius: 6px;
+  height: 32px; padding: 0 0.5rem; border-radius: 6px;
   border: 1px solid var(--border); background: var(--surface2);
-  color: var(--text); font-size: 0.8rem; cursor: pointer;
+  color: var(--text); font-size: 0.85rem; cursor: pointer;
 }
 .batch-preset-select:disabled { opacity: 0.6; cursor: default; }
 
 .lang-select {
-  padding: 0.35rem 0.5rem; border-radius: 6px;
+  height: 32px; padding: 0 0.5rem; border-radius: 6px;
   border: 1px solid var(--border); background: var(--surface2);
-  color: var(--text); font-size: 0.8rem; cursor: pointer;
+  color: var(--text); font-size: 0.85rem; cursor: pointer;
   max-width: 9rem;
 }
 
@@ -727,8 +746,9 @@ button.danger { color: var(--error); }
   align-items: center; justify-content: center; color: var(--text2);
 }
 .back-btn {
+  height: 32px; padding: 0 0.6rem;
   background: none; border: none; color: var(--text2);
-  font-size: 1rem; cursor: pointer; padding: 0.3rem 0.5rem;
+  font-size: 0.85rem; cursor: pointer;
 }
 
 /* --- Advanced SVG Editor --- */
