@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::extract::{Multipart, Path as UrlPath, State};
 use axum::http::StatusCode;
@@ -23,6 +23,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use vtracer::config::{Clustering, FitMode, Hierarchical, Preset};
+use vtracer::progress::CancelToken;
 use vtracer::Session;
 
 /// How many (source, segmentation) sessions to keep around for instant
@@ -42,6 +43,17 @@ struct AppState {
     /// Reusable VTracer sessions keyed by source (path:size:mtime). Caching the
     /// expensive segmentation here is what makes parameter tweaks instant.
     sessions: Arc<Mutex<SessionCache>>,
+    /// In-flight traces keyed by image path, for preemption: a newer
+    /// interactive request trips the older one's token so it aborts between
+    /// pipeline batches.
+    active_traces: Arc<Mutex<HashMap<String, ActiveTrace>>>,
+}
+
+/// One in-flight trace: the request id that owns it and the token a newer
+/// interactive request trips to abort it.
+struct ActiveTrace {
+    request_id: String,
+    cancel: CancelToken,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -221,7 +233,7 @@ fn do_trace(img_path: &Path, params: &TraceParams) -> Result<TraceResult, String
     let img = load_image(img_path).map_err(|e| format!("failed to load image: {e}"))?;
     let config = build_vtracer_config(params)?;
     let mut session = Session::new(img);
-    do_trace_with_session(&mut session, &config, params)
+    do_trace_with_session(&mut session, &config, params, &CancelToken::new())
 }
 
 /// Convert a smart-recommended parameter set into the API's `TraceParams`.
@@ -246,7 +258,7 @@ fn do_trace_smart(img_path: &Path, family: Option<&str>) -> Result<(TraceResult,
     let params = smart_to_trace_params(&decision.params)?;
     let config = build_vtracer_config(&params)?;
     let mut session = Session::new(img);
-    let tr = do_trace_with_session(&mut session, &config, &params)?;
+    let tr = do_trace_with_session(&mut session, &config, &params, &CancelToken::new())?;
     Ok((tr, decision))
 }
 
@@ -256,8 +268,15 @@ fn do_trace_smart(img_path: &Path, family: Option<&str>) -> Result<(TraceResult,
 /// parameters are unchanged and only re-runs the cheap downstream stages — the
 /// core of the interactive tuning loop. Split out from the one-shot path so the
 /// `/trace` handler can drive a cached session.
-fn do_trace_with_session(session: &mut Session, config: &vtracer::Config, params: &TraceParams) -> Result<TraceResult, String> {
-    let doc = session.render(config).map_err(|e| format!("trace failed: {e}"))?;
+fn do_trace_with_session(session: &mut Session, config: &vtracer::Config, params: &TraceParams, cancel: &CancelToken) -> Result<TraceResult, String> {
+    let mut on_progress = |_p: vtracer::progress::Progress| {};
+    let doc = session.render_with_progress(config, cancel, &mut on_progress)
+        .map_err(|e| if matches!(e, vtracer::Error::Cancelled) {
+            "cancelled".into()
+        } else {
+            format!("trace failed: {e}")
+        })?;
+    if cancel.is_cancelled() { return Err("cancelled".into()); }
 
     // "auto": derive the strategy + multi-level profiles from the ideal params.
     let is_auto = params.layer_strategy.as_deref() == Some("auto");
@@ -297,6 +316,7 @@ fn do_trace_with_session(session: &mut Session, config: &vtracer::Config, params
         };
         (assignment, None)
     };
+    if cancel.is_cancelled() { return Err("cancelled".into()); }
     let mut layered = LayeredDoc::from_vector_doc(&doc, &assignment);
     let mut profile_ms: Option<u64> = None;
     if is_auto {
@@ -376,6 +396,14 @@ struct TraceRequest {
     /// Absent = auto family selection.
     #[serde(default)]
     family: Option<String>,
+    /// Client-generated id for this request; identifies the in-flight trace
+    /// so a newer request can supersede it.
+    #[serde(default)]
+    request_id: Option<String>,
+    /// "interactive" (default) preempts any in-flight trace of the same image;
+    /// "background" (pre-warm) yields to it and is rejected with 409 busy.
+    #[serde(default)]
+    priority: Option<String>,
 }
 
 /// Resolve the source image path from whichever identifier the client sent.
@@ -410,10 +438,34 @@ fn resolve_source_path(
 async fn trace(
     State(state): State<AppState>,
     Json(req): Json<TraceRequest>,
-) -> Result<Json<TraceResult>, (StatusCode, String)> {
-    let img_path = resolve_source_path(&state, &req)?;
+) -> Result<Json<TraceResult>, (StatusCode, Json<serde_json::Value>)> {
+    let img_path = resolve_source_path(&state, &req)
+        .map_err(|(s, e)| (s, Json(serde_json::json!({ "error": e }))))?;
     let params = req.params.unwrap_or_default();
+    let request_id = req.request_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let is_background = req.priority.as_deref() == Some("background");
+    let image_key = img_path.to_string_lossy().to_string();
     let sessions = state.sessions.clone();
+
+    // Preemption: an interactive request cancels whatever is in flight for
+    // this image (it aborts between pipeline batches); a background request
+    // (pre-warm) yields instead and is rejected with 409 busy.
+    let cancel = CancelToken::new();
+    {
+        let mut active = state.active_traces.lock().unwrap();
+        match active.get(&image_key) {
+            Some(old) if is_background => {
+                return Err((StatusCode::CONFLICT, Json(serde_json::json!({ "busy": true }))));
+            }
+            Some(old) => old.cancel.cancel(),
+            None => {}
+        }
+        active.insert(image_key.clone(), ActiveTrace {
+            request_id: request_id.clone(),
+            cancel: cancel.clone(),
+        });
+    }
+
     let result = tokio::task::spawn_blocking(move || {
         // Build the config up front so the session cache can be keyed by the
         // segmentation parameters (not just the file): each preset keeps its own
@@ -427,13 +479,34 @@ async fn trace(
                 load_image(&path).map_err(|e| format!("failed to load image: {e}"))
             })?
         };
-        let mut guard = session.lock().unwrap();
-        do_trace_with_session(&mut guard, &config, &params)
+        // A cancelled predecessor may still be finishing its current batch;
+        // poll until the session lock frees (cancellation is near-instant).
+        let mut guard = loop {
+            match session.try_lock() {
+                Ok(g) => break g,
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        };
+        do_trace_with_session(&mut guard, &config, &params, &cancel)
     })
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    Ok(Json(result))
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))))?;
+
+    // Drop our registration only if we are still the current trace for this image.
+    {
+        let mut active = state.active_traces.lock().unwrap();
+        if active.get(&image_key).is_some_and(|a| a.request_id == request_id) {
+            active.remove(&image_key);
+        }
+    }
+
+    match result {
+        Ok(r) => Ok(Json(r)),
+        Err(e) if e == "cancelled" => {
+            Err((StatusCode::CONFLICT, Json(serde_json::json!({ "cancelled": true }))))
+        }
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))),
+    }
 }
 
 /// Smart Preset: analyze the image and trial-trace candidate parameter sets,
@@ -787,6 +860,7 @@ async fn main() {
         projects: Arc::new(Mutex::new(projects)),
         jobs: Arc::new(Mutex::new(HashMap::new())),
         cancels: Arc::new(Mutex::new(HashMap::new())),
+        active_traces: Arc::new(Mutex::new(HashMap::new())),
         projects_file,
         sessions: Arc::new(Mutex::new(SessionCache::new(MAX_SESSIONS))),
     };

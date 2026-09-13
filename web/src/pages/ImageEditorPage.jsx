@@ -1,24 +1,20 @@
 import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getImageUrl, prepareSource, traceSource, smartSource, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams } from "../api.js";
+import { getImageUrl, prepareSource, traceSource, smartSource, newTraceRequestId, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams } from "../api.js";
 import { getCachedTrace, setCachedTrace, stableStringify } from "../traceCache.js";
+import { createTraceQueue } from "../traceQueue.js";
 import { loadSavedConfigs, saveConfig, deleteSavedConfig } from "../configStore.js";
 import ParameterPanel from "../components/ParameterPanel.jsx";
 import LayerPanel from "../components/LayerPanel.jsx";
 import ConfigStrip from "../components/ConfigStrip.jsx";
 import AppHeader from "../components/AppHeader.jsx";
 
-// Debounce for auto-trace after param changes (ms)
-const TRACE_DEBOUNCE_MS = 300;
 // Wait this long after a trace settles before snapshotting a user config (ms)
 const CONFIG_SETTLE_MS = 1500;
 const MAX_USER_CONFIGS = 12;
 // Pre-warm: presets to pre-generate in the background after the initial trace,
 // in priority order. The currently-active preset is already cached and skipped.
 const PREWARM_ORDER = ["color", "lineArt", "bw", "gradient", "lowPoly"];
-// If the user interacted (param change / preset switch) within this window, the
-// pre-warm yields so interactive traces always win the CPU.
-const PREWARM_IDLE_MS = 2000;
 
 /** Default configs from MODE_PRESETS (full param sets, ready to trace). */
 function buildDefaultConfigs() {
@@ -77,21 +73,18 @@ export default function ImageEditorPage() {
   const [error, setError] = useState(null);
   const [configs, setConfigs] = useState(buildDefaultConfigs);
   const [activeConfigId, setActiveConfigId] = useState("default-color");
-  const [retryTick, setRetryTick] = useState(0);
   const [compareMode, setCompareMode] = useState("side"); // "side" | "overlay"
   const [overlayPos, setOverlayPos] = useState(50); // divider position, percent
   const [smartInfo, setSmartInfo] = useState(null); // last Smart Preset decision
   const [smartBusy, setSmartBusy] = useState(false);
-  const traceSeq = useRef(0);
   const configTimerRef = useRef(null);
   const userConfigSeq = useRef(0);
   const configsRef = useRef(configs);
   const overlayRef = useRef(null);
   const overlayDragging = useRef(false);
-  const busyRef = useRef(false);
-  const resultRef = useRef(null);
-  const lastUserActiveRef = useRef(0);
   const imageId = `${projectId}/${filename}`;
+  const imageIdRef = useRef(imageId);
+  useEffect(() => { imageIdRef.current = imageId; }, [imageId]);
 
   // --- Preview view controls: maximize, zoom, fit ---
   const [maximized, setMaximized] = useState(false);
@@ -158,8 +151,6 @@ export default function ImageEditorPage() {
   }, [fitScale, widthScale]);
 
   useEffect(() => { configsRef.current = configs; }, [configs]);
-  useEffect(() => { busyRef.current = busy; }, [busy]);
-  useEffect(() => { resultRef.current = result; }, [result]);
 
   // Restore user configs persisted from previous sessions.
   // Thumbnails are refilled from the trace cache when available.
@@ -221,85 +212,17 @@ export default function ImageEditorPage() {
     };
   }, [updateOverlayPos]);
 
-  // Auto-trace: any param change (debounced) regenerates immediately.
-  // Cache-first, so reverting a slider hits IndexedDB and is instant.
-  useEffect(() => {
-    if (!imageUrl) return;
-    const seq = ++traceSeq.current;
-    const timer = setTimeout(async () => {
-      const cached = await getCachedTrace(imageId, params).catch(() => null);
-      if (seq !== traceSeq.current) return;
-      if (cached) {
-        setResult(cached);
-        setError(null);
-        scheduleUserConfig(params, cached);
-        return;
-      }
-      setBusy(true);
-      setError(null);
-      try {
-        // Resolve the source once (path on Tauri, project+file on web) and let
-        // the engine reuse its cached session/segmentation across tweaks.
-        const source = prepareSource(projectId, filename);
-        const res = await traceSource(source, params);
-        if (seq !== traceSeq.current) return;
-        setResult(res);
-        setCachedTrace(imageId, params, res).catch(() => {});
-        scheduleUserConfig(params, res);
-      } catch (e) {
-        if (seq === traceSeq.current) setError(`Trace 失败: ${e.message}`);
-      } finally {
-        if (seq === traceSeq.current) setBusy(false);
-      }
-    }, TRACE_DEBOUNCE_MS);
-    return () => {
-      clearTimeout(timer);
-      if (configTimerRef.current) {
-        clearTimeout(configTimerRef.current);
-        configTimerRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params, imageUrl, retryTick, imageId, projectId, filename]);
-
-  // Pre-warm the remaining presets in the background after the initial trace
-  // settles, so switching between presets is instant. Runs once per image,
-  // serially, and yields whenever the user is active or a trace is in flight.
-  // It only writes the cache — it never touches the displayed result.
-  useEffect(() => {
-    if (!imageUrl) return;
-    let cancelled = false;
-    const isUserActive = () => Date.now() - lastUserActiveRef.current < PREWARM_IDLE_MS;
-    (async () => {
-      // Wait for the initial trace to settle (a result exists and we're idle).
-      while (!cancelled && (!resultRef.current || busyRef.current)) {
-        await sleep(200);
-      }
-      if (cancelled) return;
-      for (const key of PREWARM_ORDER) {
-        if (cancelled) return;
-        // Yield while the user is active or a trace is in flight.
-        while (!cancelled && (busyRef.current || isUserActive())) {
-          await sleep(400);
-        }
-        if (cancelled) return;
-        // Same params onConfigSelect would set, so the cache key matches.
-        const p = { ...DEFAULT_PARAMS, ...presetFullParams(key) };
-        const cached = await getCachedTrace(imageId, p).catch(() => null);
-        if (cancelled) return;
-        if (cached) continue; // already warm (e.g. the active preset)
-        try {
-          const source = prepareSource(projectId, filename);
-          const res = await traceSource(source, p);
-          if (cancelled) return;
-          await setCachedTrace(imageId, p, res).catch(() => {});
-        } catch (e) {
-          // Pre-warm failure is non-fatal; skip this preset.
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [imageUrl, imageId, projectId, filename]);
+  /**
+   * Write a trace result back to any config whose params match, so the
+   * strip thumbnails (presets / saved configs) update without a reload.
+   * No-op when no config matches (plain user tweaks).
+   */
+  const applyResultToConfigs = useCallback((traceParams, res) => {
+    const sig = stableStringify(traceParams);
+    setConfigs(prev => prev.some(c => stableStringify(c.params) === sig)
+      ? prev.map(c => (stableStringify(c.params) === sig ? { ...c, result: res } : c))
+      : prev);
+  }, []);
 
   /**
    * Snapshot the current params as a user config once the user stops
@@ -336,14 +259,90 @@ export default function ImageEditorPage() {
     }, CONFIG_SETTLE_MS);
   }, []);
 
+  /**
+   * Run one queue task: cache-first trace, then apply the result.
+   * Interactive tasks update the main preview; background tasks only refresh
+   * matching config thumbnails. Superseded tasks (cancelled / busy) are a
+   * silent no-op — a newer task already owns the result.
+   */
+  const executeTask = useCallback(async (task) => {
+    const imageIdNow = imageId;
+    const source = prepareSource(projectId, filename);
+    const cached = await getCachedTrace(imageIdNow, task.params).catch(() => null);
+    if (imageIdRef.current !== imageIdNow) return; // image switched mid-flight
+    if (cached) {
+      applyResultToConfigs(task.params, cached);
+      if (task.kind === "interactive") {
+        setResult(cached);
+        setError(null);
+        scheduleUserConfig(task.params, cached);
+      }
+      return;
+    }
+    try {
+      const res = await traceSource(source, task.params, {
+        requestId: newTraceRequestId(),
+        priority: task.kind === "interactive" ? "interactive" : "background",
+      });
+      if (imageIdRef.current !== imageIdNow) return;
+      setCachedTrace(imageIdNow, task.params, res).catch(() => {});
+      applyResultToConfigs(task.params, res);
+      if (task.kind === "interactive") {
+        setResult(res);
+        setError(null);
+        scheduleUserConfig(task.params, res);
+      }
+    } catch (e) {
+      if (imageIdRef.current !== imageIdNow) return;
+      if (e?.code === "cancelled" || e?.code === "busy") return; // superseded
+      if (task.kind === "interactive") setError(`Trace 失败: ${e.message}`);
+    }
+  }, [projectId, filename, imageId, applyResultToConfigs, scheduleUserConfig]);
+
+  // One queue per image: interactive traces preempt background pre-warm.
+  const queueRef = useRef(null);
+  useEffect(() => {
+    const q = createTraceQueue({ execute: executeTask, onBusyChange: setBusy });
+    queueRef.current = q;
+    return () => {
+      q.dispose();
+      queueRef.current = null;
+    };
+  }, [executeTask]);
+
+  // Clear any pending user-config snapshot on unmount.
+  useEffect(() => () => {
+    if (configTimerRef.current) clearTimeout(configTimerRef.current);
+  }, []);
+
+  // Any param change (preset select, slider, smart tuning) enqueues an
+  // interactive trace. The queue debounces (merges slider drags), drops queued
+  // background work, and the engine cancels whatever is in flight for this
+  // image when the request lands — interactive traces always win the CPU.
+  // (Declared after the queue effect so the queue exists when it runs.)
+  useEffect(() => {
+    if (!imageUrl) return;
+    queueRef.current?.enqueueInteractive(params);
+  }, [params, imageUrl, imageId]);
+
+  // Pre-warm the remaining presets in the background after each interactive
+  // trace settles, so switching between presets is instant. The presets are
+  // enqueued as background tasks: the queue runs them serially only while
+  // idle, drops them the moment the user interacts, and warm presets are a
+  // cheap cache read — so re-planning after every settle is harmless.
+  useEffect(() => {
+    if (!result || busy) return;
+    for (const key of PREWARM_ORDER) {
+      queueRef.current?.enqueueBackground({ ...DEFAULT_PARAMS, ...presetFullParams(key) });
+    }
+  }, [result, busy, imageId]);
+
   const onParamsChange = useCallback((updater) => {
-    lastUserActiveRef.current = Date.now();
     setParams(updater);
     setActiveConfigId(null);
   }, []);
 
   const onConfigSelect = useCallback((config) => {
-    lastUserActiveRef.current = Date.now();
     setActiveConfigId(config.id);
     // Normalize: configs saved before newer params fields exist.
     const next = { ...DEFAULT_PARAMS, ...config.params };
@@ -359,7 +358,6 @@ export default function ImageEditorPage() {
    */
   const runSmart = useCallback(async () => {
     if (!imageUrl || smartBusy) return;
-    lastUserActiveRef.current = Date.now();
     setSmartBusy(true);
     setSmartInfo(null);
     setError(null);
@@ -399,6 +397,24 @@ export default function ImageEditorPage() {
 
   // Clear the smart banner when switching to a different image.
   useEffect(() => { setSmartInfo(null); }, [imageId]);
+
+  // Backfill saved-config thumbnails once the initial trace has warmed the
+  // cache: the restore effect above may have run while the cache was still
+  // cold (e.g. a first visit to this image), leaving them as placeholders.
+  useEffect(() => {
+    if (!result || busy) return;
+    const pending = configsRef.current.filter(c => c.saved && !c.result);
+    if (!pending.length) return;
+    let cancelled = false;
+    (async () => {
+      for (const c of pending) {
+        const res = await getCachedTrace(imageId, c.params).catch(() => null);
+        if (cancelled || !res) continue;
+        applyResultToConfigs(c.params, res);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [result, busy, applyResultToConfigs, imageId]);
 
   const onConfigDelete = useCallback((id) => {
     const target = configsRef.current.find(c => c.id === id);
@@ -555,7 +571,7 @@ export default function ImageEditorPage() {
           {error && (
             <div className="error preview-error">
               {error}
-              <button className="error-retry" onClick={() => setRetryTick(t => t + 1)}>重试</button>
+              <button className="error-retry" onClick={() => queueRef.current?.enqueueInteractive(params)}>重试</button>
             </div>
           )}
         </div>

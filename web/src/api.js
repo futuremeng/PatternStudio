@@ -42,16 +42,60 @@ export function prepareSource(projectId, filename) {
   return { kind: "project", projectId, filename };
 }
 
-/** Trace using a source prepared by {@link prepareSource}. */
-export async function traceSource(source, params) {
+/**
+ * Trace flow error: the request was superseded, not failed.
+ * `code` is "cancelled" (a newer request aborted this one on the engine side)
+ * or "busy" (background work rejected because an interactive trace is running).
+ */
+export class TraceFlowError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = "TraceFlowError";
+    this.code = code;
+  }
+}
+
+/** Client-generated id so the engine can match and supersede in-flight traces. */
+export function newTraceRequestId() {
+  return (typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * Trace using a source prepared by {@link prepareSource}.
+ * `opts`: { requestId, priority } — "interactive" (default) preempts any
+ * in-flight trace of the same image; "background" (pre-warm) yields to it and
+ * is rejected with a TraceFlowError("busy").
+ */
+export async function traceSource(source, params, opts = {}) {
+  const { requestId, priority } = opts;
   if (isTauri()) {
-    return tauriInvoke("trace_file", { filePath: source.path, params });
+    try {
+      return await tauriInvoke("trace_file", {
+        filePath: source.path, params,
+        requestId: requestId ?? null, priority: priority ?? null,
+      });
+    } catch (e) {
+      const msg = typeof e === "string" ? e : (e?.message || String(e));
+      if (msg === "cancelled") throw new TraceFlowError("cancelled", msg);
+      if (msg === "busy") throw new TraceFlowError("busy", msg);
+      throw new Error(msg);
+    }
   }
   const res = await fetch(`${BASE}/trace`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ project_id: source.projectId, filename: source.filename, params }),
+    body: JSON.stringify({
+      project_id: source.projectId, filename: source.filename, params,
+      request_id: requestId ?? null, priority: priority ?? null,
+    }),
   });
+  if (res.status === 409) {
+    let body = {};
+    try { body = await res.json(); } catch { /* ignore */ }
+    throw new TraceFlowError(body.busy ? "busy" : "cancelled", body.busy ? "trace busy" : "trace cancelled");
+  }
   return handle(res);
 }
 

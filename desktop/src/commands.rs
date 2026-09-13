@@ -13,6 +13,7 @@ use patternstudio_tracer::{load_image, load_image_from_memory};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 use vtracer::config::{Clustering, FitMode, Hierarchical, Preset};
+use vtracer::progress::CancelToken;
 use vtracer::Session;
 
 // ── Trace params ──────────────────────────────────────────────────────────
@@ -159,7 +160,7 @@ fn trace_bytes_internal(data: &[u8], params: &TraceParams) -> Result<TraceOut, S
     let img = load_image_from_memory(data).map_err(|e| format!("failed to decode image: {e}"))?;
     let config = build_vtracer_config(params)?;
     let mut session = Session::new(img);
-    trace_with_session(&mut session, &config, params)
+    trace_with_session(&mut session, &config, params, &CancelToken::new())
 }
 
 /// Convert a smart-recommended parameter set into the command's `TraceParams`.
@@ -183,7 +184,7 @@ fn trace_bytes_smart(data: &[u8], family: Option<&str>) -> Result<(TraceOut, pat
     let params = smart_to_trace_params(&decision.params)?;
     let config = build_vtracer_config(&params)?;
     let mut session = Session::new(img);
-    let out = trace_with_session(&mut session, &config, &params)?;
+    let out = trace_with_session(&mut session, &config, &params, &CancelToken::new())?;
     Ok((out, decision))
 }
 
@@ -193,8 +194,15 @@ fn trace_bytes_smart(data: &[u8], family: Option<&str>) -> Result<(TraceOut, pat
 /// parameters are unchanged and only re-runs the cheap downstream stages — the
 /// core of the interactive tuning loop. Split out from the one-shot path so the
 /// `trace_file` command can drive a cached session.
-fn trace_with_session(session: &mut Session, config: &vtracer::Config, params: &TraceParams) -> Result<TraceOut, String> {
-    let doc = session.render(config).map_err(|e| e.to_string())?;
+fn trace_with_session(session: &mut Session, config: &vtracer::Config, params: &TraceParams, cancel: &CancelToken) -> Result<TraceOut, String> {
+    let mut on_progress = |_p: vtracer::progress::Progress| {};
+    let doc = session.render_with_progress(config, cancel, &mut on_progress)
+        .map_err(|e| if matches!(e, vtracer::Error::Cancelled) {
+            "cancelled".into()
+        } else {
+            e.to_string()
+        })?;
+    if cancel.is_cancelled() { return Err("cancelled".into()); }
 
     // "auto": derive the strategy + multi-level profiles from the ideal params.
     let is_auto = params.layer_strategy.as_deref() == Some("auto");
@@ -234,6 +242,7 @@ fn trace_with_session(session: &mut Session, config: &vtracer::Config, params: &
         };
         (assignment, None)
     };
+    if cancel.is_cancelled() { return Err("cancelled".into()); }
     let mut layered = LayeredDoc::from_vector_doc(&doc, &assignment);
     let mut profile_ms: Option<u64> = None;
     if is_auto {
@@ -323,13 +332,51 @@ fn session_cache() -> &'static Mutex<SessionCache> {
     CACHE.get_or_init(|| Mutex::new(SessionCache::new(MAX_SESSIONS)))
 }
 
+/// One in-flight trace per image: the request id that owns it and the token a
+/// newer interactive request trips to abort it between pipeline batches.
+struct ActiveTrace {
+    request_id: String,
+    cancel: CancelToken,
+}
+
+fn active_traces() -> &'static Mutex<HashMap<String, ActiveTrace>> {
+    static ACTIVE: OnceLock<Mutex<HashMap<String, ActiveTrace>>> = OnceLock::new();
+    ACTIVE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Trace an image file by path, reusing a cached session (and thus a cached
 /// segmentation) across calls. This is the fast path for the editor: the image
 /// is read and decoded once, and only the cheap downstream stages re-run when a
 /// non-clustering parameter changes.
 #[tauri::command]
-pub async fn trace_file(file_path: String, params: TraceParams) -> Result<TraceOut, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn trace_file(
+    file_path: String,
+    params: TraceParams,
+    request_id: Option<String>,
+    priority: Option<String>,
+) -> Result<TraceOut, String> {
+    let request_id = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let is_background = priority.as_deref() == Some("background");
+    let image_key = file_path.clone();
+
+    // Preemption: an interactive request cancels whatever is in flight for
+    // this image (it aborts between pipeline batches); a background request
+    // (pre-warm) yields instead and is rejected as busy.
+    let cancel = CancelToken::new();
+    {
+        let mut active = active_traces().lock().unwrap();
+        match active.get(&image_key) {
+            Some(old) if is_background => return Err("busy".into()),
+            Some(old) => old.cancel.cancel(),
+            None => {}
+        }
+        active.insert(image_key.clone(), ActiveTrace {
+            request_id: request_id.clone(),
+            cancel: cancel.clone(),
+        });
+    }
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let path = Path::new(&file_path);
         if !path.exists() {
             return Err(format!("image not found: {file_path}"));
@@ -346,11 +393,27 @@ pub async fn trace_file(file_path: String, params: TraceParams) -> Result<TraceO
                 load_image(&p).map_err(|e| format!("failed to decode image: {e}"))
             })?
         };
-        let mut guard = session.lock().unwrap();
-        trace_with_session(&mut guard, &config, &params)
+        // A cancelled predecessor may still be finishing its current batch;
+        // poll until the session lock frees (cancellation is near-instant).
+        let mut guard = loop {
+            match session.try_lock() {
+                Ok(g) => break g,
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            }
+        };
+        trace_with_session(&mut guard, &config, &params, &cancel)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    // Drop our registration only if we are still the current trace for this image.
+    {
+        let mut active = active_traces().lock().unwrap();
+        if active.get(&image_key).is_some_and(|a| a.request_id == request_id) {
+            active.remove(&image_key);
+        }
+    }
+    result
 }
 
 #[tauri::command]
