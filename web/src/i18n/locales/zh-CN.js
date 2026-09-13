@@ -3,6 +3,7 @@ export default {
   // Common
   "back": "← 返回",
   "language": "语言",
+  "theme": "切换明暗主题",
   "loading": "加载中...",
   "close": "关闭",
   "retry": "重试",

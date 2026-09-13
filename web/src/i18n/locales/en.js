@@ -3,6 +3,7 @@ export default {
   // Common
   "back": "← Back",
   "language": "Language",
+  "theme": "Toggle light/dark theme",
   "loading": "Loading...",
   "close": "Close",
   "retry": "Retry",

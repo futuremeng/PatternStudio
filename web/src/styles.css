@@ -37,10 +37,38 @@
   --radius: 8px;
 }
 
-/* Dark theme — follows the OS appearance (prefers-color-scheme).
+/* Dark theme — follows the OS appearance (prefers-color-scheme) unless the
+   user manually picks light; :root[data-theme="dark"] forces dark.
    深色底 + 提亮的品牌色，保证对比度。 */
+:root[data-theme="dark"] {
+    --bg: #0f1219;
+    --surface: #1a1f2b;
+    --surface2: #232a3a;
+    --border: #2e3648;
+    --text: #e4e7ee;
+    --text2: #8b92a5;
+    --accent: #41b6e6;
+    --accent-hover: #6cc6ef;
+    --accent2: #45a583;
+    --success: #45a583;
+    --error: #ff6b6b;
+    --warning: #ffa300;
+    --on-accent: #0b1524;
+    --badge-done-bg: #12352a;
+    --badge-error-bg: #3a1a1a;
+    --badge-processing-bg: #3a3218;
+    --badge-processing-text: #ffa300;
+    --overlay-panel-bg: rgba(26, 29, 39, 0.92);
+    --selected-bg: rgba(65, 182, 230, 0.12);
+    --profile-badge-bg: rgba(69, 165, 131, 0.15);
+    --profile-badge-border: rgba(69, 165, 131, 0.4);
+    --save-hover-bg: rgba(69, 165, 131, 0.12);
+    --complete-hover: #157a55;
+}
+
+/* Same palette when the OS is in dark mode and the user hasn't forced light. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0f1219;
     --surface: #1a1f2b;
     --surface2: #232a3a;
@@ -66,6 +94,16 @@
     --complete-hover: #157a55;
   }
 }
+
+.theme-toggle {
+  width: 2.15rem; height: 2.15rem; padding: 0;
+  border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text);
+  font-size: 1rem; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color 0.15s, background 0.15s;
+}
+.theme-toggle:hover { border-color: var(--accent); }
 * { box-sizing: border-box; }
 body {
   margin: 0;

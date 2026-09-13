@@ -3,6 +3,7 @@ export default {
   // Common
   "back": "← Indietro",
   "language": "Lingua",
+  "theme": "Cambia tema chiaro/scuro",
   "loading": "Caricamento...",
   "close": "Chiudi",
   "retry": "Riprova",

@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useSyncExternalStore } from "react";
 import { useI18n } from "../i18n/index.jsx";
+import { getEffectiveTheme, subscribeTheme, toggleTheme } from "../theme.js";
 
 /**
  * Unified app header: brand + optional back button + page title/meta + actions.
@@ -8,6 +9,7 @@ import { useI18n } from "../i18n/index.jsx";
  */
 export default function AppHeader({ title, meta, onBack, children }) {
   const { locale, setLocale, t, supported } = useI18n();
+  const theme = useSyncExternalStore(subscribeTheme, getEffectiveTheme);
   return (
     <header className="app-header">
       <span className="brand">PatternStudio</span>
@@ -19,6 +21,14 @@ export default function AppHeader({ title, meta, onBack, children }) {
       {meta && <span className="page-meta">{meta}</span>}
       <div className="header-actions">
         {children}
+        <button
+          className="theme-toggle"
+          onClick={toggleTheme}
+          title={t("theme")}
+          aria-label={t("theme")}
+        >
+          {theme === "dark" ? "☀️" : "🌙"}
+        </button>
         <select
           className="lang-select"
           value={locale}

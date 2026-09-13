@@ -3,6 +3,7 @@ export default {
   // Common
   "back": "← 戻る",
   "language": "言語",
+  "theme": "ライト/ダークを切替",
   "loading": "読み込み中...",
   "close": "閉じる",
   "retry": "再試行",

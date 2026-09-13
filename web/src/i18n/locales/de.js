@@ -3,6 +3,7 @@ export default {
   // Common
   "back": "← Zurück",
   "language": "Sprache",
+  "theme": "Hell/Dunkel umschalten",
   "loading": "Wird geladen...",
   "close": "Schließen",
   "retry": "Erneut versuchen",
