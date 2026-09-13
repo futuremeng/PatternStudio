@@ -63,7 +63,7 @@ function dominantFill(paths) {
       bestN = n;
     }
   }
-  return best || "#8b92a5";
+  return best || "#6f7683";
 }
 
 // The last selected system preset, persisted so that any image opened from
@@ -456,7 +456,7 @@ export default function ImageEditorPage() {
     const sel = selectedPathIdxsRef.current;
     res.paths.forEach((p, i) => {
       if (sel.has(i)) {
-        p.style.stroke = "#6c5ce7";
+        p.style.stroke = "#41b6e6";
         p.style.strokeWidth = "2";
         p.style.cursor = "move";
       } else {
@@ -490,7 +490,7 @@ export default function ImageEditorPage() {
       for (const [px, py] of pts) {
         const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         c.setAttribute("cx", px); c.setAttribute("cy", py); c.setAttribute("r", r);
-        c.setAttribute("fill", "#6c5ce7"); c.setAttribute("stroke", "#fff");
+        c.setAttribute("fill", "#41b6e6"); c.setAttribute("stroke", "#fff");
         c.setAttribute("stroke-width", (r * 0.35).toFixed(1));
         c.classList.add("patch-cp"); c.style.pointerEvents = "none";
         svg.appendChild(c);
@@ -618,8 +618,8 @@ export default function ImageEditorPage() {
           active = true;
           marquee = document.createElementNS("http://www.w3.org/2000/svg", "rect");
           marquee.setAttribute("class", "patch-marquee");
-          marquee.setAttribute("fill", "rgba(108, 92, 231, 0.12)");
-          marquee.setAttribute("stroke", "#6c5ce7");
+          marquee.setAttribute("fill", "rgba(65, 182, 230, 0.15)");
+          marquee.setAttribute("stroke", "#41b6e6");
           marquee.setAttribute("stroke-width", "1");
           marquee.setAttribute("stroke-dasharray", "4 3");
           marquee.style.pointerEvents = "none";

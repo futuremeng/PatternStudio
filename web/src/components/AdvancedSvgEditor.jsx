@@ -167,7 +167,7 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
       canvas_expansion: 0,
       initFill: { color: "000000", opacity: 1 },
       initStroke: { color: "000000", width: 1, opacity: 1 },
-      selectionColor: "#6c5ce7",
+      selectionColor: "#41b6e6",
       wireframe: false,
       showlayers: false,
       no_save_warning: true,
