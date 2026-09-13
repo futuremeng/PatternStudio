@@ -120,8 +120,8 @@ body {
   flex-wrap: wrap;
 }
 .app-header .brand {
-  font-size: 1.05rem; font-weight: 700;
-  color: var(--accent2); white-space: nowrap;
+  width: 40px; height: 40px; border-radius: 8px;
+  object-fit: cover; display: block; flex: none;
 }
 .app-header .header-sep { width: 1px; height: 1.4rem; background: var(--border); }
 .app-header .page-title {

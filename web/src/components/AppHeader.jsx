@@ -1,6 +1,7 @@
 import React, { useSyncExternalStore } from "react";
 import { useI18n } from "../i18n/index.jsx";
 import { getEffectiveTheme, subscribeTheme, toggleTheme } from "../theme.js";
+import appIcon from "../assets/icon.png";
 
 /**
  * Unified app header: brand + optional back button + page title/meta + actions.
@@ -12,7 +13,7 @@ export default function AppHeader({ title, meta, onBack, children }) {
   const theme = useSyncExternalStore(subscribeTheme, getEffectiveTheme);
   return (
     <header className="app-header">
-      <span className="brand">PatternStudio</span>
+      <img className="brand" src={appIcon} alt="PatternStudio" />
       <span className="header-sep" aria-hidden="true" />
       {onBack && (
         <button className="back-btn" onClick={onBack}>{t("back")}</button>
