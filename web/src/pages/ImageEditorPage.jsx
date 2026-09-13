@@ -16,6 +16,20 @@ const MAX_USER_CONFIGS = 12;
 // in priority order. The currently-active preset is already cached and skipped.
 const PREWARM_ORDER = ["color", "lineArt", "bw", "gradient", "lowPoly"];
 
+// The last selected system preset, persisted so that any image opened from
+// the list (same or different project) starts with it. The desktop app
+// embeds this same frontend, so it shares the choice.
+const LAST_PRESET_KEY = "patternstudio.lastPreset";
+function loadLastPreset() {
+  try {
+    const key = localStorage.getItem(LAST_PRESET_KEY);
+    return key && MODE_PRESETS[key] ? key : null;
+  } catch { return null; }
+}
+function saveLastPreset(key) {
+  try { localStorage.setItem(LAST_PRESET_KEY, key); } catch { /* storage unavailable */ }
+}
+
 /** Default configs from MODE_PRESETS (full param sets, ready to trace). */
 function buildDefaultConfigs() {
   return Object.entries(MODE_PRESETS).map(([key, preset]) => ({
@@ -74,12 +88,18 @@ export default function ImageEditorPage() {
   const { projectId, filename } = useParams();
   const navigate = useNavigate();
   const [imageUrl, setImageUrl] = useState(null);
-  const [params, setParams] = useState(DEFAULT_PARAMS);
+  const [params, setParams] = useState(() => {
+    const key = loadLastPreset();
+    return key ? presetFullParams(key) : DEFAULT_PARAMS;
+  });
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [configs, setConfigs] = useState(buildDefaultConfigs);
-  const [activeConfigId, setActiveConfigId] = useState("default-color");
+  const [activeConfigId, setActiveConfigId] = useState(() => {
+    const key = loadLastPreset();
+    return key ? `default-${key}` : "default-color";
+  });
   const [compareMode, setCompareMode] = useState("side"); // "side" | "overlay"
   const [overlayPos, setOverlayPos] = useState(50); // divider position, percent
   const [smartInfo, setSmartInfo] = useState(null); // last Smart Preset decision
@@ -594,6 +614,12 @@ export default function ImageEditorPage() {
 
   const onConfigSelect = useCallback((config) => {
     setActiveConfigId(config.id);
+    // Remember the selected system preset: the next image opened from the
+    // list (same or different) starts with it.
+    if (config.isDefault) {
+      const key = config.id.startsWith("default-") ? config.id.slice("default-".length) : null;
+      if (key && MODE_PRESETS[key]) saveLastPreset(key);
+    }
     // Normalize: configs saved before newer params fields exist.
     const next = { ...DEFAULT_PARAMS, ...config.params };
     setParams(prev =>
