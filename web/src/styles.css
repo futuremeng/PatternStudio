@@ -237,8 +237,18 @@ body {
   display: block; transition: transform 0.3s;
 }
 .image-card:hover img { transform: scale(1.05); }
-/* Split preview for processed images: left = left half of original,
-   top-right = top-right quarter of line art, bottom-right = bottom-right quarter of color fill */
+/* Split preview for processed images. All three panels show regions of the
+   SAME square thumbnail — the "cover square" (side = max(w,h), centered on
+   the image) — at the same scale, so content aligns across panel borders.
+   Left = left half of the original, top-right = top-right quarter of the
+   line art, bottom-right = bottom-right quarter of the color fill.
+   The SVGs get their quarter via cropSvgQuarter() (viewBox rewrite). The
+   raster gets it via object-fit: CONTAIN on a square box (200% x 100%):
+   contain fits the LONGER side to the box, which makes the cover square
+   coincide with the box exactly, so the box's left half IS the cover
+   square's left half. (cover would not: for non-square images it zooms the
+   image past the box and the visible half is a center strip, not the left
+   half of the cover square.) */
 .image-card .img-wrap.split { display: block; }
 .image-card .split-left {
   position: absolute; top: 0; left: 0; bottom: 0;
@@ -248,7 +258,7 @@ body {
 }
 .image-card .split-left img {
   width: 200%; height: 100%; max-width: none;
-  object-fit: cover;
+  object-fit: contain;
 }
 .image-card:hover .split-left img { transform: none; }
 .image-card .split-right {

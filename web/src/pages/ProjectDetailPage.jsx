@@ -14,27 +14,35 @@ import { useI18n } from "../i18n/index.jsx";
 const smartCacheKey = (family) => ({ __smart: family });
 
 /**
- * Crop an SVG to one of its quarters by rewriting the viewBox.
+ * Crop an SVG to one of its quarters *of the cover square* by rewriting the
+ * viewBox. The cover square is the same square thumbnail the left panel's
+ * raster uses (object-fit: cover on a square box): side = max(w, h),
+ * centered on the image. Normalizing all three panels to that one square
+ * first is what keeps them aligned — left half + top-right quarter +
+ * bottom-right quarter tile the same square at the same scale.
  * quarter: "tr" = top-right, "br" = bottom-right.
  * Falls back to the width/height attributes when no viewBox exists.
  */
 function cropSvgQuarter(svg, quarter) {
+  let x = 0, y = 0, w, h, vbAttr = null;
   const vb = svg.match(/viewBox="([^"]+)"/);
   if (vb) {
-    const [x, y, w, h] = vb[1].split(/[\s,]+/).map(Number);
+    [x, y, w, h] = vb[1].split(/[\s,]+/).map(Number);
     if ([x, y, w, h].some(n => !Number.isFinite(n))) return svg;
-    const nx = x + w / 2;
-    const ny = quarter === "tr" ? y : y + h / 2;
-    return svg.replace(vb[0], `viewBox="${nx} ${ny} ${w / 2} ${h / 2}"`);
+    vbAttr = vb[0];
+  } else {
+    const wm = svg.match(/width="([\d.]+)(px)?"/);
+    const hm = svg.match(/height="([\d.]+)(px)?"/);
+    if (!wm || !hm) return svg;
+    w = parseFloat(wm[1]);
+    h = parseFloat(hm[1]);
   }
-  const wm = svg.match(/width="([\d.]+)(px)?"/);
-  const hm = svg.match(/height="([\d.]+)(px)?"/);
-  if (wm && hm) {
-    const w = parseFloat(wm[1]), h = parseFloat(hm[1]);
-    const ny = quarter === "tr" ? 0 : h / 2;
-    return svg.replace(/<svg/, `<svg viewBox="${w / 2} ${ny} ${w / 2} ${h / 2}"`);
-  }
-  return svg;
+  // Same "thumbnail" as the raster: cover-fit to a centered square.
+  const side = Math.max(w, h);
+  const sx = x + (w - side) / 2;
+  const sy = y + (h - side) / 2;
+  const viewBox = `viewBox="${sx + side / 2} ${quarter === "tr" ? sy : sy + side / 2} ${side / 2} ${side / 2}"`;
+  return vbAttr ? svg.replace(vbAttr, viewBox) : svg.replace(/<svg/, `<svg ${viewBox}`);
 }
 
 /**
