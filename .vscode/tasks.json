@@ -2,6 +2,33 @@
     "version": "2.0.0",
     "tasks": [
         {
+            // Tauri 要求窗口图标必须是 8-bit RGBA (TrueColorAlpha)。
+            // 重新生成 icon.png 后常变成 16-bit 或非 RGBA，导致
+            // generate_context! 编译期 panic("is not RGBA") 或运行期
+            // panic("dimensions don't match")。此 task 在 debug 前检测，
+            // 仅在图标不是 8-bit RGBA 时规范化并 touch 源文件强制重编
+            // (cargo 检测不到图标变更，必须 touch 才会重新嵌入)。
+            "label": "prepare desktop icon (8-bit RGBA)",
+            "type": "shell",
+            "command": "fmt=$(/opt/homebrew/bin/magick identify -format '%[type]-%z' desktop/icons/icon.png); if [ \"$fmt\" != \"TrueColorAlpha-8\" ]; then /opt/homebrew/bin/magick desktop/icons/icon.png -depth 8 -type TrueColorAlpha desktop/icons/icon.png && touch desktop/src/lib.rs && echo 'icon was not 8-bit RGBA -> normalized + forcing recompile'; else echo 'icon already 8-bit RGBA -> nothing to do'; fi",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            // debug 前完整准备: 规范化 icon.png(8-bit RGBA) + cargo build desktop
+            // + 把新二进制 copy 进 PatternStudio.app（.app 里的二进制是 copy，
+            // 不刷新就是旧的）。lldb 跑 .app 里的二进制 → Dock 显示校徽图标。
+            "label": "build desktop (.app ready)",
+            "type": "shell",
+            "command": "fmt=$(/opt/homebrew/bin/magick identify -format '%[type]-%z' desktop/icons/icon.png); if [ \"$fmt\" != \"TrueColorAlpha-8\" ]; then /opt/homebrew/bin/magick desktop/icons/icon.png -depth 8 -type TrueColorAlpha desktop/icons/icon.png && touch desktop/src/lib.rs && echo 'icon normalized to 8-bit RGBA'; fi; cargo build --bin=patternstudio-desktop --manifest-path=desktop/Cargo.toml --features tauri/custom-protocol && bash desktop/refresh_app.sh",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": ["$rustc"]
+        },
+        {
             "label": "cargo build (workspace)",
             "type": "cargo",
             "command": "build",

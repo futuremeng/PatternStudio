@@ -40,17 +40,12 @@
             "type": "lldb",
             "request": "launch",
             "name": "Debug Desktop (Tauri)",
-            // 调试 Tauri 桌面版（Rust 侧）。前端需先构建: make web
-            // 断点可打在 desktop/src/lib.rs 的 tauri command 里
-            // 注意: 必须带 tauri/custom-protocol，否则是 dev 模式，
-            // 窗口会去加载 devUrl（需要 vite dev server）而不是嵌入的前端 → 白屏
-            "cargo": {
-                "args": ["build", "--bin=patternstudio-desktop", "--manifest-path=desktop/Cargo.toml", "--features", "tauri/custom-protocol"],
-                "filter": {
-                    "name": "patternstudio-desktop",
-                    "kind": "bin"
-                }
-            },
+            // 跑 .app bundle 里的二进制 → Dock 显示校徽图标（裸二进制只能显示默认图标）。
+            // preLaunchTask 会: 规范化 icon.png 为 8-bit RGBA + cargo build + 把新二进制
+            // copy 进 .app（否则 .app 里是旧二进制）。断点打在 desktop/src/lib.rs。
+            // 注意: 必须带 tauri/custom-protocol，否则是 dev 模式（需 vite dev server）→ 白屏
+            "preLaunchTask": "build desktop (.app ready)",
+            "program": "${workspaceFolder}/target/debug/PatternStudio.app/Contents/MacOS/patternstudio-desktop",
             "cwd": "${workspaceFolder}"
         },
         {
