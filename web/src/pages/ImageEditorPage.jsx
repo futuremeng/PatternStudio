@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getImageUrl, prepareSource, traceSource, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams } from "../api.js";
+import { getImageUrl, prepareSource, traceSource, smartSource, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams } from "../api.js";
 import { getCachedTrace, setCachedTrace, stableStringify } from "../traceCache.js";
 import { loadSavedConfigs, saveConfig, deleteSavedConfig } from "../configStore.js";
 import ParameterPanel from "../components/ParameterPanel.jsx";
@@ -80,6 +80,8 @@ export default function ImageEditorPage() {
   const [retryTick, setRetryTick] = useState(0);
   const [compareMode, setCompareMode] = useState("side"); // "side" | "overlay"
   const [overlayPos, setOverlayPos] = useState(50); // divider position, percent
+  const [smartInfo, setSmartInfo] = useState(null); // last Smart Preset decision
+  const [smartBusy, setSmartBusy] = useState(false);
   const traceSeq = useRef(0);
   const configTimerRef = useRef(null);
   const userConfigSeq = useRef(0);
@@ -343,6 +345,54 @@ export default function ImageEditorPage() {
     );
   }, []);
 
+  /**
+   * Smart tuning: search for the best parameters *within the preset family
+   * the user is currently working in*. The param change triggers the normal
+   * auto-trace, so the preview updates for free.
+   */
+  const runSmart = useCallback(async () => {
+    if (!imageUrl || smartBusy) return;
+    lastUserActiveRef.current = Date.now();
+    setSmartBusy(true);
+    setSmartInfo(null);
+    setError(null);
+    try {
+      const source = prepareSource(projectId, filename);
+      const family = familyFromParams(params);
+      const decision = await smartSource(source, family);
+      setSmartInfo(decision);
+      if (decision?.params) {
+        const next = { ...DEFAULT_PARAMS, ...decision.params };
+        setParams(prev =>
+          stableStringify(prev) === stableStringify(next) ? prev : next
+        );
+        setActiveConfigId(null);
+      }
+    } catch (e) {
+      setError(`智能调参失败: ${e.message}`);
+    } finally {
+      setSmartBusy(false);
+    }
+  }, [imageUrl, smartBusy, projectId, filename, params]);
+
+  /**
+   * Apply the preset-default result (from the smart comparison) instead of the
+   * smart winner, so the user can fall back to the known-good preset if the
+   * tuned result doesn't look right.
+   */
+  const applyPresetResult = useCallback(() => {
+    const preset = smartInfo?.preset;
+    if (!preset?.params) return;
+    const next = { ...DEFAULT_PARAMS, ...preset.params };
+    setParams(prev =>
+      stableStringify(prev) === stableStringify(next) ? prev : next
+    );
+    setActiveConfigId(null);
+  }, [smartInfo]);
+
+  // Clear the smart banner when switching to a different image.
+  useEffect(() => { setSmartInfo(null); }, [imageId]);
+
   const onConfigDelete = useCallback((id) => {
     const target = configsRef.current.find(c => c.id === id);
     if (target?.saved) deleteSavedConfig(id).catch(() => {});
@@ -365,6 +415,16 @@ export default function ImageEditorPage() {
       downloadSvg(result.svg, filename.replace(/\.\w+$/, "") + ".svg");
     }
   }, [result, filename]);
+
+  // The actually-applied smart winner (may be the preset baseline when no
+  // variation clearly beat it), and whether it *is* the preset.
+  const smartWinner = smartInfo?.candidates?.find(
+    c => stableStringify(c.params) === stableStringify(smartInfo?.params)
+  );
+  const smartIsPreset = !!(
+    smartInfo?.preset &&
+    stableStringify(smartInfo.preset.params) === stableStringify(smartInfo?.params)
+  );
 
   return (
     <div className={`editor-page${maximized ? " maximized" : ""}`}>
@@ -392,7 +452,13 @@ export default function ImageEditorPage() {
 
       <div className="editor-main">
         <aside className="editor-sidebar">
-          <ParameterPanel params={params} onChange={onParamsChange} />
+          <ParameterPanel
+            params={params}
+            onChange={onParamsChange}
+            onSmart={runSmart}
+            smartBusy={smartBusy}
+            activeFamilyLabel={MODE_PRESETS[familyFromParams(params)]?.label}
+          />
         </aside>
 
         <div className="editor-content">
@@ -477,6 +543,30 @@ export default function ImageEditorPage() {
         </aside>
       </div>
 
+      {smartInfo?.params && (
+        <div className="smart-banner">
+          <span className="smart-banner-icon">✨</span>
+          <span className="smart-banner-text">
+            智能调参：<strong>{smartWinner?.label || smartInfo.family}</strong>
+            {smartInfo.reason ? ` — ${smartInfo.reason}` : ""}
+          </span>
+          {smartInfo.preset && (
+            <span
+              className="smart-banner-compare"
+              title="预设默认结果的指标（对照基准）"
+            >
+              预设 保真 {smartInfo.preset.fidelity.toFixed(2)} · 复杂度{" "}
+              {smartInfo.preset.complexity.toFixed(2)}
+            </span>
+          )}
+          {smartInfo.preset && !smartIsPreset && (
+            <button className="smart-banner-preset" onClick={applyPresetResult}>
+              使用预设结果
+            </button>
+          )}
+          <button className="smart-banner-close" onClick={() => setSmartInfo(null)} aria-label="关闭">×</button>
+        </div>
+      )}
       <ConfigStrip
         configs={configs}
         activeConfigId={activeConfigId}

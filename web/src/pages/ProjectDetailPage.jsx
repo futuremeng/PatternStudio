@@ -1,8 +1,16 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getImageUrl, startBatchTrace, presetFullParams } from "../api.js";
+import { getImageUrl, startBatchTrace, presetFullParams, MODE_PRESETS } from "../api.js";
 import { getCachedTrace, setCachedTrace } from "../traceCache.js";
 import AppHeader from "../components/AppHeader.jsx";
+
+/**
+ * Cache marker for smart-batch results, per preset family. The winning params
+ * differ per image, so smart results are keyed by this stable marker (for the
+ * "already done?" pre-check) and additionally under the winning params (so
+ * the editor's smart flow hits the cache).
+ */
+const smartCacheKey = (family) => ({ __smart: family });
 
 /**
  * Crop an SVG to one of its quarters by rewriting the viewBox.
@@ -73,7 +81,20 @@ function ImageCard({ projectId, filename, preview, onClick }) {
 
   return (
     <div className="image-card" ref={cardRef} onClick={onClick}>
-      {preview ? (
+      {preview?.result ? (
+        // Single-preset batch result (bw / gradient / lowPoly / smart), shown full on the right.
+        <div className="img-wrap split">
+          <div className="split-left">
+            {url && <img src={url} alt={filename} />}
+          </div>
+          <div className="split-right">
+            <div className="split-panel">
+              <div className="svg-mini" dangerouslySetInnerHTML={{ __html: preview.result }} />
+              {preview.label && <div className="mini-label">{preview.label}</div>}
+            </div>
+          </div>
+        </div>
+      ) : preview ? (
         <div className="img-wrap split">
           <div className="split-left">
             {url && <img src={url} alt={filename} />}
@@ -105,6 +126,10 @@ export default function ProjectDetailPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
   const [project, setProject] = useState(null);
+  // Batch: the user picks a preset family (what output they want), then
+  // chooses fixed params or smart tuning (best params within that family).
+  const [batchPreset, setBatchPreset] = useState("lineArt");
+  const [batchSmart, setBatchSmart] = useState(false);
   const [batchStatus, setBatchStatus] = useState(null);
   const [batchProgress, setBatchProgress] = useState(null);
   const [batchFailed, setBatchFailed] = useState(0);
@@ -136,7 +161,8 @@ export default function ProjectDetailPage() {
     })();
   }, [projectId]);
 
-  // Load cached line/color results (same params as batch trace) for the split preview
+  // Load cached line/color results (fixed preset params or smart results)
+  // for the split preview
   useEffect(() => {
     if (!project?.images?.length) return;
     let cancelled = false;
@@ -144,11 +170,15 @@ export default function ProjectDetailPage() {
       const found = {};
       for (const name of project.images) {
         const imageId = `${projectId}/${name}`;
-        const [line, color] = await Promise.all([
+        const [lineFixed, lineSmart, colorFixed, colorSmart] = await Promise.all([
           getCachedTrace(imageId, presetFullParams("lineArt")).catch(() => null),
+          getCachedTrace(imageId, smartCacheKey("lineArt")).catch(() => null),
           getCachedTrace(imageId, presetFullParams("color")).catch(() => null),
+          getCachedTrace(imageId, smartCacheKey("color")).catch(() => null),
         ]);
-        if (line || color) found[name] = { line: line?.svg || null, color: color?.svg || null };
+        const line = (lineFixed || lineSmart)?.svg || null;
+        const color = (colorFixed || colorSmart)?.svg || null;
+        if (line || color) found[name] = { line, color };
       }
       if (!cancelled) setPreviews(found);
     })();
@@ -157,17 +187,23 @@ export default function ProjectDetailPage() {
 
   const onBatchTrace = useCallback(async () => {
     if (!project) return;
-    // Two passes per image: line art, then color fill (both feed the split preview)
-    const jobs = [
-      { pkey: "line", params: presetFullParams("lineArt") },
-      { pkey: "color", params: presetFullParams("color") },
-    ];
+    // One pass per image with the selected preset. Smart mode: the engine
+    // analyzes each image and trial-traces parameter variations *within* the
+    // chosen family, using the winner per image.
+    const family = batchPreset;
+    const jobs = [{
+      pkey: family,
+      family,
+      smart: batchSmart,
+      params: presetFullParams(family),
+    }];
     // Cache-first: only send images without a same-params result to the backend
     const plan = [];
     for (const job of jobs) {
       const missing = [];
       for (const name of project.images) {
-        const cached = await getCachedTrace(`${projectId}/${name}`, job.params).catch(() => null);
+        const key = job.smart ? smartCacheKey(job.family) : job.params;
+        const cached = await getCachedTrace(`${projectId}/${name}`, key).catch(() => null);
         if (!cached) missing.push(name);
       }
       if (missing.length) plan.push({ ...job, missing });
@@ -187,7 +223,7 @@ export default function ProjectDetailPage() {
     let doneCount = 0;
     let failedCount = 0;
     for (const job of plan) {
-      const handle = startBatchTrace(projectId, job.params, job.missing);
+      const handle = startBatchTrace(projectId, job.params, job.missing, !!job.smart, job.smart ? job.family : undefined);
       batchHandleRef.current = handle;
       handle.setOnEvent((event) => {
         if (event.type === "processing") {
@@ -195,19 +231,33 @@ export default function ProjectDetailPage() {
         } else if (event.type === "done") {
           doneCount += 1;
           setBatchProgress(p => ({ ...p, current: doneCount }));
-          // Persist the generated result so the editor page hits the cache
-          setCachedTrace(`${projectId}/${event.file}`, job.params, {
+          const res = {
             svg: event.svg,
             width: event.width,
             height: event.height,
             shapeCount: event.shapeCount ?? event.shape_count,
             layerCount: (event.layers || []).length,
             layers: event.layers || [],
-          }).catch(() => {});
-          // Refresh the split preview for this card
+          };
+          if (job.smart) {
+            // Persist under the stable per-family marker (pre-check) and
+            // under the winning params (so the editor's smart flow hits the cache).
+            setCachedTrace(`${projectId}/${event.file}`, smartCacheKey(job.family), res).catch(() => {});
+            if (event.smart?.params) {
+              setCachedTrace(`${projectId}/${event.file}`, event.smart.params, res).catch(() => {});
+            }
+          } else {
+            // Persist the generated result so the editor page hits the cache
+            setCachedTrace(`${projectId}/${event.file}`, job.params, res).catch(() => {});
+          }
+          // Preview slot: lineArt / color feed the split panels; the other
+          // presets take the full right panel with a label.
+          const slot = job.family === "lineArt" ? "line" : job.family === "color" ? "color" : "result";
+          const update = { [slot]: event.svg };
+          if (slot === "result") update.label = MODE_PRESETS[job.family]?.label;
           setPreviews(prev => ({
             ...prev,
-            [event.file]: { ...(prev[event.file] || {}), [job.pkey]: event.svg },
+            [event.file]: { ...(prev[event.file] || {}), ...update },
           }));
         } else if (event.type === "error") {
           doneCount += 1;
@@ -228,7 +278,7 @@ export default function ProjectDetailPage() {
       setBatchFailed(failedCount);
       setBatchProgress({ current: total, total, file: "" });
     }
-  }, [project, projectId]);
+  }, [project, projectId, batchPreset, batchSmart]);
 
   const onCancelBatch = useCallback(() => {
     cancelRef.current = true;
@@ -247,12 +297,14 @@ export default function ProjectDetailPage() {
   }
 
   const allDone = batchStatus === "done" && batchFailed === 0;
+  const presetLabel = MODE_PRESETS[batchPreset]?.label || "";
   const batchLabel =
     batchStatus === "running" ? "批量处理中..."
     : allDone ? "✓ 已完成"
     : batchStatus === "cancelled" ? "⚡ 继续处理"
     : batchStatus === "done" ? "⚡ 重新处理失败项"
-    : "⚡ 批量处理";
+    : batchSmart ? `✨ 智能批量 · ${presetLabel}`
+    : `⚡ 批量处理 · ${presetLabel}`;
 
   return (
     <div className="project-detail-page">
@@ -261,6 +313,21 @@ export default function ProjectDetailPage() {
         meta={`${project.images?.length || 0} 张图片`}
         onBack={() => navigate("/")}
       >
+        <select
+          className="batch-preset-select"
+          value={batchPreset}
+          onChange={e => { setBatchPreset(e.target.value); setBatchStatus(null); }}
+          disabled={batchStatus === "running"}
+          title="批量预设：选择要生成的输出类型"
+        >
+          {Object.entries(MODE_PRESETS).map(([key, p]) => (
+            <option key={key} value={key}>{p.label}</option>
+          ))}
+        </select>
+        <div className="seg-control" title="智能调参：在所选预设内为每张图试算最佳参数">
+          <button className={!batchSmart ? "active" : ""} onClick={() => { setBatchSmart(false); setBatchStatus(null); }}>固定</button>
+          <button className={batchSmart ? "active" : ""} onClick={() => { setBatchSmart(true); setBatchStatus(null); }}>✨ 智能</button>
+        </div>
         {batchStatus === "running" && (
           <button className="danger" onClick={onCancelBatch}>⏹ 中止</button>
         )}

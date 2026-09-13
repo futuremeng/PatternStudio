@@ -55,6 +55,24 @@ export async function traceSource(source, params) {
   return handle(res);
 }
 
+/**
+ * Smart Preset: analyze the image and trial-trace candidate parameter sets.
+ * Returns { params, family, reason, stats, candidates, elapsedMs } —
+ * `params` is ready to feed into traceSource, and `reason` explains the
+ * choice in human-readable terms.
+ */
+export async function smartSource(source, family) {
+  if (isTauri()) {
+    return tauriInvoke("smart_file", { path: source.path, family: family || null });
+  }
+  const res = await fetch(`${BASE}/smart`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project_id: source.projectId, filename: source.filename, family: family || null }),
+  });
+  return handle(res);
+}
+
 /** One-shot trace of an in-memory file (upload on web, bytes on Tauri). */
 export async function traceImage(file, params) {
   if (isTauri()) {
@@ -159,14 +177,14 @@ export async function cancelBatchTrace(projectId, jobId) {
   await fetch(`${BASE}/projects/${projectId}/batch-trace/${jobId}/cancel`, { method: "POST" });
 }
 
-export function startBatchTrace(projectId, params, files) {
+export function startBatchTrace(projectId, params, files, smart = false, family) {
   if (isTauri()) {
     let unlisten = null;
     let onEvent = () => {};
     let jobId = null;
     let resolveDone = () => {};
     const done = new Promise(r => { resolveDone = r; });
-    const start = tauriInvoke("batch_trace", { folderPath: projectId, params, files })
+    const start = tauriInvoke("batch_trace", { folderPath: projectId, params, files, smart, family: family || null })
       .then((id) => {
         jobId = id;
         return tauriListen("batch-trace", (event) => {
@@ -194,7 +212,7 @@ export function startBatchTrace(projectId, params, files) {
   const start = fetch(`${BASE}/projects/${projectId}/batch-trace`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ params, files }),
+    body: JSON.stringify({ params, files, smart, family: family || null }),
   }).then(async res => {
     const { job_id } = await res.json();
     jobId = job_id;
@@ -307,5 +325,19 @@ export const MODE_PRESETS = {
 export function presetFullParams(key) {
   const preset = MODE_PRESETS[key];
   return preset ? { ...DEFAULT_PARAMS, ...preset.params } : { ...DEFAULT_PARAMS };
+}
+
+/**
+ * Derive the preset family from a param set, so "smart tuning" can search
+ * within the family the user is currently working in (whether they got here
+ * via a preset card or manual tweaks).
+ */
+export function familyFromParams(p) {
+  if (!p) return "color";
+  if (p.lineArt && p.clustering === "binary") return "lineArt";
+  if (p.clustering === "binary") return "bw";
+  if (p.mode === "polygon") return "lowPoly";
+  if (p.preset === "photo") return "gradient";
+  return "color";
 }
 

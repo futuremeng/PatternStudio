@@ -14,6 +14,7 @@ use axum::{Json, Router};
 use futures::stream::{Stream, StreamExt};
 use patternstudio_core::ir::LayeredDoc;
 use patternstudio_core::profiles::{AutoDecision, IdealParams, apply_profiles};
+use patternstudio_core::smart::SmartDecision;
 use patternstudio_core::{key_for_source, LayerAssignment, SessionCache};
 use patternstudio_svg::LayeredWriter;
 use patternstudio_tracer::load_image;
@@ -223,6 +224,32 @@ fn do_trace(img_path: &Path, params: &TraceParams) -> Result<TraceResult, String
     do_trace_with_session(&mut session, &config, params)
 }
 
+/// Convert a smart-recommended parameter set into the API's `TraceParams`.
+/// Both structs use camelCase with identical field names, so a JSON round-trip
+/// is a safe, field-agnostic mapping.
+fn smart_to_trace_params(p: &patternstudio_core::smart::SmartParams) -> Result<TraceParams, String> {
+    let v = serde_json::to_value(p).map_err(|e| e.to_string())?;
+    serde_json::from_value(v).map_err(|e| e.to_string())
+}
+
+/// Smart one-shot trace: decode the image once, analyze it, trial-trace
+/// candidate parameter sets, then trace at full resolution with the winner.
+/// `family` restricts the search to one preset family (absent = auto).
+/// Returns the trace result plus the decision (family, reason, params).
+fn do_trace_smart(img_path: &Path, family: Option<&str>) -> Result<(TraceResult, patternstudio_core::smart::SmartDecision), String> {
+    let img = load_image(img_path).map_err(|e| format!("failed to load image: {e}"))?;
+    let decision = match family {
+        Some(f) => patternstudio_core::smart::recommend_for(&img, f),
+        None => patternstudio_core::smart::recommend(&img),
+    }
+    .map_err(|e| format!("smart analysis failed: {e}"))?;
+    let params = smart_to_trace_params(&decision.params)?;
+    let config = build_vtracer_config(&params)?;
+    let mut session = Session::new(img);
+    let tr = do_trace_with_session(&mut session, &config, &params)?;
+    Ok((tr, decision))
+}
+
 /// Layering + SVG over a document produced by a [`Session`].
 ///
 /// `session.render` reuses the cached segmentation when the clustering
@@ -344,18 +371,23 @@ struct TraceRequest {
     filename: Option<String>,
     #[serde(default)]
     params: Option<TraceParams>,
+    /// Smart mode: restrict the search to this preset family
+    /// ("lineArt" | "color" | "bw" | "gradient" | "lowPoly").
+    /// Absent = auto family selection.
+    #[serde(default)]
+    family: Option<String>,
 }
 
-async fn trace(
-    State(state): State<AppState>,
-    Json(req): Json<TraceRequest>,
-) -> Result<Json<TraceResult>, (StatusCode, String)> {
-    // Resolve the source image path from whichever identifier the client sent.
-    // `project_id` + `filename` lets the web UI trace straight from the project
-    // folder without re-uploading the image on every parameter change.
-    let img_path = if let Some(ref asset_id) = req.asset_id {
+/// Resolve the source image path from whichever identifier the client sent.
+/// `project_id` + `filename` lets the web UI trace straight from the project
+/// folder without re-uploading the image on every parameter change.
+fn resolve_source_path(
+    state: &AppState,
+    req: &TraceRequest,
+) -> Result<PathBuf, (StatusCode, String)> {
+    if let Some(ref asset_id) = req.asset_id {
         state.assets.lock().unwrap().get(asset_id).cloned()
-            .ok_or((StatusCode::NOT_FOUND, format!("asset {asset_id} not found")))?
+            .ok_or((StatusCode::NOT_FOUND, format!("asset {asset_id} not found")))
     } else if let (Some(ref pid), Some(ref name)) = (&req.project_id, &req.filename) {
         let project = state.projects.lock().unwrap().get(pid).cloned()
             .ok_or((StatusCode::NOT_FOUND, "project not found".into()))?;
@@ -366,13 +398,20 @@ async fn trace(
         if !p.exists() {
             return Err((StatusCode::NOT_FOUND, "image not found".into()));
         }
-        p
+        Ok(p)
     } else if let Some(ref fp) = req.file_path {
-        PathBuf::from(fp)
+        Ok(PathBuf::from(fp))
     } else {
-        return Err((StatusCode::BAD_REQUEST,
-            "asset_id, project_id+filename, or file_path required".into()));
-    };
+        Err((StatusCode::BAD_REQUEST,
+            "asset_id, project_id+filename, or file_path required".into()))
+    }
+}
+
+async fn trace(
+    State(state): State<AppState>,
+    Json(req): Json<TraceRequest>,
+) -> Result<Json<TraceResult>, (StatusCode, String)> {
+    let img_path = resolve_source_path(&state, &req)?;
     let params = req.params.unwrap_or_default();
     let sessions = state.sessions.clone();
     let result = tokio::task::spawn_blocking(move || {
@@ -390,6 +429,31 @@ async fn trace(
         };
         let mut guard = session.lock().unwrap();
         do_trace_with_session(&mut guard, &config, &params)
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(result))
+}
+
+/// Smart Preset: analyze the image and trial-trace candidate parameter sets,
+/// returning the best one plus the full candidate report.
+async fn smart(
+    State(state): State<AppState>,
+    Json(req): Json<TraceRequest>,
+) -> Result<Json<SmartDecision>, (StatusCode, String)> {
+    let img_path = resolve_source_path(&state, &req)?;
+    let family = req.family;
+    let result = tokio::task::spawn_blocking(move || {
+        let image = load_image(&img_path)
+            .map_err(|e| format!("failed to load image: {e}"))?;
+        // Family-scoped when the client picked a preset, auto otherwise.
+        let decision = match family.as_deref() {
+            Some(f) => patternstudio_core::smart::recommend_for(&image, f),
+            None => patternstudio_core::smart::recommend(&image),
+        }
+        .map_err(|e| format!("smart analysis failed: {e}"))?;
+        Ok::<SmartDecision, String>(decision)
     })
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
@@ -568,6 +632,14 @@ struct BatchTraceRequest {
     params: Option<TraceParams>,
     #[serde(default)]
     files: Option<Vec<String>>,
+    /// Smart mode: ignore `params`, analyze each image and trial-trace
+    /// candidate parameter sets, using the winner per image.
+    #[serde(default)]
+    smart: bool,
+    /// Smart mode: restrict the search to this preset family.
+    /// Absent = auto family selection per image.
+    #[serde(default)]
+    family: Option<String>,
 }
 
 async fn start_batch_trace(
@@ -591,6 +663,8 @@ async fn start_batch_trace(
     };
     let folder = project.path.clone();
     let params = req.params.unwrap_or_default();
+    let smart = req.smart;
+    let family = req.family;
     let cancelled = Arc::new(AtomicBool::new(false));
     state.cancels.lock().unwrap().insert(job_id.clone(), cancelled.clone());
     let job_id_cleanup = job_id.clone();
@@ -620,12 +694,27 @@ async fn start_batch_trace(
                 }).to_string())).await;
             let img_path = folder.join(file);
             let params_clone = params.clone();
-            let result = tokio::task::spawn_blocking(move || do_trace(&img_path, &params_clone))
-                .await.unwrap_or_else(|e| Err(e.to_string()));
+            let family_clone = family.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                if smart {
+                    do_trace_smart(&img_path, family_clone.as_deref()).map(|(tr, d)| (tr, Some(d)))
+                } else {
+                    do_trace(&img_path, &params_clone).map(|tr| (tr, None))
+                }
+            })
+            .await.unwrap_or_else(|e| Err(e.to_string()));
             let elapsed = start.elapsed().as_millis() as u64;
             match result {
-                Ok(tr) => {
+                Ok((tr, decision)) => {
                     success += 1;
+                    // Smart mode: report which family won and with which
+                    // params, so the client can cache the result under those
+                    // params and show the recommendation.
+                    let smart_info = decision.as_ref().map(|d| serde_json::json!({
+                        "family": d.family,
+                        "reason": d.reason,
+                        "params": d.params,
+                    }));
                     let _ = tx.send(Event::default().event("progress")
                         .data(serde_json::json!({
                             "index": i, "total": total, "file": file,
@@ -633,6 +722,7 @@ async fn start_batch_trace(
                             "width": tr.width, "height": tr.height,
                             "shape_count": tr.shape_count, "layers": tr.layers,
                             "strategy_info": tr.strategy_info,
+                            "smart": smart_info,
                             "elapsed_ms": elapsed
                         }).to_string())).await;
                 }
@@ -675,7 +765,7 @@ async fn cancel_batch_trace(
 
 async fn batch_trace_events(
     State(state): State<AppState>,
-    UrlPath(job_id): UrlPath<String>,
+    UrlPath((_project_id, job_id)): UrlPath<(String, String)>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>, (StatusCode, String)> {
     let rx = state.jobs.lock().unwrap().remove(&job_id)
         .and_then(|opt| opt)
@@ -704,6 +794,7 @@ async fn main() {
         .route("/api/v1/health", get(health))
         .route("/api/v1/uploads", post(upload))
         .route("/api/v1/trace", post(trace))
+        .route("/api/v1/smart", post(smart))
         .route("/api/v1/pattern", post(generate_pattern))
         .route("/api/v1/patterns", get(list_patterns))
         .route("/api/v1/projects", post(create_project).get(list_projects))

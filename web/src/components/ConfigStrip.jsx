@@ -5,7 +5,13 @@ import React from "react";
  * default presets (kept) + user-generated snapshots (deletable).
  * Clicking a card loads its full param set (auto-trace picks it up).
  */
-export default function ConfigStrip({ configs, activeConfigId, onConfigSelect, onConfigSave, onConfigDelete }) {
+export default function ConfigStrip({
+  configs,
+  activeConfigId,
+  onConfigSelect,
+  onConfigSave,
+  onConfigDelete,
+}) {
   return (
     <div className="mode-strip">
       {configs.map(config => {

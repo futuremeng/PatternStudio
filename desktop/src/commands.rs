@@ -162,6 +162,31 @@ fn trace_bytes_internal(data: &[u8], params: &TraceParams) -> Result<TraceOut, S
     trace_with_session(&mut session, &config, params)
 }
 
+/// Convert a smart-recommended parameter set into the command's `TraceParams`.
+/// Both structs use camelCase with identical field names, so a JSON round-trip
+/// is a safe, field-agnostic mapping.
+fn smart_to_trace_params(p: &patternstudio_core::smart::SmartParams) -> Result<TraceParams, String> {
+    let v = serde_json::to_value(p).map_err(|e| e.to_string())?;
+    serde_json::from_value(v).map_err(|e| e.to_string())
+}
+
+/// Smart trace of in-memory image bytes: analyze, trial-trace candidate
+/// parameter sets, then trace with the winner. `family` restricts the search
+/// to one preset family (absent = auto). Returns the result plus the decision.
+fn trace_bytes_smart(data: &[u8], family: Option<&str>) -> Result<(TraceOut, patternstudio_core::smart::SmartDecision), String> {
+    let img = load_image_from_memory(data).map_err(|e| format!("failed to decode image: {e}"))?;
+    let decision = match family {
+        Some(f) => patternstudio_core::smart::recommend_for(&img, f),
+        None => patternstudio_core::smart::recommend(&img),
+    }
+    .map_err(|e| format!("smart analysis failed: {e}"))?;
+    let params = smart_to_trace_params(&decision.params)?;
+    let config = build_vtracer_config(&params)?;
+    let mut session = Session::new(img);
+    let out = trace_with_session(&mut session, &config, &params)?;
+    Ok((out, decision))
+}
+
 /// Layering + SVG over a document produced by a [`Session`].
 ///
 /// `session.render` reuses the cached segmentation when the clustering
@@ -247,6 +272,28 @@ fn trace_with_session(session: &mut Session, config: &vtracer::Config, params: &
         strategy_info: decision,
         profile_ms,
     })
+}
+
+/// Smart Preset: analyze the image and trial-trace candidate parameter sets,
+/// returning the best one plus the full candidate report.
+#[tauri::command]
+pub async fn smart_file(path: String, family: Option<String>) -> Result<patternstudio_core::smart::SmartDecision, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = Path::new(&path);
+        if !p.exists() {
+            return Err(format!("image not found: {path}"));
+        }
+        let image = load_image(p)
+            .map_err(|e| format!("failed to load image: {e}"))?;
+        // Family-scoped when the client picked a preset, auto otherwise.
+        let decision = match family.as_deref() {
+            Some(f) => patternstudio_core::smart::recommend_for(&image, f),
+            None => patternstudio_core::smart::recommend(&image),
+        };
+        decision.map_err(|e| format!("smart analysis failed: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Debug, Serialize)]
@@ -467,7 +514,10 @@ pub async fn batch_trace(
     folder_path: String,
     params: TraceParams,
     files: Option<Vec<String>>,
+    smart: Option<bool>,
+    family: Option<String>,
 ) -> Result<String, String> {
+    let smart = smart.unwrap_or(false);
     let job_id = uuid::Uuid::new_v4().to_string();
 
     let path = Path::new(&folder_path);
@@ -530,18 +580,29 @@ pub async fn batch_trace(
 
             let file_path = file_path.clone();
             let params_clone = params.clone();
+            let smart_clone = smart;
+            let family_clone = family.clone();
             let result = tauri::async_runtime::spawn_blocking(move || {
                 let data = std::fs::read(&file_path)
                     .map_err(|e| format!("failed to read {file_path}: {e}"))?;
-                trace_bytes_internal(&data, &params_clone)
+                if smart_clone {
+                    trace_bytes_smart(&data, family_clone.as_deref()).map(|(out, d)| (out, Some(d)))
+                } else {
+                    trace_bytes_internal(&data, &params_clone).map(|out| (out, None))
+                }
             })
             .await
             .unwrap_or_else(|e| Err(e.to_string()));
 
             let elapsed = start.elapsed().as_millis() as u64;
             match result {
-                Ok(out) => {
+                Ok((out, decision)) => {
                     success += 1;
+                    let smart_info = decision.as_ref().map(|d| serde_json::json!({
+                        "family": d.family,
+                        "reason": d.reason,
+                        "params": d.params,
+                    }));
                     let _ = app.emit("batch-trace", serde_json::json!({
                         "type": "done",
                         "index": i,
@@ -553,6 +614,7 @@ pub async fn batch_trace(
                         "shapeCount": out.shape_count,
                         "layers": out.layers,
                         "strategyInfo": out.strategy_info,
+                        "smart": smart_info,
                         "elapsed_ms": elapsed,
                     }));
                 }

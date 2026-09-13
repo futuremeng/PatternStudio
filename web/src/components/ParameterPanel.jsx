@@ -53,7 +53,7 @@ function Group({ title, defaultOpen = true, children }) {
   );
 }
 
-export default function ParameterPanel({ params, onChange }) {
+export default function ParameterPanel({ params, onChange, onSmart, smartBusy, activeFamilyLabel }) {
   const set = (key) => (val) => onChange(prev => ({ ...prev, [key]: val }));
 
   const isSpline = params.mode === "spline";
@@ -61,6 +61,15 @@ export default function ParameterPanel({ params, onChange }) {
 
   return (
     <div className="param-group">
+      <button
+        type="button"
+        className={`smart-tune${smartBusy ? " busy" : ""}`}
+        onClick={() => !smartBusy && onSmart && onSmart()}
+        disabled={smartBusy}
+        title={`在「${activeFamilyLabel || "当前预设"}」内试算多组参数，自动选出最佳`}
+      >
+        {smartBusy ? "⏳ 正在试算最佳参数…" : `✨ 智能调参${activeFamilyLabel ? ` · ${activeFamilyLabel}` : ""}`}
+      </button>
       <Group title="Clustering">
         <SegmentedControl
           label="聚类模式"
