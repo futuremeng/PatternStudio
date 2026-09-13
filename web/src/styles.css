@@ -244,6 +244,13 @@ body {
   padding: 1rem;
 }
 .preview-stage .placeholder { min-height: 200px; min-width: 240px; }
+/* Before the first trace finishes, the vector panel reserves the same box as
+   the original image (sized inline); a dashed outline marks the reserved area. */
+.ba-panel .placeholder, .overlay-wrap .placeholder {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.4);
+}
 
 .before-after { display: flex; align-items: center; justify-content: center; gap: 1rem; }
 .ba-panel {

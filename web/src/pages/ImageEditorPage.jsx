@@ -99,6 +99,10 @@ export default function ImageEditorPage() {
   const [tool, setTool] = useState("select");
   const viewportRef = useRef(null);
   const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 });
+  // Natural size of the source image (known as soon as it loads, before the
+  // first trace finishes). Used to size the vector placeholder and enable
+  // zoom/fit controls from the very first paint.
+  const [srcSize, setSrcSize] = useState({ w: 0, h: 0 });
 
   // Track the visible preview size so we can fit the image at zoom = 1 and
   // scale it precisely for the zoom / fit-width / fit controls. Measured in a
@@ -125,8 +129,10 @@ export default function ImageEditorPage() {
   const fitScreen = useCallback(() => setZoom(1), []);
 
   // Fit metrics derived from the image's natural size and the viewport.
-  const imgW = result?.width || 0;
-  const imgH = result?.height || 0;
+  // Fall back to the source image's natural size so the layout (and the
+  // vector placeholder) is stable before the first trace result arrives.
+  const imgW = result?.width || srcSize.w || 0;
+  const imgH = result?.height || srcSize.h || 0;
   const isSide = compareMode === "side";
   const PAD = 16; // matches .preview-stage padding
   const GAP = 16; // matches .before-after gap (fixed, does not scale)
@@ -181,6 +187,7 @@ export default function ImageEditorPage() {
   // Load the source image; the auto-trace effect below picks up from here.
   useEffect(() => {
     let cancelled = false;
+    setSrcSize({ w: 0, h: 0 });
     (async () => {
       try {
         const url = await getImageUrl(projectId, filename);
@@ -468,7 +475,14 @@ export default function ImageEditorPage() {
                 <div className="before-after">
                   <div className="ba-panel">
                     <span className="label">原图</span>
-                    {imageUrl ? <img src={imageUrl} alt="original" style={imgStyle} /> : <div className="placeholder">加载中</div>}
+                    {imageUrl ? (
+                      <img
+                        src={imageUrl}
+                        alt="original"
+                        style={imgStyle}
+                        onLoad={(e) => setSrcSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+                      />
+                    ) : <div className="placeholder">加载中</div>}
                   </div>
                   <div className="ba-panel">
                     <span className="label">矢量</span>
@@ -476,7 +490,7 @@ export default function ImageEditorPage() {
                     {result?.svg ? (
                       <div className="svg-frame" style={boxStyle} dangerouslySetInnerHTML={{ __html: result.svg }} />
                     ) : (
-                      <div className="placeholder">{busy ? "处理中..." : "点击下方配置开始"}</div>
+                      <div className="placeholder" style={boxStyle}>{busy ? "处理中..." : "点击下方配置开始"}</div>
                     )}
                   </div>
                 </div>
@@ -505,7 +519,7 @@ export default function ImageEditorPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="placeholder">{busy ? "处理中..." : "点击下方配置开始"}</div>
+                    <div className="placeholder" style={boxStyle}>{busy ? "处理中..." : "点击下方配置开始"}</div>
                   )}
                 </div>
               )}
