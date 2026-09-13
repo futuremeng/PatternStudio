@@ -350,7 +350,22 @@ export default function ImageEditorPage() {
       if (justDraggedRef.current) return;
       if (e.target === svg) clearPatchSelection();
     };
-    const onKeyDown = (e) => { if (e.key === "Escape") clearPatchSelection(); };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") { clearPatchSelection(); return; }
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedPathIdxRef.current != null) {
+        e.preventDefault();
+        const idx = selectedPathIdxRef.current;
+        const current = getSvgAndPaths();
+        if (current && current.paths[idx]) {
+          current.paths[idx].remove();
+          pathTransformsRef.current.delete(idx);
+        }
+        selectedPathIdxRef.current = null;
+        const after = getSvgAndPaths();
+        if (after) after.paths.forEach(p => { p.style.stroke = ""; p.style.strokeWidth = ""; p.style.cursor = ""; });
+        if (after) after.svg.querySelectorAll(".patch-cp").forEach(el => el.remove());
+      }
+    };
 
     paths.forEach(p => {
       p.style.pointerEvents = "auto";
