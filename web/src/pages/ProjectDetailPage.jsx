@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { getImageUrl, startBatchTrace, presetFullParams, MODE_PRESETS } from "../api.js";
 import { getCachedTrace, setCachedTrace } from "../traceCache.js";
 import AppHeader from "../components/AppHeader.jsx";
+import { useI18n } from "../i18n/index.jsx";
 
 /**
  * Cache marker for smart-batch results, per preset family. The winning params
@@ -43,6 +44,7 @@ function cropSvgQuarter(svg, quarter) {
  * balloon memory; IntersectionObserver keeps only the visible cards loaded.
  */
 function ImageCard({ projectId, filename, preview, onClick }) {
+  const { t, presetLabel } = useI18n();
   const [url, setUrl] = useState(null);
   const cardRef = useRef(null);
 
@@ -90,7 +92,7 @@ function ImageCard({ projectId, filename, preview, onClick }) {
           <div className="split-right">
             <div className="split-panel">
               <div className="svg-mini" dangerouslySetInnerHTML={{ __html: preview.result }} />
-              {preview.label && <div className="mini-label">{preview.label}</div>}
+              {preview.label && <div className="mini-label">{presetLabel(preview.label)}</div>}
             </div>
           </div>
         </div>
@@ -103,12 +105,12 @@ function ImageCard({ projectId, filename, preview, onClick }) {
             <div className="split-panel">
               {preview.line
                 ? <div className="svg-mini" dangerouslySetInnerHTML={{ __html: cropSvgQuarter(preview.line, "tr") }} />
-                : <div className="mini-empty">线稿</div>}
+                : <div className="mini-empty">{t("detail.lineArt")}</div>}
             </div>
             <div className="split-panel">
               {preview.color
                 ? <div className="svg-mini" dangerouslySetInnerHTML={{ __html: cropSvgQuarter(preview.color, "br") }} />
-                : <div className="mini-empty">色稿</div>}
+                : <div className="mini-empty">{t("detail.colorArt")}</div>}
             </div>
           </div>
         </div>
@@ -123,6 +125,7 @@ function ImageCard({ projectId, filename, preview, onClick }) {
 }
 
 export default function ProjectDetailPage() {
+  const { t, presetLabel } = useI18n();
   const { projectId } = useParams();
   const navigate = useNavigate();
   const [project, setProject] = useState(null);
@@ -254,7 +257,7 @@ export default function ProjectDetailPage() {
           // presets take the full right panel with a label.
           const slot = job.family === "lineArt" ? "line" : job.family === "color" ? "color" : "result";
           const update = { [slot]: event.svg };
-          if (slot === "result") update.label = MODE_PRESETS[job.family]?.label;
+          if (slot === "result") update.label = job.family;
           setPreviews(prev => ({
             ...prev,
             [event.file]: { ...(prev[event.file] || {}), ...update },
@@ -293,24 +296,23 @@ export default function ProjectDetailPage() {
   }, []);
 
   if (!project) {
-    return <div className="placeholder">{error ? error : "加载中..."}</div>;
+    return <div className="placeholder">{error ? error : t("loading")}</div>;
   }
 
   const allDone = batchStatus === "done" && batchFailed === 0;
-  const presetLabel = MODE_PRESETS[batchPreset]?.label || "";
   const batchLabel =
-    batchStatus === "running" ? "批量处理中..."
-    : allDone ? "✓ 已完成"
-    : batchStatus === "cancelled" ? "⚡ 继续处理"
-    : batchStatus === "done" ? "⚡ 重新处理失败项"
-    : batchSmart ? `✨ 智能批量 · ${presetLabel}`
-    : `⚡ 批量处理 · ${presetLabel}`;
+    batchStatus === "running" ? t("detail.batchRunning")
+    : allDone ? t("detail.batchDone")
+    : batchStatus === "cancelled" ? t("detail.batchResume")
+    : batchStatus === "done" ? t("detail.batchRetryFailed")
+    : batchSmart ? t("detail.batchSmart", { label: presetLabel(batchPreset) })
+    : t("detail.batchFixed", { label: presetLabel(batchPreset) });
 
   return (
     <div className="project-detail-page">
       <AppHeader
         title={project.name}
-        meta={`${project.images?.length || 0} 张图片`}
+        meta={t("imageCount", { n: project.images?.length || 0 })}
         onBack={() => navigate("/")}
       >
         <select
@@ -318,18 +320,18 @@ export default function ProjectDetailPage() {
           value={batchPreset}
           onChange={e => { setBatchPreset(e.target.value); setBatchStatus(null); }}
           disabled={batchStatus === "running"}
-          title="批量预设：选择要生成的输出类型"
+          title={t("detail.presetTitle")}
         >
-          {Object.entries(MODE_PRESETS).map(([key, p]) => (
-            <option key={key} value={key}>{p.label}</option>
+          {Object.entries(MODE_PRESETS).map(([key]) => (
+            <option key={key} value={key}>{presetLabel(key)}</option>
           ))}
         </select>
-        <div className="seg-control" title="智能调参：在所选预设内为每张图试算最佳参数">
-          <button className={!batchSmart ? "active" : ""} onClick={() => { setBatchSmart(false); setBatchStatus(null); }}>固定</button>
-          <button className={batchSmart ? "active" : ""} onClick={() => { setBatchSmart(true); setBatchStatus(null); }}>✨ 智能</button>
+        <div className="seg-control" title={t("detail.smartTitle")}>
+          <button className={!batchSmart ? "active" : ""} onClick={() => { setBatchSmart(false); setBatchStatus(null); }}>{t("detail.fixed")}</button>
+          <button className={batchSmart ? "active" : ""} onClick={() => { setBatchSmart(true); setBatchStatus(null); }}>{t("detail.smart")}</button>
         </div>
         {batchStatus === "running" && (
-          <button className="danger" onClick={onCancelBatch}>⏹ 中止</button>
+          <button className="danger" onClick={onCancelBatch}>{t("detail.abort")}</button>
         )}
         <button className="primary" onClick={onBatchTrace} disabled={batchStatus === "running" || allDone}>
           {batchLabel}
@@ -362,10 +364,10 @@ export default function ProjectDetailPage() {
             {batchStatus === "running"
               ? `${batchProgress.current}/${batchProgress.total} ${batchProgress.file}`
               : batchStatus === "cancelled"
-                ? `已中止: ${batchProgress.current}/${batchProgress.total}`
+                ? t("detail.progressAborted", { c: batchProgress.current, t: batchProgress.total })
                 : batchFailed > 0
-                  ? `完成: ${batchProgress.current}/${batchProgress.total} · 失败 ${batchFailed}`
-                  : `完成: ${batchProgress.current}/${batchProgress.total}`}
+                  ? t("detail.progressFailed", { c: batchProgress.current, t: batchProgress.total, f: batchFailed })
+                  : t("detail.progressDone", { c: batchProgress.current, t: batchProgress.total })}
           </div>
         </div>
       )}

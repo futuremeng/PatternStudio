@@ -1,14 +1,5 @@
 import React, { useState, useRef, useCallback } from "react";
-
-// Thumbnail kinds, visually distinguished on the strip:
-// - preset: system presets (isDefault)
-// - saved:  user-saved configs (persisted, `saved: true`)
-// - temp:   temporary in-session snapshots (not persisted)
-const KIND_META = {
-  preset: "预设",
-  saved: "已保存",
-  temp: "临时",
-};
+import { useI18n } from "../i18n/index.jsx";
 
 /**
  * Bottom strip of parameter-config combinations:
@@ -23,6 +14,16 @@ export default function ConfigStrip({
   onConfigDelete,
   onConfigRename,
 }) {
+  const { t } = useI18n();
+  // Thumbnail kinds, visually distinguished on the strip:
+  // - preset: system presets (isDefault)
+  // - saved:  user-saved configs (persisted, `saved: true`)
+  // - temp:   temporary in-session snapshots (not persisted)
+  const KIND_META = {
+    preset: t("config.preset"),
+    saved: t("config.saved"),
+    temp: t("config.temp"),
+  };
   // Inline rename state for user configs (double-click the label).
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState("");
@@ -58,7 +59,7 @@ export default function ConfigStrip({
             key={config.id}
             className={`mode-thumb kind-${kind}${isActive ? " active" : ""}`}
             onClick={() => onConfigSelect(config)}
-            title={`${config.label}（${KIND_META[kind]}）`}
+            title={t("config.title", { label: config.label, kind: KIND_META[kind] })}
           >
             {config.result?.svg ? (
               <div className="svg-mini" dangerouslySetInnerHTML={{ __html: config.result.svg }} />
@@ -85,18 +86,18 @@ export default function ConfigStrip({
               <span
                 className="mode-label"
                 onDoubleClick={config.isDefault ? undefined : e => startEdit(e, config)}
-                title={config.isDefault ? undefined : "双击改名"}
+                title={config.isDefault ? undefined : t("config.renameHint")}
               >
                 {config.label}
               </span>
             )}
             {config.isDefault ? (
-              <span className="config-kind-icon" title="系统预设">⚙</span>
+              <span className="config-kind-icon" title={t("config.systemPreset")}>⚙</span>
             ) : (
               <>
                 <button
                   className={`config-save${config.saved ? " saved" : ""}`}
-                  title={config.saved ? "已保存，点击取消保存" : "保存此配置"}
+                  title={config.saved ? t("config.savedHint") : t("config.saveHint")}
                   onClick={e => { e.stopPropagation(); onConfigSave(config); }}
                 >
                   {config.saved ? "✓" : "✚"}
@@ -104,7 +105,7 @@ export default function ConfigStrip({
                 {!config.saved && (
                   <button
                     className="config-delete"
-                    title="删除此配置"
+                    title={t("config.deleteHint")}
                     onClick={e => { e.stopPropagation(); onConfigDelete(config.id); }}
                   >
                     ×

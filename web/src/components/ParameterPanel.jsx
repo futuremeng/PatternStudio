@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useI18n } from "../i18n/index.jsx";
 
 function SegmentedControl({ label, value, options, onChange, title }) {
   return (
@@ -54,6 +55,7 @@ function Group({ title, defaultOpen = true, children }) {
 }
 
 export default function ParameterPanel({ params, onChange, onSmart, smartBusy, activeFamilyLabel }) {
+  const { t } = useI18n();
   const set = (key) => (val) => onChange(prev => ({ ...prev, [key]: val }));
 
   const isSpline = params.mode === "spline";
@@ -66,35 +68,39 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
         className={`smart-tune${smartBusy ? " busy" : ""}`}
         onClick={() => !smartBusy && onSmart && onSmart()}
         disabled={smartBusy}
-        title={`在「${activeFamilyLabel || "当前预设"}」内试算多组参数，自动选出最佳`}
+        title={t("param.smartTitle", { family: activeFamilyLabel || t("param.currentPreset") })}
       >
-        {smartBusy ? "⏳ 正在试算最佳参数…" : `✨ 智能调参${activeFamilyLabel ? ` · ${activeFamilyLabel}` : ""}`}
+        {smartBusy
+          ? t("param.smartTuning")
+          : activeFamilyLabel
+            ? t("param.smartTuneFamily", { family: activeFamilyLabel })
+            : t("param.smartTune")}
       </button>
-      <Group title="Clustering">
+      <Group title={t("param.groupClustering")}>
         <SegmentedControl
-          label="聚类模式"
+          label={t("param.clusteringMode")}
           value={params.clustering}
           options={[
             { value: "binary", label: "B/W" },
-            { value: "color", label: "颜色" },
-            { value: "watershed", label: "分水岭" },
+            { value: "color", label: t("param.color") },
+            { value: "watershed", label: t("param.watershed") },
           ]}
           onChange={set("clustering")}
         />
         {params.clustering === "binary" && (
           <>
             <SegmentedControl
-              label="阈值模式"
+              label={t("param.thresholdMode")}
               value={params.binaryAdaptive ? "adaptive" : "fixed"}
               options={[
-                { value: "fixed", label: "固定" },
-                { value: "adaptive", label: "自适应" },
+                { value: "fixed", label: t("param.fixed") },
+                { value: "adaptive", label: t("param.adaptive") },
               ]}
               onChange={v => set("binaryAdaptive")(v === "adaptive")}
             />
             {!params.binaryAdaptive && (
               <Slider
-                label="阈值 (0-255)"
+                label={t("param.threshold")}
                 value={params.binaryThreshold ?? 128}
                 min={0}
                 max={255}
@@ -105,8 +111,8 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
             {params.binaryAdaptive && (
               <>
                 <Slider
-                  label="Window (0-128)"
-                  title="自适应阈值窗口边长（像素）；0 = 自动（约为短边的 1/8）"
+                  label={t("param.window")}
+                  title={t("param.windowTitle")}
                   value={params.binaryAdaptiveWindow ?? 0}
                   min={0}
                   max={128}
@@ -114,8 +120,8 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
                   onChange={set("binaryAdaptiveWindow")}
                 />
                 <Slider
-                  label="Sensitivity (0-100)"
-                  title="自适应灵敏度：低于局部均值 t% 的像素视为前景（默认 15）"
+                  label={t("param.sensitivity")}
+                  title={t("param.sensitivityTitle")}
                   value={params.binaryAdaptiveT ?? 15}
                   min={0}
                   max={100}
@@ -129,7 +135,7 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
         {params.clustering === "color" && (
           <>
             <Slider
-              label="颜色精度 (1-8)"
+              label={t("param.colorPrecision")}
               value={params.colorPrecision}
               min={1}
               max={8}
@@ -137,8 +143,8 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
               onChange={set("colorPrecision")}
             />
             <Slider
-              label="渐变步长 (0-128)"
-              title="相邻渐变层之间的颜色差（越大层数越少）"
+              label={t("param.layerDifference")}
+              title={t("param.layerDifferenceTitle")}
               value={params.layerDifference}
               min={0}
               max={128}
@@ -149,7 +155,7 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
         )}
         {params.clustering === "watershed" && (
           <Slider
-            label="细节 (0-255)"
+            label={t("param.detail")}
             value={params.watershedDetail ?? 128}
             min={0}
             max={255}
@@ -159,18 +165,18 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
         )}
       </Group>
 
-      <Group title="Compositing">
+      <Group title={t("param.groupCompositing")}>
         <SegmentedControl
-          label="组合方式"
+          label={t("param.compositing")}
           value={params.hierarchical}
           options={[
-            { value: "stacked", label: "堆叠" },
-            { value: "cutout", label: "切割" },
+            { value: "stacked", label: t("param.stacked") },
+            { value: "cutout", label: t("param.cutout") },
           ]}
           onChange={set("hierarchical")}
         />
         <Slider
-          label="噪点过滤 (0-20)"
+          label={t("param.filterSpeckle")}
           value={params.filterSpeckle}
           min={0}
           max={20}
@@ -179,14 +185,14 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
         />
       </Group>
 
-      <Group title="Curve Fitting">
+      <Group title={t("param.groupCurveFitting")}>
         <SegmentedControl
-          label="模式"
+          label={t("param.mode")}
           value={params.mode}
           options={[
-            { value: "pixel", label: "像素" },
-            { value: "polygon", label: "多边形" },
-            { value: "spline", label: "样条" },
+            { value: "pixel", label: t("param.pixel") },
+            { value: "polygon", label: t("param.polygon") },
+            { value: "spline", label: t("param.spline") },
           ]}
           onChange={set("mode")}
         />
@@ -194,8 +200,8 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
         {isSpline && (
           <>
             <Slider
-              label="简化程度 (0-0.25)"
-              title="曲线简化容差（像素）：在容差内用更少的曲线重拟合平滑段，0 = 不简化"
+              label={t("param.simplify")}
+              title={t("param.simplifyTitle")}
               value={params.simplify}
               min={0}
               max={0.25}
@@ -203,7 +209,7 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
               onChange={set("simplify")}
             />
             <Slider
-              label="路径精度 (0-6)"
+              label={t("param.pathPrecision")}
               value={params.pathPrecision}
               min={0}
               max={6}
@@ -211,8 +217,8 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
               onChange={set("pathPrecision")}
             />
             <Slider
-              label="角点阈值 (0-180°)"
-              title="角度小于此值的拐点会被平滑掉（值越大越平滑）"
+              label={t("param.cornerThreshold")}
+              title={t("param.cornerThresholdTitle")}
               value={params.cornerThreshold ?? 60}
               min={0}
               max={180}
@@ -220,8 +226,8 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
               onChange={set("cornerThreshold")}
             />
             <Slider
-              label="线段长度 (0-20)"
-              title="短于此长度的线段会被过滤掉（值越大越简洁）"
+              label={t("param.lengthThreshold")}
+              title={t("param.lengthThresholdTitle")}
               value={params.lengthThreshold ?? 4}
               min={0}
               max={20}
@@ -232,19 +238,19 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
         )}
       </Group>
 
-      <Group title="Color Fitting">
+      <Group title={t("param.groupColorFitting")}>
         <SegmentedControl
-          label="最大颜色数"
+          label={t("param.maxColors")}
           value={maxColorsMode}
           options={[
-            { value: "auto", label: "自动" },
-            { value: "number", label: "数字" },
+            { value: "auto", label: t("param.auto") },
+            { value: "number", label: t("param.number") },
           ]}
           onChange={v => set("maxColors")(v === "auto" ? null : (params.maxColors || 8))}
         />
         {maxColorsMode === "number" && (
           <div className="param-row">
-            <label>颜色数 (1-256)</label>
+            <label>{t("param.colorCount")}</label>
             <input
               type="number"
               min={1}
@@ -255,7 +261,7 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
           </div>
         )}
         <div className="param-row">
-          <label>固定色板 (空 = 不启用)</label>
+          <label>{t("param.palette")}</label>
           <input
             type="text"
             placeholder="#ff0000,#00ff00"
@@ -265,23 +271,23 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
         </div>
       </Group>
 
-      <Group title="Layer Strategy" defaultOpen={false}>
+      <Group title={t("param.groupLayerStrategy")} defaultOpen={false}>
         <SegmentedControl
-          label="分层策略"
-          title="控制如何把矢量形状分配到不同图层"
+          label={t("param.layerStrategy")}
+          title={t("param.layerStrategyTitle")}
           value={params.layerStrategy ?? "none"}
           options={[
-            { value: "none", label: "单层", title: "所有形状放在同一个图层" },
-            { value: "auto", label: "自动", title: "根据当前参数组合自动选择分层策略，并按 粗/标准/细 三级参数剖面处理各层" },
-            { value: "color", label: "颜色", title: "相同颜色的形状归到同一图层" },
-            { value: "complexity", label: "复杂度", title: "简单形状作为底图，复杂形状单独成层" },
-            { value: "hybrid", label: "混合", title: "先按颜色分组，再在每组内按复杂度拆分出细节层" },
+            { value: "none", label: t("param.singleLayer"), title: t("param.singleLayerTitle") },
+            { value: "auto", label: t("param.auto"), title: t("param.autoStrategyTitle") },
+            { value: "color", label: t("param.color"), title: t("param.colorStrategyTitle") },
+            { value: "complexity", label: t("param.complexity"), title: t("param.complexityStrategyTitle") },
+            { value: "hybrid", label: t("param.hybrid"), title: t("param.hybridStrategyTitle") },
           ]}
           onChange={set("layerStrategy")}
         />
         {params.layerStrategy !== "none" && (
           <div className="param-row">
-            <label title="最多生成的图层数量">最大层数 (2-16)</label>
+            <label title={t("param.maxLayersTitle")}>{t("param.maxLayers")}</label>
             <input
               type="number"
               min={2}
@@ -293,8 +299,8 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
         )}
         {(params.layerStrategy === "complexity" || params.layerStrategy === "hybrid") && (
           <Slider
-            label="复杂度阈值 (10-90%)"
-            title="路径命令数超过此百分比的形状会被拆到细节层"
+            label={t("param.complexityThreshold")}
+            title={t("param.complexityThresholdTitle")}
             value={params.complexityThreshold ?? 70}
             min={10}
             max={90}
@@ -303,26 +309,26 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
           />
         )}
         <SegmentedControl
-          label="优化级别"
-          title="路径优化强度：关 / 标准 / 深度"
+          label={t("param.optimize")}
+          title={t("param.optimizeTitle")}
           value={String(params.optimize ?? 1)}
           options={[
-            { value: "0", label: "关", title: "不做路径优化" },
-            { value: "1", label: "标准", title: "标准路径优化" },
-            { value: "2", label: "深度", title: "深度路径优化（更慢，路径更简洁）" },
+            { value: "0", label: t("param.off"), title: t("param.offTitle") },
+            { value: "1", label: t("param.standard"), title: t("param.standardTitle") },
+            { value: "2", label: t("param.deep"), title: t("param.deepTitle") },
           ]}
           onChange={v => set("optimize")(Number(v))}
         />
       </Group>
 
-      <Group title="输出">
+      <Group title={t("param.groupOutput")}>
         <SegmentedControl
-          label="输出样式"
-          title="填充 (fill) 或线稿 (stroke)"
+          label={t("param.outputStyle")}
+          title={t("param.outputStyleTitle")}
           value={params.lineArt ? "line" : "fill"}
           options={[
-            { value: "fill", label: "填充", title: "彩色填充形状" },
-            { value: "line", label: "线稿", title: "用描边 (stroke) 代替填充 (fill) 输出线稿" },
+            { value: "fill", label: t("param.fill"), title: t("param.fillTitle") },
+            { value: "line", label: t("param.lineArt"), title: t("param.lineArtTitle") },
           ]}
           onChange={v => set("lineArt")(v === "line")}
         />

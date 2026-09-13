@@ -1,5 +1,6 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import { translate } from "./i18n/index.jsx";
 
 const BASE = "/api/v1";
 
@@ -101,9 +102,9 @@ export async function traceSource(source, params, opts = {}) {
 
 /**
  * Smart Preset: analyze the image and trial-trace candidate parameter sets.
- * Returns { params, family, reason, stats, candidates, elapsedMs } —
- * `params` is ready to feed into traceSource, and `reason` explains the
- * choice in human-readable terms.
+ * Returns { params, family, reasonKey, stats, candidates, elapsedMs } —
+ * `params` is ready to feed into traceSource, and `reasonKey` ("scoped" |
+ * "auto") is translated by the UI together with `stats`/`candidates`.
  */
 export async function smartSource(source, family) {
   if (isTauri()) {
@@ -137,7 +138,7 @@ export async function traceImage(file, params) {
 
 export async function openProject() {
   if (isTauri()) {
-    const folderPath = await tauriInvoke("open_folder");
+    const folderPath = await tauriInvoke("open_folder", { title: translate("projects.chooseFolder") });
     const images = await tauriInvoke("list_images", { folderPath });
     const name = folderPath.split("/").pop() || "project";
     try {
@@ -147,7 +148,7 @@ export async function openProject() {
     }
     return { id: folderPath, name, path: folderPath, imageCount: images.length, images: images.map(i => i.name) };
   }
-  const path = prompt("输入项目文件夹路径:");
+  const path = prompt(translate("openFolderPrompt"));
   if (!path) throw new Error("cancelled");
   const res = await fetch(`${BASE}/projects`, {
     method: "POST",
@@ -356,13 +357,14 @@ export const DEFAULT_PARAMS = {
 /**
  * Bottom-strip presets: each one showcases a different algorithmic dimension
  * (output mode / color clustering / adaptive threshold / fine gradient / polygon fit).
+ * Display labels live in the i18n dictionaries under `preset.<key>`.
  */
 export const MODE_PRESETS = {
-  lineArt: { label: "线稿", params: { preset: "bw", clustering: "binary", lineArt: true, mode: "spline" } },
-  color: { label: "彩色填充", params: { preset: "poster", clustering: "color", mode: "spline" } },
-  bw: { label: "黑白", params: { preset: "bw", clustering: "binary", binaryAdaptive: true, mode: "spline", filterSpeckle: 4 } },
-  gradient: { label: "渐变", params: { preset: "photo", clustering: "color", colorPrecision: 8, layerDifference: 4, mode: "spline", simplify: 0.2 } },
-  lowPoly: { label: "低多边形", params: { preset: "poster", clustering: "color", colorPrecision: 4, layerDifference: 32, mode: "polygon" } },
+  lineArt: { params: { preset: "bw", clustering: "binary", lineArt: true, mode: "spline" } },
+  color: { params: { preset: "poster", clustering: "color", mode: "spline" } },
+  bw: { params: { preset: "bw", clustering: "binary", binaryAdaptive: true, mode: "spline", filterSpeckle: 4 } },
+  gradient: { params: { preset: "photo", clustering: "color", colorPrecision: 8, layerDifference: 4, mode: "spline", simplify: 0.2 } },
+  lowPoly: { params: { preset: "poster", clustering: "color", colorPrecision: 4, layerDifference: 32, mode: "polygon" } },
 };
 
 /** Full param set for a preset (DEFAULT_PARAMS + preset overrides). */

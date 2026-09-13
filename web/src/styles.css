@@ -526,6 +526,13 @@ body {
 }
 .batch-preset-select:disabled { opacity: 0.6; cursor: default; }
 
+.lang-select {
+  padding: 0.35rem 0.5rem; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text); font-size: 0.8rem; cursor: pointer;
+  max-width: 9rem;
+}
+
 .layer-panel { display: flex; flex-direction: column; gap: 0.6rem; }
 .layer-panel h3 { margin: 0; font-size: 0.95rem; }
 .layer-card {

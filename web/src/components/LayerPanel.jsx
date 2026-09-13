@@ -1,20 +1,14 @@
 import React, { useState } from "react";
 import { downloadSvg } from "../api.js";
-
-const PROFILE_TITLES = {
-  L0: "L0 粗：背景层 — 加大简化容差 + 降低坐标精度",
-  L1: "L1 标准：保持理想参数结果",
-  L2: "L2 细：细节层 — 更高坐标精度 + 冗余段清理",
-};
-
-const STRATEGY_LABELS = {
-  none: "单层",
-  color: "按颜色分层",
-  complexity: "按复杂度分层",
-  hybrid: "混合分层",
-};
+import { useI18n } from "../i18n/index.jsx";
 
 function LayerCard({ layer, selected, onToggle }) {
+  const { t } = useI18n();
+  const PROFILE_TITLES = {
+    L0: t("layer.profileL0"),
+    L1: t("layer.profileL1"),
+    L2: t("layer.profileL2"),
+  };
   return (
     <div
       className={`layer-card ${selected ? "selected" : ""}`}
@@ -38,7 +32,7 @@ function LayerCard({ layer, selected, onToggle }) {
         </div>
         <div className="meta">
           <span className="color-dot" style={{ background: layer.dominantColor }} />
-          <span>{layer.shapeCount} shapes</span>
+          <span>{t("layer.shapes", { n: layer.shapeCount })}</span>
           <span>·</span>
           <span>{layer.role}</span>
         </div>
@@ -48,7 +42,24 @@ function LayerCard({ layer, selected, onToggle }) {
 }
 
 export default function LayerPanel({ layers, strategyInfo, profileMs }) {
+  const { t } = useI18n();
   const [selected, setSelected] = useState(new Set());
+
+  const STRATEGY_LABELS = {
+    none: t("layer.strategyNone"),
+    color: t("layer.strategyColor"),
+    complexity: t("layer.strategyComplexity"),
+    hybrid: t("layer.strategyHybrid"),
+  };
+
+  // The backend sends an i18n key (reasonKey); legacy cached results carry a
+  // pre-built Chinese `reason` string instead — fall back to it.
+  const strategyReason = strategyInfo?.reasonKey
+    ? t(`reason.${strategyInfo.reasonKey}`, {
+        c: strategyInfo.distinctColors,
+        budget: strategyInfo.detailBudget,
+      })
+    : strategyInfo?.reason;
 
   const toggle = (name) => {
     setSelected(prev => {
@@ -81,30 +92,34 @@ export default function LayerPanel({ layers, strategyInfo, profileMs }) {
   };
 
   if (layers.length === 0) {
-    return <div className="muted">暂无图层数据（请先 Trace）</div>;
+    return <div className="muted">{t("layer.noData")}</div>;
   }
 
   return (
     <div className="layer-panel">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <h3>图层 ({layers.length})</h3>
+        <h3>{t("layer.title", { n: layers.length })}</h3>
         <div style={{ display: "flex", gap: "0.3rem" }}>
-          <button onClick={selectAll} style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}>全选</button>
-          <button onClick={selectNone} style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}>清空</button>
+          <button onClick={selectAll} style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}>{t("layer.selectAll")}</button>
+          <button onClick={selectNone} style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}>{t("layer.clear")}</button>
         </div>
       </div>
 
-      {strategyInfo?.reason && (
+      {strategyReason && (
         <div className="strategy-note">
           <div className="strategy-header">
             <span className="strategy-icon">⚙</span>
             <span className="strategy-type">{STRATEGY_LABELS[strategyInfo.strategy] || strategyInfo.strategy}</span>
-            <span className="strategy-meta" title="层数 · 检测到的颜色数 · 细节预算(0-100，由简化/精度/阈值等参数综合计算)">
-              {strategyInfo.layers} 层 · {strategyInfo.distinctColors} 色 · 预算 {strategyInfo.detailBudget}
+            <span className="strategy-meta" title={t("layer.metaTitle")}>
+              {t("layer.meta", {
+                layers: strategyInfo.layers,
+                colors: strategyInfo.distinctColors,
+                budget: strategyInfo.detailBudget,
+              })}
               {profileMs != null && ` · ${profileMs}ms`}
             </span>
           </div>
-          <div className="strategy-reason">{strategyInfo.reason}</div>
+          <div className="strategy-reason">{strategyReason}</div>
         </div>
       )}
 
@@ -122,7 +137,7 @@ export default function LayerPanel({ layers, strategyInfo, profileMs }) {
         onClick={exportSelected}
         disabled={selected.size === 0}
       >
-        导出选中图层 ({selected.size})
+        {t("layer.exportSelected", { n: selected.size })}
       </button>
     </div>
   );

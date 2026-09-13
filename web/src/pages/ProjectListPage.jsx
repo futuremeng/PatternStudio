@@ -2,8 +2,10 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { openProject, listProjects, deleteProject, getImageUrl } from "../api.js";
 import AppHeader from "../components/AppHeader.jsx";
+import { useI18n } from "../i18n/index.jsx";
 
 export default function ProjectListPage() {
+  const { t } = useI18n();
   const [projects, setProjects] = useState([]);
   const [thumbs, setThumbs] = useState({});
   const [busy, setBusy] = useState(false);
@@ -59,9 +61,9 @@ export default function ProjectListPage() {
 
   return (
     <div className="project-list-page">
-      <AppHeader title="项目列表">
+      <AppHeader title={t("projects.title")}>
         <button className="open-project-btn" onClick={onOpenProject} disabled={busy}>
-          {busy ? "打开中..." : "📂 打开项目"}
+          {busy ? t("projects.opening") : t("projects.open")}
         </button>
       </AppHeader>
 
@@ -70,7 +72,7 @@ export default function ProjectListPage() {
         {projects.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">📁</div>
-            <p>还没有项目，点击上方按钮打开一个图片文件夹</p>
+            <p>{t("projects.empty")}</p>
           </div>
         ) : (
           <div className="project-grid">
@@ -89,14 +91,14 @@ export default function ProjectListPage() {
                   <button
                     className="remove-btn"
                     onClick={(e) => onRemoveProject(e, p.id)}
-                    title="移除项目"
+                    title={t("projects.remove")}
                   >
                     ×
                   </button>
                 </div>
                 <div className="project-info">
                   <h3>{p.name}</h3>
-                  <div className="count">{p.imageCount} 张图片</div>
+                  <div className="count">{t("imageCount", { n: p.imageCount })}</div>
                 </div>
               </div>
             ))}

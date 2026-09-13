@@ -417,9 +417,9 @@ pub async fn trace_file(
 }
 
 #[tauri::command]
-pub fn open_folder() -> Result<String, String> {
+pub fn open_folder(title: Option<String>) -> Result<String, String> {
     let folder = rfd::FileDialog::new()
-        .set_title("选择项目文件夹")
+        .set_title(title.unwrap_or_else(|| "Select project folder".into()))
         .pick_folder();
     match folder {
         Some(p) => Ok(p.to_string_lossy().to_string()),
@@ -663,7 +663,7 @@ pub async fn batch_trace(
                     success += 1;
                     let smart_info = decision.as_ref().map(|d| serde_json::json!({
                         "family": d.family,
-                        "reason": d.reason,
+                        "reasonKey": d.reason_key,
                         "params": d.params,
                     }));
                     let _ = app.emit("batch-trace", serde_json::json!({

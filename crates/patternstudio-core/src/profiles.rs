@@ -203,8 +203,9 @@ impl LayerProfile {
 }
 
 
-/// Outcome of the automatic strategy decision, including the human-readable
-/// reason (surfaced in the UI and layer metadata).
+/// Outcome of the automatic strategy decision. The frontend translates
+/// `reason_key` (plus `distinct_colors` / `detail_budget`) into the
+/// human-readable reason shown in the UI.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoDecision {
@@ -212,7 +213,8 @@ pub struct AutoDecision {
     pub strategy: String,
     pub layers: usize,
     pub complexity_threshold: u8,
-    pub reason: String,
+    /// i18n key for the human-readable reason (see the web `reason.*` keys).
+    pub reason_key: String,
     /// Distinct colors detected in the traced document.
     pub distinct_colors: usize,
     /// The computed detail budget (0..=100) that drove the decision.
@@ -233,7 +235,7 @@ impl AutoDecision {
                     strategy: "complexity".into(),
                     layers: 4,
                     complexity_threshold: threshold,
-                    reason: format!("二值/线稿 + 高细节预算({budget}) → 复杂度分层"),
+                    reason_key: "binaryComplexity".into(),
                 distinct_colors: 1,
                 detail_budget: budget,                };
             }
@@ -241,7 +243,7 @@ impl AutoDecision {
                 strategy: "none".into(),
                 layers: 1,
                 complexity_threshold: threshold,
-                reason: format!("二值/线稿 + 细节预算 {budget} → 单层"),
+                reason_key: "binarySingle".into(),
             distinct_colors: 1,
             detail_budget: budget,            };
         }
@@ -251,7 +253,7 @@ impl AutoDecision {
                 strategy: "none".into(),
                 layers: 1,
                 complexity_threshold: threshold,
-                reason: format!("仅 {c} 色 → 单层"),
+                reason_key: "singleColor".into(),
                 distinct_colors: c,
                 detail_budget: budget,            };
         }
@@ -262,7 +264,7 @@ impl AutoDecision {
                     strategy: "hybrid".into(),
                     layers: (c + 1).min(8),
                     complexity_threshold: threshold,
-                    reason: format!("{c} 色 + 细节预算 {budget} ≥ 40 → 混合分层"),
+                    reason_key: "fewHybrid".into(),
                     distinct_colors: c,
                     detail_budget: budget,                };
             }
@@ -270,7 +272,7 @@ impl AutoDecision {
                 strategy: "color".into(),
                 layers: c,
                 complexity_threshold: threshold,
-                reason: format!("{c} 色 + 细节预算 {budget} < 40 → 颜色分层"),
+                reason_key: "fewColor".into(),
                 distinct_colors: c,
                 detail_budget: budget,
             };
@@ -282,7 +284,7 @@ impl AutoDecision {
                 strategy: "hybrid".into(),
                 layers,
                 complexity_threshold: threshold,
-                reason: format!("{c} 色 + 细节预算 {budget} ≥ 60 → 混合分层（颜色预算减半）"),
+                reason_key: "manyHybrid".into(),
                 distinct_colors: c,
                 detail_budget: budget,
             }
@@ -291,7 +293,7 @@ impl AutoDecision {
                 strategy: "complexity".into(),
                 layers: 4,
                 complexity_threshold: threshold,
-                reason: format!("{c} 色 + 细节预算 {budget} < 60 → 复杂度分层"),
+                reason_key: "manyComplexity".into(),
                 distinct_colors: c,
                 detail_budget: budget,
             }

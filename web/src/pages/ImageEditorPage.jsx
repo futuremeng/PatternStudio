@@ -8,6 +8,7 @@ import ParameterPanel from "../components/ParameterPanel.jsx";
 import LayerPanel from "../components/LayerPanel.jsx";
 import ConfigStrip from "../components/ConfigStrip.jsx";
 import AppHeader from "../components/AppHeader.jsx";
+import { useI18n } from "../i18n/index.jsx";
 
 // Wait this long after a trace settles before snapshotting a user config (ms)
 const CONFIG_SETTLE_MS = 1500;
@@ -31,10 +32,10 @@ function saveLastPreset(key) {
 }
 
 /** Default configs from MODE_PRESETS (full param sets, ready to trace). */
-function buildDefaultConfigs() {
-  return Object.entries(MODE_PRESETS).map(([key, preset]) => ({
+function buildDefaultConfigs(presetLabel) {
+  return Object.entries(MODE_PRESETS).map(([key]) => ({
     id: `default-${key}`,
-    label: preset.label,
+    label: presetLabel(key),
     params: presetFullParams(key),
     isDefault: true,
   }));
@@ -85,6 +86,7 @@ const IconFit = () => (
 );
 
 export default function ImageEditorPage() {
+  const { t, presetLabel, locale } = useI18n();
   const { projectId, filename } = useParams();
   const navigate = useNavigate();
   const [imageUrl, setImageUrl] = useState(null);
@@ -95,7 +97,7 @@ export default function ImageEditorPage() {
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [configs, setConfigs] = useState(buildDefaultConfigs);
+  const [configs, setConfigs] = useState(() => buildDefaultConfigs(presetLabel));
   const [activeConfigId, setActiveConfigId] = useState(() => {
     const key = loadLastPreset();
     return key ? `default-${key}` : "default-color";
@@ -236,6 +238,13 @@ export default function ImageEditorPage() {
   }, [fitScale, widthScale]);
 
   useEffect(() => { configsRef.current = configs; }, [configs]);
+
+  // Keep the default preset labels in sync with the active locale.
+  useEffect(() => {
+    setConfigs(prev => prev.map(c =>
+      c.isDefault ? { ...c, label: presetLabel(c.id.slice("default-".length)) } : c
+    ));
+  }, [locale, presetLabel]);
 
   // Restore user configs persisted from previous sessions.
   // Thumbnails are refilled from the trace cache when available.
@@ -495,7 +504,7 @@ export default function ImageEditorPage() {
       userConfigSeq.current += 1;
       const cfg = {
         id: `user-${Date.now()}-${userConfigSeq.current}`,
-        label: `自定义 ${userConfigSeq.current}`,
+        label: t("editor.customConfig", { n: userConfigSeq.current }),
         params: traceParams,
         isDefault: false,
         saved: false,
@@ -512,7 +521,7 @@ export default function ImageEditorPage() {
       });
       setActiveConfigId(cfg.id);
     }, CONFIG_SETTLE_MS);
-  }, []);
+  }, [t]);
 
   /**
    * Run one queue task: cache-first trace, then apply the result.
@@ -550,9 +559,9 @@ export default function ImageEditorPage() {
     } catch (e) {
       if (imageIdRef.current !== imageIdNow) return;
       if (e?.code === "cancelled" || e?.code === "busy") return; // superseded
-      if (task.kind === "interactive") setError(`Trace 失败: ${e.message}`);
+      if (task.kind === "interactive") setError(t("editor.traceFailed", { msg: e.message }));
     }
-  }, [projectId, filename, imageId, applyResultToConfigs, scheduleUserConfig]);
+  }, [projectId, filename, imageId, applyResultToConfigs, scheduleUserConfig, t]);
 
   // One queue per image: interactive traces preempt background pre-warm.
   const queueRef = useRef(null);
@@ -650,11 +659,11 @@ export default function ImageEditorPage() {
         setActiveConfigId(null);
       }
     } catch (e) {
-      setError(`智能调参失败: ${e.message}`);
+      setError(t("editor.smartFailed", { msg: e.message }));
     } finally {
       setSmartBusy(false);
     }
-  }, [imageUrl, smartBusy, projectId, filename, params]);
+  }, [imageUrl, smartBusy, projectId, filename, params, t]);
 
   /**
    * Apply the preset-default result (from the smart comparison) instead of the
@@ -733,21 +742,44 @@ export default function ImageEditorPage() {
     stableStringify(smartInfo.preset.params) === stableStringify(smartInfo?.params)
   );
 
+  // Candidate labels arrive as i18n keys: preset family ids (translated via
+  // presetLabel) or "photo" / "flat" / "presetDefault" (candidate.* keys).
+  const candidateLabel = (label) =>
+    MODE_PRESETS[label] ? presetLabel(label) : t(`candidate.${label}`);
+
+  // Human-readable smart decision, translated from the backend's reasonKey
+  // ("scoped" = search was restricted to one preset family, incl. the preset
+  // baseline). Legacy results carry a pre-built `reason` string instead.
+  const smartReason = smartInfo?.reasonKey
+    ? t(smartInfo.preset ? "smart.reasonScoped" : "smart.reasonAuto", {
+        colors: smartInfo.stats?.effectiveColors ?? 0,
+        colorfulness: Math.round(smartInfo.stats?.colorfulness ?? 0),
+        bimodality: (smartInfo.stats?.bimodality ?? 0).toFixed(2),
+        texture: Math.round((smartInfo.stats?.texture ?? 0) * 100),
+        family: presetLabel(smartInfo.family),
+        n: smartInfo.candidates?.length ?? 0,
+        winner: candidateLabel(smartWinner?.label || smartInfo.family),
+        fidelity: (smartWinner?.fidelity ?? 0).toFixed(2),
+        complexity: (smartWinner?.complexity ?? 0).toFixed(2),
+        shapes: smartWinner?.shapeCount ?? 0,
+      })
+    : smartInfo?.reason;
+
   return (
     <div className={`editor-page${maximized ? " maximized" : ""}`}>
       <AppHeader
         title={filename}
         onBack={() => navigate(`/project/${encodeURIComponent(projectId)}`)}
       >
-        <button onClick={onDownload} disabled={!result?.svg}>下载 SVG</button>
+        <button onClick={onDownload} disabled={!result?.svg}>{t("editor.downloadSvg")}</button>
         {result?.width > 0 && (
           <span className="page-meta">{result.width} x {result.height} px</span>
         )}
         <button
           className="icon-btn"
           onClick={toggleMaximize}
-          title={maximized ? "还原" : "最大化"}
-          aria-label={maximized ? "还原" : "最大化"}
+          title={maximized ? t("editor.restore") : t("editor.maximize")}
+          aria-label={maximized ? t("editor.restore") : t("editor.maximize")}
         >
           {maximized ? <IconRestore /> : <IconMaximize />}
         </button>
@@ -760,7 +792,7 @@ export default function ImageEditorPage() {
             onChange={onParamsChange}
             onSmart={runSmart}
             smartBusy={smartBusy}
-            activeFamilyLabel={MODE_PRESETS[familyFromParams(params)]?.label}
+            activeFamilyLabel={presetLabel(familyFromParams(params))}
           />
         </aside>
 
@@ -770,7 +802,7 @@ export default function ImageEditorPage() {
               {compareMode === "side" ? (
                 <div className="before-after">
                   <div className="ba-panel">
-                    <span className="label">原图</span>
+                    <span className="label">{t("editor.original")}</span>
                     {imageUrl ? (
                       <img
                         src={imageUrl}
@@ -778,21 +810,21 @@ export default function ImageEditorPage() {
                         style={imgStyle}
                         onLoad={(e) => setSrcSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
                       />
-                    ) : <div className="placeholder">加载中</div>}
+                    ) : <div className="placeholder">{t("editor.loading")}</div>}
                   </div>
                   <div className="ba-panel">
-                    <span className="label">矢量</span>
-                    {busy && result?.svg && <span className="busy-badge">处理中...</span>}
+                    <span className="label">{t("editor.vector")}</span>
+                    {busy && result?.svg && <span className="busy-badge">{t("processing")}</span>}
                     {result?.svg ? (
                       <div className={`svg-frame${tool === "select" ? " select-mode" : ""}`} ref={svgContainerRef} style={boxStyle} dangerouslySetInnerHTML={{ __html: result.svg }} />
                     ) : (
-                      <div className="placeholder" style={boxStyle}>{busy ? "处理中..." : "点击下方配置开始"}</div>
+                      <div className="placeholder" style={boxStyle}>{busy ? t("processing") : t("editor.clickToStart")}</div>
                     )}
                   </div>
                 </div>
               ) : (
                 <div className="overlay-wrap">
-                  {busy && result?.svg && <span className="busy-badge">处理中...</span>}
+                  {busy && result?.svg && <span className="busy-badge">{t("processing")}</span>}
                   {imageUrl && result?.svg ? (
                     <div
                       className="overlay-compare"
@@ -808,14 +840,14 @@ export default function ImageEditorPage() {
                       <div className="overlay-top" style={{ clipPath: `inset(0 0 0 ${overlayPos}%)` }}>
                         <div className={`overlay-svg${tool === "select" ? " select-mode" : ""}`} ref={svgContainerRef} dangerouslySetInnerHTML={{ __html: result.svg }} />
                       </div>
-                      <span className="overlay-tag overlay-tag-left">原图</span>
-                      <span className="overlay-tag overlay-tag-right">矢量</span>
+                      <span className="overlay-tag overlay-tag-left">{t("editor.original")}</span>
+                      <span className="overlay-tag overlay-tag-right">{t("editor.vector")}</span>
                       <div className="overlay-divider" style={{ left: `${overlayPos}%` }}>
                         <div className="overlay-handle">‹›</div>
                       </div>
                     </div>
                   ) : (
-                    <div className="placeholder" style={boxStyle}>{busy ? "处理中..." : "点击下方配置开始"}</div>
+                    <div className="placeholder" style={boxStyle}>{busy ? t("processing") : t("editor.clickToStart")}</div>
                   )}
                 </div>
               )}
@@ -823,16 +855,16 @@ export default function ImageEditorPage() {
           </div>
 
           <div className="preview-controls">
-            <button className={tool === "select" ? "active" : ""} onClick={() => setTool(tool === "select" ? "none" : "select")} title={tool === "select" ? "Disable Selection" : "Select Patches"} aria-label={tool === "select" ? "Disable Selection" : "Select Patches"}>
+            <button className={tool === "select" ? "active" : ""} onClick={() => setTool(tool === "select" ? "none" : "select")} title={tool === "select" ? t("editor.disableSelection") : t("editor.selectPatches")} aria-label={tool === "select" ? t("editor.disableSelection") : t("editor.selectPatches")}>
               <IconSelect />
             </button>
-            <button onClick={() => setCompareMode(compareMode === "side" ? "overlay" : "side")} title={compareMode === "side" ? "切换为叠加" : "切换为对照"} aria-label="切换对照模式">
+            <button onClick={() => setCompareMode(compareMode === "side" ? "overlay" : "side")} title={compareMode === "side" ? t("editor.switchToOverlay") : t("editor.switchToSide")} aria-label={t("editor.toggleCompare")}>
               <IconCompare />
             </button>
-            <button onClick={zoomIn} title="放大" aria-label="放大">
+            <button onClick={zoomIn} title={t("editor.zoomIn")} aria-label={t("editor.zoomIn")}>
               <IconZoomIn />
             </button>
-            <button onClick={zoomOut} title="缩小" aria-label="缩小">
+            <button onClick={zoomOut} title={t("editor.zoomOut")} aria-label={t("editor.zoomOut")}>
               <IconZoomOut />
             </button>
             <button
@@ -845,8 +877,8 @@ export default function ImageEditorPage() {
                   setZoom(1 / fitScale);
                 }
               }}
-              title={actualSize ? "铺满" : "1:1"}
-              aria-label={actualSize ? "铺满" : "1:1"}
+              title={actualSize ? t("editor.fit") : "1:1"}
+              aria-label={actualSize ? t("editor.fit") : "1:1"}
             >
               {actualSize ? <IconFit /> : <span style={{ fontSize: "0.65rem", fontWeight: 700 }}>1:1</span>}
             </button>
@@ -855,7 +887,7 @@ export default function ImageEditorPage() {
           {error && (
             <div className="error preview-error">
               {error}
-              <button className="error-retry" onClick={() => queueRef.current?.enqueueInteractive(params)}>重试</button>
+              <button className="error-retry" onClick={() => queueRef.current?.enqueueInteractive(params)}>{t("retry")}</button>
             </div>
           )}
         </div>
@@ -869,24 +901,26 @@ export default function ImageEditorPage() {
         <div className="smart-banner">
           <span className="smart-banner-icon">✨</span>
           <span className="smart-banner-text">
-            智能调参：<strong>{smartWinner?.label || smartInfo.family}</strong>
-            {smartInfo.reason ? ` — ${smartInfo.reason}` : ""}
+            {t("editor.smartLabel")}<strong>{candidateLabel(smartWinner?.label || smartInfo.family)}</strong>
+            {smartReason ? ` — ${smartReason}` : ""}
           </span>
           {smartInfo.preset && (
             <span
               className="smart-banner-compare"
-              title="预设默认结果的指标（对照基准）"
+              title={t("editor.presetMetricsTitle")}
             >
-              预设 保真 {smartInfo.preset.fidelity.toFixed(2)} · 复杂度{" "}
-              {smartInfo.preset.complexity.toFixed(2)}
+              {t("editor.presetMetrics", {
+                f: smartInfo.preset.fidelity.toFixed(2),
+                c: smartInfo.preset.complexity.toFixed(2),
+              })}
             </span>
           )}
           {smartInfo.preset && !smartIsPreset && (
             <button className="smart-banner-preset" onClick={applyPresetResult}>
-              使用预设结果
+              {t("editor.usePresetResult")}
             </button>
           )}
-          <button className="smart-banner-close" onClick={() => setSmartInfo(null)} aria-label="关闭">×</button>
+          <button className="smart-banner-close" onClick={() => setSmartInfo(null)} aria-label={t("close")}>×</button>
         </div>
       )}
       <ConfigStrip

@@ -474,7 +474,8 @@ impl SmartParams {
 
 
 /// One trial candidate: a named parameter family with its full params at the
-/// original image scale.
+/// original image scale. `label` is an i18n key (a preset family id, or
+/// "photo" / "flat" / "presetDefault") translated by the frontend.
 #[derive(Debug, Clone)]
 pub struct SmartCandidate {
     /// Machine family id ("lineArt", "bw", "color", "photo", "gradient",
@@ -525,18 +526,6 @@ pub fn candidate_params(stats: &ImageStats) -> Vec<SmartCandidate> {
 
 /// Valid family ids — mirrors the web editor's `MODE_PRESETS` keys.
 pub const FAMILIES: [&str; 5] = ["lineArt", "color", "bw", "gradient", "lowPoly"];
-
-/// Human label (Chinese) for a family id, if known.
-pub fn family_label(family: &str) -> Option<&'static str> {
-    match family {
-        "lineArt" => Some("线稿"),
-        "color" => Some("彩色填充"),
-        "bw" => Some("黑白"),
-        "gradient" => Some("渐变"),
-        "lowPoly" => Some("低多边形"),
-        _ => None,
-    }
-}
 
 /// The exact default parameter set for a preset family — mirrors the web
 /// editor's `MODE_PRESETS` (keep in sync). Used as the baseline candidate so
@@ -668,7 +657,7 @@ fn line_art_candidate(stats: &ImageStats, adaptive: bool, speckle: u32) -> Smart
     p.filter_speckle = speckle;
     p.binary_adaptive = adaptive;
     p.binary_threshold = stats.otsu_threshold;
-    SmartCandidate { family: "lineArt", label: "线稿", params: p, is_baseline: false }
+    SmartCandidate { family: "lineArt", label: "lineArt", params: p, is_baseline: false }
 }
 
 fn bw_candidate(stats: &ImageStats, adaptive: bool, speckle: u32) -> SmartCandidate {
@@ -678,13 +667,13 @@ fn bw_candidate(stats: &ImageStats, adaptive: bool, speckle: u32) -> SmartCandid
     p.filter_speckle = speckle;
     p.binary_adaptive = adaptive;
     p.binary_threshold = stats.otsu_threshold;
-    SmartCandidate { family: "bw", label: "黑白", params: p, is_baseline: false }
+    SmartCandidate { family: "bw", label: "bw", params: p, is_baseline: false }
 }
 
 fn poster_candidate(speckle: u32) -> SmartCandidate {
     let mut p = SmartParams::default();
     p.filter_speckle = speckle;
-    SmartCandidate { family: "color", label: "彩色填充", params: p, is_baseline: false }
+    SmartCandidate { family: "color", label: "color", params: p, is_baseline: false }
 }
 
 fn photo_candidate(speckle: u32) -> SmartCandidate {
@@ -695,7 +684,7 @@ fn photo_candidate(speckle: u32) -> SmartCandidate {
     p.filter_speckle = speckle.max(8);
     p.corner_threshold = 180;
     p.simplify = 0.2;
-    SmartCandidate { family: "photo", label: "照片", params: p, is_baseline: false }
+    SmartCandidate { family: "photo", label: "photo", params: p, is_baseline: false }
 }
 
 fn gradient_candidate(speckle: u32) -> SmartCandidate {
@@ -705,7 +694,7 @@ fn gradient_candidate(speckle: u32) -> SmartCandidate {
     p.layer_difference = 4;
     p.filter_speckle = speckle;
     p.simplify = 0.2;
-    SmartCandidate { family: "gradient", label: "渐变", params: p, is_baseline: false }
+    SmartCandidate { family: "gradient", label: "gradient", params: p, is_baseline: false }
 }
 
 fn low_poly_candidate(speckle: u32) -> SmartCandidate {
@@ -714,14 +703,14 @@ fn low_poly_candidate(speckle: u32) -> SmartCandidate {
     p.layer_difference = 32;
     p.filter_speckle = speckle;
     p.mode = "polygon".into();
-    SmartCandidate { family: "lowPoly", label: "低多边形", params: p, is_baseline: false }
+    SmartCandidate { family: "lowPoly", label: "lowPoly", params: p, is_baseline: false }
 }
 
 fn flat_candidate(speckle: u32) -> SmartCandidate {
     let mut p = SmartParams::default();
     p.clustering = "watershed".into();
     p.filter_speckle = speckle;
-    SmartCandidate { family: "flat", label: "扁平色块", params: p, is_baseline: false }
+    SmartCandidate { family: "flat", label: "flat", params: p, is_baseline: false }
 }
 
 /// Scale the pixel-unit parameters from the original image scale to a test
@@ -775,8 +764,10 @@ pub struct SmartDecision {
     pub params: SmartParams,
     /// Family id of the winner.
     pub family: String,
-    /// Human-readable explanation (Chinese).
-    pub reason: String,
+    /// i18n key for the human-readable reason: "scoped" (search restricted to
+    /// one preset family, incl. the preset baseline) or "auto" (full search).
+    /// The frontend translates it from `stats`, `candidates` and `family`.
+    pub reason_key: String,
     /// Source image statistics that drove the candidate selection.
     pub stats: ImageStats,
     /// All trial candidates, best score first.
@@ -1000,37 +991,11 @@ fn decision_from(stats: ImageStats, mut reports: Vec<CandidateReport>, scope: Op
     };
     let winner = &reports[winner_idx];
 
-    let reason = match scope {
-        Some(family) => format!(
-            "图像分析：{} 色 · 色彩度 {:.0} · 双峰度 {:.2} · 纹理 {:.0}% → 在「{}」内试算 {} 组参数（含预设基线），「{}」胜出（保真 {:.2}，复杂度 {:.2}，{} 形状）",
-            stats.effective_colors,
-            stats.colorfulness,
-            stats.bimodality,
-            stats.texture * 100.0,
-            family_label(family).unwrap_or(family),
-            reports.len(),
-            winner.label,
-            winner.fidelity,
-            winner.complexity,
-            winner.shape_count,
-        ),
-        None => format!(
-            "图像分析：{} 色 · 色彩度 {:.0} · 双峰度 {:.2} · 纹理 {:.0}% → 试算 {} 组参数，「{}」胜出（保真 {:.2}，复杂度 {:.2}，{} 形状）",
-            stats.effective_colors,
-            stats.colorfulness,
-            stats.bimodality,
-            stats.texture * 100.0,
-            reports.len(),
-            winner.label,
-            winner.fidelity,
-            winner.complexity,
-            winner.shape_count,
-        ),
-    };
+    let reason_key = if scope.is_some() { "scoped" } else { "auto" }.to_string();
     SmartDecision {
         params: winner.params.clone(),
         family: winner.family.clone(),
-        reason,
+        reason_key,
         stats,
         candidates: reports,
         preset,
@@ -1075,7 +1040,7 @@ pub fn recommend_for(img: &ColorImage, family: &str) -> Result<SmartDecision, Er
             0,
             SmartCandidate {
                 family: family_id,
-                label: "预设默认",
+                label: "presetDefault",
                 params: baseline,
                 is_baseline: true,
             },
@@ -1258,7 +1223,7 @@ mod tests {
             decision.family
         );
         assert_eq!(decision.candidates[0].family, decision.family);
-        assert!(!decision.reason.is_empty());
+        assert_eq!(decision.reason_key, "auto");
     }
 
     #[test]
@@ -1315,7 +1280,7 @@ mod tests {
         assert!(decision.params.line_art);
         assert_eq!(decision.params.clustering, "binary");
         assert!(decision.candidates.len() >= 2);
-        assert!(decision.reason.contains("线稿"));
+        assert_eq!(decision.reason_key, "scoped");
     }
 
     #[test]

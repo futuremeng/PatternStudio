@@ -785,7 +785,7 @@ async fn start_batch_trace(
                     // params and show the recommendation.
                     let smart_info = decision.as_ref().map(|d| serde_json::json!({
                         "family": d.family,
-                        "reason": d.reason,
+                        "reasonKey": d.reason_key,
                         "params": d.params,
                     }));
                     let _ = tx.send(Event::default().event("progress")
