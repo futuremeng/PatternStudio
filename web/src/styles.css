@@ -402,6 +402,25 @@ body {
 .mode-thumb .svg-mini svg { width: 100%; height: 100%; }
 .mode-thumb .mode-label { font-size: 0.7rem; color: var(--text2); }
 .mode-thumb.active .mode-label { color: var(--accent2); }
+/* Thumbnail kind tags: 预设 / 已保存 / 临时, overlaid on the mini preview.
+   Positioned at the bottom-left corner of the 64px preview (thumb padding 0.4rem). */
+.thumb-tag {
+  position: absolute;
+  top: calc(0.4rem + 64px - 15px);
+  left: 0.4rem;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 0.6rem;
+  line-height: 15px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.thumb-tag-preset { background: rgba(15, 17, 23, 0.55); color: var(--text); }
+.thumb-tag-saved { background: var(--success); color: #fff; }
+.thumb-tag-temp { background: rgba(15, 17, 23, 0.55); color: var(--warning); }
+/* Preview border hints: saved = solid green, temp = dashed */
+.mode-thumb.kind-saved .svg-mini { border-color: var(--success); }
+.mode-thumb.kind-temp .svg-mini { border-style: dashed; }
 
 /* Smart tuning button (top of the parameter panel) */
 .smart-tune {

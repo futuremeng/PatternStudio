@@ -1,5 +1,15 @@
 import React from "react";
 
+// Thumbnail kinds, visually distinguished on the strip:
+// - preset: system presets (isDefault)
+// - saved:  user-saved configs (persisted, `saved: true`)
+// - temp:   temporary in-session snapshots (not persisted)
+const KIND_META = {
+  preset: "预设",
+  saved: "已保存",
+  temp: "临时",
+};
+
 /**
  * Bottom strip of parameter-config combinations:
  * default presets (kept) + user-generated snapshots (deletable).
@@ -16,18 +26,20 @@ export default function ConfigStrip({
     <div className="mode-strip">
       {configs.map(config => {
         const isActive = activeConfigId === config.id;
+        const kind = config.isDefault ? "preset" : config.saved ? "saved" : "temp";
         return (
           <div
             key={config.id}
-            className={`mode-thumb ${isActive ? "active" : ""}`}
+            className={`mode-thumb kind-${kind}${isActive ? " active" : ""}`}
             onClick={() => onConfigSelect(config)}
-            title={config.label}
+            title={`${config.label}（${KIND_META[kind]}）`}
           >
             {config.result?.svg ? (
               <div className="svg-mini" dangerouslySetInnerHTML={{ __html: config.result.svg }} />
             ) : (
               <div className="svg-mini placeholder-mini">{config.label}</div>
             )}
+            <span className={`thumb-tag thumb-tag-${kind}`}>{KIND_META[kind]}</span>
             <span className="mode-label">{config.label}</span>
             {!config.isDefault && (
               <>
