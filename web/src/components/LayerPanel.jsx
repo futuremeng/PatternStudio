@@ -4,13 +4,18 @@ import { downloadSvg, downloadBlob } from "../api.js";
 import { useI18n } from "../i18n/index.jsx";
 
 // Rebuild a layer's preview SVG as a standalone file with explicit width/height.
+// The viewBox origin (x y) is preserved: layers snapshotted from a
+// shrink-to-content canvas carry an offset viewBox that keeps their shapes
+// in the original image coordinates.
 function layerToStandaloneSvg(previewSvg) {
   const innerMatch = previewSvg.match(/<svg[^>]*>([\s\S]*)<\/svg>/);
   const inner = innerMatch ? innerMatch[1] : "";
-  const vbMatch = previewSvg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
-  const w = vbMatch ? vbMatch[1] : "100";
-  const h = vbMatch ? vbMatch[2] : "100";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">${inner}</svg>\n`;
+  const vbMatch = previewSvg.match(/viewBox="(-?[\d.]+) (-?[\d.]+) ([\d.]+) ([\d.]+)"/);
+  const x = vbMatch ? vbMatch[1] : "0";
+  const y = vbMatch ? vbMatch[2] : "0";
+  const w = vbMatch ? vbMatch[3] : "100";
+  const h = vbMatch ? vbMatch[4] : "100";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x} ${y} ${w} ${h}" width="${w}" height="${h}">${inner}</svg>\n`;
 }
 
 // Make a layer name safe to use as a file name inside the export ZIP.

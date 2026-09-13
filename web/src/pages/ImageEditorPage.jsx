@@ -24,6 +24,8 @@ const PREWARM_ORDER = ["color", "lineArt", "bw", "gradient", "lowPoly"];
 // Used to snapshot the user's edits as a new, exportable layer.
 function serializeEditedSvg(svg) {
   const vb = svg.viewBox.baseVal;
+  const X = vb.x || 0;
+  const Y = vb.y || 0;
   const W = vb.width;
   const H = vb.height;
   const serializer = new XMLSerializer();
@@ -39,7 +41,7 @@ function serializeEditedSvg(svg) {
     parts.push("    " + str);
   });
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">\n` +
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${X} ${Y} ${W} ${H}" width="${W}" height="${H}">\n` +
     `  <g id="edited-layer" data-role="edited">\n` +
     parts.join("\n") +
     `\n  </g>\n</svg>\n`
@@ -519,16 +521,16 @@ export default function ImageEditorPage() {
       renderControlPoints();
     }
 
-    // Convert a client point to SVG user-space coordinates (same mapping the
-    // drag handler uses: viewBox scaled to the rendered svg size).
+    // Convert a client point to SVG user-space coordinates. Uses the
+    // element's actual screen CTM, which stays correct for any viewBox
+    // (including the offset viewBox produced by "shrink canvas") and any
+    // letterboxing — a manual rect/viewBox ratio would drift as soon as the
+    // viewBox aspect ratio differs from the rendered element's.
     const clientToSvg = (clientX, clientY) => {
-      const rect = svg.getBoundingClientRect();
-      const vb = svg.viewBox.baseVal;
-      if (!vb || vb.width === 0 || rect.width === 0) return null;
-      return {
-        x: (clientX - rect.left) * (vb.width / rect.width),
-        y: (clientY - rect.top) * (vb.height / rect.height),
-      };
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return null;
+      const p = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
+      return { x: p.x, y: p.y };
     };
 
     // Select every path whose (transformed) bounding box intersects the
@@ -574,11 +576,13 @@ export default function ImageEditorPage() {
       const onMove = (me) => {
         const d = dragRef.current;
         if (!d) return;
-        const rect = svg.getBoundingClientRect();
-        const vb = svg.viewBox.baseVal;
-        if (!vb || vb.width === 0 || rect.width === 0) return;
-        const dx = d.ox + (me.clientX - d.sx) * (vb.width / rect.width);
-        const dy = d.oy + (me.clientY - d.sy) * (vb.height / rect.height);
+        const ctm = svg.getScreenCTM();
+        if (!ctm) return;
+        const inv = ctm.inverse();
+        const start = new DOMPoint(d.sx, d.sy).matrixTransform(inv);
+        const cur = new DOMPoint(me.clientX, me.clientY).matrixTransform(inv);
+        const dx = d.ox + (cur.x - start.x);
+        const dy = d.oy + (cur.y - start.y);
         pathTransformsRef.current.set(d.idx, { dx, dy });
         paths[d.idx].setAttribute("transform", `translate(${dx}, ${dy})`);
         renderControlPoints();
@@ -694,6 +698,39 @@ export default function ImageEditorPage() {
       dragRef.current = null;
     };
   }, [tool, result?.svg, compareMode, getSvgAndPaths, highlightPaths, renderControlPoints, clearPatchSelection]);
+
+  // --- Align the vector canvas with the original image (overlay mode) ---
+  // A fresh trace's SVG uses viewBox 0 0 imgW imgH, so stretching it to 100%
+  // of the compare box lines it up with the image. After the advanced
+  // editor's "shrink canvas" the viewBox carries an offset (x y w h) that
+  // crops the same image space; the svg element must then be placed at
+  // (x*ds, y*ds) with size (w*ds, h*ds). Stretching it to 100% instead would
+  // make the browser letterbox the content, and the vectors drift from the
+  // image by an amount that grows with the window size / zoom.
+  useEffect(() => {
+    if (compareMode === "side") return;
+    const container = svgContainerRef.current;
+    if (!container || !result?.svg) return;
+    const svg = container.querySelector("svg");
+    if (!svg) return;
+    const vb = svg.viewBox.baseVal;
+    if (!vb || vb.width === 0 || vb.height === 0) return;
+    const native = vb.x === 0 && vb.y === 0 && vb.width === imgW && vb.height === imgH;
+    if (native || !hasDims) {
+      // Default CSS sizing (100% of the compare box).
+      svg.style.position = "";
+      svg.style.left = "";
+      svg.style.top = "";
+      svg.style.width = "";
+      svg.style.height = "";
+      return;
+    }
+    svg.style.position = "absolute";
+    svg.style.left = `${vb.x * ds}px`;
+    svg.style.top = `${vb.y * ds}px`;
+    svg.style.width = `${vb.width * ds}px`;
+    svg.style.height = `${vb.height * ds}px`;
+  }, [result?.svg, compareMode, ds, hasDims, imgW, imgH]);
 
   /**
    * Write a trace result back to any config whose params match, so the

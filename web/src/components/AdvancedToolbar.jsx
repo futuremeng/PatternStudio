@@ -69,6 +69,14 @@ const IconSaveLayer = () => (
     <path d="M3 17l9 5 9-5" />
   </svg>
 );
+const IconShrink = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+    <path d="M16 3v3a2 2 0 0 0 2 2h3" />
+    <path d="M8 21v-3a2 2 0 0 0-2-2H3" />
+    <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+  </svg>
+);
 const IconCheck = () => (
   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
     <path d="M20 6L9 17l-5-5" />
@@ -88,7 +96,7 @@ export default function AdvancedToolbar({
   canUndo, canRedo, onUndo, onRedo,
   onGroup, onUngroup,
   onMoveTop, onMoveBottom, onMoveUp, onMoveDown,
-  onDelete, onSaveAsLayer, onComplete, onCancel,
+  onDelete, onSaveAsLayer, onShrinkCanvas, onComplete, onCancel,
 }) {
   const { t } = useI18n();
 
@@ -145,6 +153,9 @@ export default function AdvancedToolbar({
       <div className="toolbar-group">
         <button onClick={onSaveAsLayer} title={t("adv.saveLayer")} aria-label={t("adv.saveLayer")}>
           <IconSaveLayer />
+        </button>
+        <button onClick={onShrinkCanvas} title={t("adv.shrinkCanvas")} aria-label={t("adv.shrinkCanvas")}>
+          <IconShrink />
         </button>
       </div>
       <span className="toolbar-spacer" />

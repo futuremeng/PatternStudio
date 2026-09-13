@@ -211,4 +211,5 @@ export default {
   "adv.done": "完了 — 変更を適用",
   "adv.cancel": "キャンセル (Esc)",
   "adv.saveLayer": "レイヤーとして保存",
+  "adv.shrinkCanvas": "キャンバスを内容に合わせる",
 };

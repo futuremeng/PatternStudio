@@ -211,4 +211,5 @@ export default {
   "adv.done": "完成 — 应用修改",
   "adv.cancel": "取消 (Esc)",
   "adv.saveLayer": "存为新图层",
+  "adv.shrinkCanvas": "收缩画布至内容范围",
 };

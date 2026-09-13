@@ -211,4 +211,5 @@ export default {
   "adv.done": "Done — apply changes",
   "adv.cancel": "Cancel (Esc)",
   "adv.saveLayer": "Save as layer",
+  "adv.shrinkCanvas": "Shrink canvas to content",
 };

@@ -65,7 +65,7 @@ function flattenLayerGroups(svgString) {
  *
  * Returns null when the raw string cannot be parsed.
  */
-function normalizeEditedSvg(rawSvg, w, h) {
+function normalizeEditedSvg(rawSvg, w, h, x = 0, y = 0) {
   try {
     const doc = new DOMParser().parseFromString(rawSvg, "image/svg+xml");
     const root = doc.documentElement;
@@ -99,7 +99,7 @@ function normalizeEditedSvg(rawSvg, w, h) {
       ? ' xmlns:xlink="http://www.w3.org/1999/xlink"'
       : "";
     return (
-      `<svg xmlns="http://www.w3.org/2000/svg"${xlinkDecl} viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">\n` +
+      `<svg xmlns="http://www.w3.org/2000/svg"${xlinkDecl} viewBox="${x} ${y} ${w} ${h}" width="${w}" height="${h}">\n` +
       body +
       "\n</svg>\n"
     );
@@ -131,12 +131,18 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
   const { t } = useI18n();
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
-  const dimsRef = useRef({ w: 800, h: 600 });
+  // Canvas window in user space: the viewBox origin (x, y) plus its size.
+  // A fresh trace has x = y = 0; "shrink canvas" moves the origin to crop
+  // the canvas without touching the shapes (see doShrinkCanvas).
+  const dimsRef = useRef({ x: 0, y: 0, w: 800, h: 600 });
   const [mode, setMode] = useState("select");
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [zoom, setZoom] = useState(1); // 1 = fit to container
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
+  // Bumped when the canvas dimensions change (shrink-to-content) so the zoom
+  // sizing effect re-runs with the new viewBox.
+  const [dimsVersion, setDimsVersion] = useState(0);
   // Latest onSaveAsLayer, so the (stable) imperative handle never goes stale.
   const onSaveAsLayerRef = useRef(onSaveAsLayer);
   useEffect(() => { onSaveAsLayerRef.current = onSaveAsLayer; }, [onSaveAsLayer]);
@@ -146,11 +152,14 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
     const container = containerRef.current;
     if (!container || !svgString) return;
 
-    // Parse dimensions from the SVG viewBox
-    const vbMatch = svgString.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
-    const w = vbMatch ? parseFloat(vbMatch[1]) : 800;
-    const h = vbMatch ? parseFloat(vbMatch[2]) : 600;
-    dimsRef.current = { w, h };
+    // Parse the canvas window from the SVG viewBox (x y w h — the origin
+    // may be non-zero after a shrink-to-content).
+    const vbMatch = svgString.match(/viewBox="(-?[\d.]+) (-?[\d.]+) ([\d.]+) ([\d.]+)"/);
+    const x = vbMatch ? parseFloat(vbMatch[1]) : 0;
+    const y = vbMatch ? parseFloat(vbMatch[2]) : 0;
+    const w = vbMatch ? parseFloat(vbMatch[3]) : 800;
+    const h = vbMatch ? parseFloat(vbMatch[4]) : 600;
+    dimsRef.current = { x, y, w, h };
 
     const canvas = new SvgCanvas(container, {
       canvasName: "advanced-canvas",
@@ -177,8 +186,9 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
     canvas.setMode("select");
 
     // Give the canvas root a viewBox so the artwork can be scaled by
-    // resizing the element (see the zoom effect below).
-    canvas.getSvgContent().setAttribute("viewBox", `0 0 ${w} ${h}`);
+    // resizing the element (see the zoom effect below). The origin (x, y)
+    // is preserved so a previously-shrunk canvas keeps its crop.
+    canvas.getSvgContent().setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
 
     // Bind event to track undo/redo availability
     const onHistoryChange = () => {
@@ -223,7 +233,7 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
     const svgEl = canvas.getSvgContent();
     svgEl.setAttribute("width", String(Math.round(w * scale * 100) / 100));
     svgEl.setAttribute("height", String(Math.round(h * scale * 100) / 100));
-  }, [containerSize, zoom, svgString]);
+  }, [containerSize, zoom, svgString, dimsVersion]);
 
   useImperativeHandle(
     ref,
@@ -235,8 +245,8 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
       saveAsLayer: () => {
         const canvas = canvasRef.current;
         if (!canvas || !onSaveAsLayerRef.current) return;
-        const { w, h } = dimsRef.current;
-        const clean = normalizeEditedSvg(canvas.getSvgString(), w, h);
+        const { x, y, w, h } = dimsRef.current;
+        const clean = normalizeEditedSvg(canvas.getSvgString(), w, h, x, y);
         if (clean) onSaveAsLayerRef.current(clean);
       },
     }),
@@ -288,12 +298,63 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
     canvasRef.current?.deleteSelectedElements();
   }, []);
 
+  // --- Shrink the canvas to fit the content ---
+  // Computes the union bbox of all top-level shapes (in user space) and crops
+  // the canvas to it by moving the viewBox origin. The shapes keep their
+  // original (image-space) coordinates, so the main editor can still align
+  // the vectors with the original image, and shrinking twice stays correct
+  // (no cumulative translation). Subsequent "save as layer" / "done" exports
+  // carry the offset viewBox.
+  const doShrinkCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const content = canvas.getSvgContent();
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    let found = false;
+    for (const child of [...content.children]) {
+      const tag = child.tagName;
+      if (tag === "defs" || tag === "title" || tag === "desc") continue;
+      let bb;
+      try { bb = child.getBBox(); } catch { continue; }
+      if (!bb || (bb.width === 0 && bb.height === 0)) continue;
+      const ctm = child.getCTM();
+      if (!ctm) continue;
+      for (const [px, py] of [
+        [bb.x, bb.y],
+        [bb.x + bb.width, bb.y],
+        [bb.x, bb.y + bb.height],
+        [bb.x + bb.width, bb.y + bb.height],
+      ]) {
+        const p = new DOMPoint(px, py).matrixTransform(ctm);
+        x1 = Math.min(x1, p.x);
+        y1 = Math.min(y1, p.y);
+        x2 = Math.max(x2, p.x);
+        y2 = Math.max(y2, p.y);
+      }
+      found = true;
+    }
+    if (!found) return;
+
+    const pad = 10;
+    const newX = x1 - pad;
+    const newY = y1 - pad;
+    const newW = x2 - x1 + pad * 2;
+    const newH = y2 - y1 + pad * 2;
+
+    // Crop by moving the viewBox origin; the shapes are left untouched so
+    // their coordinates stay in the original image space. Re-run the zoom
+    // sizing with the new canvas window.
+    dimsRef.current = { x: newX, y: newY, w: newW, h: newH };
+    content.setAttribute("viewBox", `${newX} ${newY} ${newW} ${newH}`);
+    setDimsVersion((v) => v + 1);
+  }, []);
+
   // --- Save the current canvas as a new layer ---
   const handleSaveAsLayer = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !onSaveAsLayer) return;
-    const { w, h } = dimsRef.current;
-    const clean = normalizeEditedSvg(canvas.getSvgString(), w, h);
+    const { x, y, w, h } = dimsRef.current;
+    const clean = normalizeEditedSvg(canvas.getSvgString(), w, h, x, y);
     if (clean) onSaveAsLayer(clean);
   }, [onSaveAsLayer]);
 
@@ -301,8 +362,8 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
   const handleComplete = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const { w, h } = dimsRef.current;
-    const clean = normalizeEditedSvg(canvas.getSvgString(), w, h);
+    const { x, y, w, h } = dimsRef.current;
+    const clean = normalizeEditedSvg(canvas.getSvgString(), w, h, x, y);
     if (clean) onComplete(clean);
   }, [onComplete]);
 
@@ -349,6 +410,7 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
         onMoveDown={doMoveDown}
         onDelete={doDelete}
         onSaveAsLayer={handleSaveAsLayer}
+        onShrinkCanvas={doShrinkCanvas}
         onComplete={handleComplete}
         onCancel={handleCancel}
       />
