@@ -402,6 +402,19 @@ body {
 .mode-thumb .svg-mini svg { width: 100%; height: 100%; }
 .mode-thumb .mode-label { font-size: 0.7rem; color: var(--text2); }
 .mode-thumb.active .mode-label { color: var(--accent2); }
+.mode-thumb:not(.kind-preset) .mode-label:hover { color: var(--text); }
+/* Inline rename input (double-click a user config's label) */
+.mode-label-input {
+  width: 100%;
+  font-size: 0.7rem;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid var(--accent);
+  background: var(--surface2);
+  color: var(--text);
+  text-align: center;
+  outline: none;
+}
 /* Thumbnail kind tags: 预设 / 已保存 / 临时, overlaid on the mini preview.
    Positioned at the bottom-left corner of the 64px preview (thumb padding 0.4rem). */
 .thumb-tag {

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useRef, useCallback } from "react";
 
 // Thumbnail kinds, visually distinguished on the strip:
 // - preset: system presets (isDefault)
@@ -21,7 +21,33 @@ export default function ConfigStrip({
   onConfigSelect,
   onConfigSave,
   onConfigDelete,
+  onConfigRename,
 }) {
+  // Inline rename state for user configs (double-click the label).
+  const [editingId, setEditingId] = useState(null);
+  const [draft, setDraft] = useState("");
+  const editingIdRef = useRef(null);
+  const setEditing = (id) => { editingIdRef.current = id; setEditingId(id); };
+
+  const startEdit = useCallback((e, config) => {
+    e.stopPropagation();
+    setDraft(config.label);
+    setEditing(config.id);
+  }, []);
+
+  /** Commit the rename (Enter / blur). Empty names revert to the old label. */
+  const commitEdit = useCallback((config) => {
+    if (editingIdRef.current !== config.id) return;
+    setEditing(null);
+    const label = draft.trim();
+    if (label && label !== config.label) onConfigRename(config.id, label);
+  }, [draft, onConfigRename]);
+
+  const cancelEdit = useCallback(() => {
+    if (editingIdRef.current === null) return;
+    setEditing(null);
+  }, []);
+
   return (
     <div className="mode-strip">
       {configs.map(config => {
@@ -40,7 +66,31 @@ export default function ConfigStrip({
               <div className="svg-mini placeholder-mini">{config.label}</div>
             )}
             <span className={`thumb-tag thumb-tag-${kind}`}>{KIND_META[kind]}</span>
-            <span className="mode-label">{config.label}</span>
+            {editingId === config.id ? (
+              <input
+                className="mode-label-input"
+                value={draft}
+                autoFocus
+                maxLength={20}
+                onClick={e => e.stopPropagation()}
+                onDoubleClick={e => e.stopPropagation()}
+                onChange={e => setDraft(e.target.value)}
+                onBlur={() => commitEdit(config)}
+                onKeyDown={e => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") commitEdit(config);
+                  else if (e.key === "Escape") cancelEdit();
+                }}
+              />
+            ) : (
+              <span
+                className="mode-label"
+                onDoubleClick={config.isDefault ? undefined : e => startEdit(e, config)}
+                title={config.isDefault ? undefined : "双击改名"}
+              >
+                {config.label}
+              </span>
+            )}
             {!config.isDefault && (
               <>
                 <button

@@ -407,6 +407,14 @@ export default function ImageEditorPage() {
     setActiveConfigId(prev => (prev === id ? null : prev));
   }, []);
 
+  /** Rename a user config; re-persist if it is saved. */
+  const onConfigRename = useCallback((id, label) => {
+    const target = configsRef.current.find(c => c.id === id);
+    if (!target || target.label === label) return;
+    setConfigs(prev => prev.map(c => (c.id === id ? { ...c, label } : c)));
+    if (target.saved) saveConfig({ ...target, label }).catch(() => {});
+  }, []);
+
   /** Toggle persistence for a user config (save / unsave). */
   const onConfigSave = useCallback((config) => {
     if (config.saved) {
@@ -587,6 +595,7 @@ export default function ImageEditorPage() {
         onConfigSelect={onConfigSelect}
         onConfigSave={onConfigSave}
         onConfigDelete={onConfigDelete}
+        onConfigRename={onConfigRename}
       />
     </div>
   );
