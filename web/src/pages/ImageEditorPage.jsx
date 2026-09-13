@@ -96,6 +96,7 @@ export default function ImageEditorPage() {
   // --- Preview view controls: maximize, zoom, fit ---
   const [maximized, setMaximized] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [actualSize, setActualSize] = useState(false);
   const [tool, setTool] = useState("none");
   const viewportRef = useRef(null);
   const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 });
@@ -128,12 +129,12 @@ export default function ImageEditorPage() {
   }, []);
 
   // Reset the view when switching to a different image.
-  useEffect(() => { setZoom(1); }, [imageId]);
+  useEffect(() => { setZoom(1); setActualSize(false); }, [imageId]);
 
   const toggleMaximize = useCallback(() => setMaximized(m => !m), []);
-  const zoomIn = useCallback(() => setZoom(z => Math.min(8, z * 1.25)), []);
-  const zoomOut = useCallback(() => setZoom(z => Math.max(0.1, z / 1.25)), []);
-  const fitScreen = useCallback(() => setZoom(1), []);
+  const zoomIn = useCallback(() => { setActualSize(false); setZoom(z => Math.min(8, z * 1.25)); }, []);
+  const zoomOut = useCallback(() => { setActualSize(false); setZoom(z => Math.max(0.1, z / 1.25)); }, []);
+  const fitScreen = useCallback(() => { setActualSize(false); setZoom(1); }, []);
 
   // Ctrl/Cmd + wheel zoom on the preview viewport; plain wheel scrolls natively.
   const panDragRef = useRef(null); // { startX, startY, scrollLeft, scrollTop }
@@ -793,8 +794,20 @@ export default function ImageEditorPage() {
             <button onClick={zoomOut} title="缩小" aria-label="缩小">
               <IconZoomOut />
             </button>
-            <button onClick={fitScreen} title="比例" aria-label="比例">
-              <IconFit />
+            <button
+              onClick={() => {
+                if (actualSize) {
+                  setActualSize(false);
+                  setZoom(1);
+                } else if (fitScale > 0) {
+                  setActualSize(true);
+                  setZoom(1 / fitScale);
+                }
+              }}
+              title={actualSize ? "铺满" : "1:1"}
+              aria-label={actualSize ? "铺满" : "1:1"}
+            >
+              {actualSize ? <IconFit /> : <span style={{ fontSize: "0.65rem", fontWeight: 700 }}>1:1</span>}
             </button>
           </div>
 
