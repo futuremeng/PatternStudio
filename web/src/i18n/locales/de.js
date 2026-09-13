@@ -36,6 +36,8 @@ export default {
   "detail.progressDone": "Fertig: {c}/{t}",
   "detail.lineArt": "Linienzeichnung",
   "detail.colorArt": "Farben",
+  "detail.split": "Aufteilung",
+  "detail.splitTitle": "Original / Linienzeichnung / Farben anzeigen",
 
   // Presets (MODE_PRESETS)
   "preset.lineArt": "Linienzeichnung",

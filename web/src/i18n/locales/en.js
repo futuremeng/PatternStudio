@@ -36,6 +36,8 @@ export default {
   "detail.progressDone": "Done: {c}/{t}",
   "detail.lineArt": "Line art",
   "detail.colorArt": "Color",
+  "detail.split": "Split view",
+  "detail.splitTitle": "Show the original / line art / color split view",
 
   // Presets (MODE_PRESETS)
   "preset.lineArt": "Line art",

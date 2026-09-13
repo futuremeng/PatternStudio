@@ -36,6 +36,8 @@ export default {
   "detail.progressDone": "完成: {c}/{t}",
   "detail.lineArt": "线稿",
   "detail.colorArt": "色稿",
+  "detail.split": "三图分割",
+  "detail.splitTitle": "显示原图 / 线稿 / 色稿 的三图分割视图",
 
   // Presets (MODE_PRESETS)
   "preset.lineArt": "线稿",

@@ -51,7 +51,7 @@ function cropSvgQuarter(svg, quarter) {
  * over IPC, so eagerly loading a 100-image project would stall the UI and
  * balloon memory; IntersectionObserver keeps only the visible cards loaded.
  */
-function ImageCard({ projectId, filename, preview, onClick }) {
+function ImageCard({ projectId, filename, preview, showSplit, onClick }) {
   const { t, presetLabel } = useI18n();
   const [url, setUrl] = useState(null);
   const cardRef = useRef(null);
@@ -91,7 +91,7 @@ function ImageCard({ projectId, filename, preview, onClick }) {
 
   return (
     <div className="image-card" ref={cardRef} onClick={onClick}>
-      {preview?.result ? (
+      {showSplit && preview?.result ? (
         // Single-preset batch result (bw / gradient / lowPoly / smart), shown full on the right.
         <div className="img-wrap split">
           <div className="split-left">
@@ -104,7 +104,7 @@ function ImageCard({ projectId, filename, preview, onClick }) {
             </div>
           </div>
         </div>
-      ) : preview ? (
+      ) : showSplit && preview ? (
         <div className="img-wrap split">
           <div className="split-left">
             {url && <img src={url} alt={filename} />}
@@ -141,6 +141,8 @@ export default function ProjectDetailPage() {
   // chooses fixed params or smart tuning (best params within that family).
   const [batchPreset, setBatchPreset] = useState("lineArt");
   const [batchSmart, setBatchSmart] = useState(false);
+  // Display mode for the grid: off = original thumbnail, on = three-image split.
+  const [showSplit, setShowSplit] = useState(false);
   const [batchStatus, setBatchStatus] = useState(null);
   const [batchProgress, setBatchProgress] = useState(null);
   const [batchFailed, setBatchFailed] = useState(0);
@@ -323,6 +325,19 @@ export default function ProjectDetailPage() {
         meta={t("imageCount", { n: project.images?.length || 0 })}
         onBack={() => navigate("/")}
       >
+        <label className="split-toggle" title={t("detail.splitTitle")}>
+          <span className="split-toggle-label">{t("detail.split")}</span>
+          <button
+            type="button"
+            className={`switch ${showSplit ? "on" : ""}`}
+            role="switch"
+            aria-checked={showSplit}
+            aria-label={t("detail.split")}
+            onClick={() => setShowSplit(v => !v)}
+          >
+            <span className="knob" />
+          </button>
+        </label>
         <select
           className="batch-preset-select"
           value={batchPreset}
@@ -354,6 +369,7 @@ export default function ProjectDetailPage() {
               projectId={projectId}
               filename={filename}
               preview={previews[filename]}
+              showSplit={showSplit}
               onClick={() => navigate(`/project/${encodeURIComponent(projectId)}/image/${encodeURIComponent(filename)}`)}
             />
           ))}

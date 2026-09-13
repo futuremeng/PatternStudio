@@ -36,6 +36,8 @@ export default {
   "detail.progressDone": "Terminé : {c}/{t}",
   "detail.lineArt": "Traits",
   "detail.colorArt": "Couleurs",
+  "detail.split": "Vue scindée",
+  "detail.splitTitle": "Afficher l'original / les traits / les couleurs",
 
   // Presets (MODE_PRESETS)
   "preset.lineArt": "Traits",

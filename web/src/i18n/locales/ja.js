@@ -36,6 +36,8 @@ export default {
   "detail.progressDone": "完了: {c}/{t}",
   "detail.lineArt": "ライン画",
   "detail.colorArt": "カラー",
+  "detail.split": "分割表示",
+  "detail.splitTitle": "元画像 / ライン画 / カラーの分割ビューを表示",
 
   // Presets (MODE_PRESETS)
   "preset.lineArt": "ライン画",
