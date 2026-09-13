@@ -312,6 +312,11 @@ fn do_trace_with_session(session: &mut Session, config: &vtracer::Config, params
                 let t = params.complexity_threshold.unwrap_or(70);
                 LayerAssignment::hybrid(&doc, n, t)
             }
+            "spatial" => {
+                let n = params.layers.max(2);
+                let gap = (doc.width.min(doc.height) as f64 * 0.02).max(5.0);
+                LayerAssignment::by_spatial(&doc, n, gap)
+            }
             _ => LayerAssignment::single_layer(),
         };
         (assignment, None)

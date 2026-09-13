@@ -51,6 +51,7 @@ export default {
   "reason.fewColor": "{c} 色 + 細節預算 {budget} < 40 → 顏色分層",
   "reason.manyHybrid": "{c} 色 + 細節預算 {budget} ≥ 60 → 混合分層（顏色預算減半）",
   "reason.manyComplexity": "{c} 色 + 細節預算 {budget} < 60 → 複雜度分層",
+  "reason.spatialSplit": "空間聚类：偵測到 {layers} 個獨立區域 → 空間分層",
   // Smart tuning reason (backend SmartDecision.reasonKey)
   "smart.reasonScoped": "圖像分析：{colors} 色 · 色彩度 {colorfulness} · 雙峰度 {bimodality} · 紋理 {texture}% → 在「{family}」內試算 {n} 組參數（含預設基線），「{winner}」勝出（保真 {fidelity}，複雜度 {complexity}，{shapes} 形狀）",
   "smart.reasonAuto": "圖像分析：{colors} 色 · 色彩度 {colorfulness} · 雙峰度 {bimodality} · 紋理 {texture}% → 試算 {n} 組參數，「{winner}」勝出（保真 {fidelity}，複雜度 {complexity}，{shapes} 形狀）",
@@ -137,6 +138,8 @@ export default {
   "param.singleLayerTitle": "所有形狀放在同一個圖層",
   "param.autoStrategyTitle": "根據目前參數組合自動選擇分層策略，並按 粗/標準/細 三級參數剖面處理各層",
   "param.colorStrategyTitle": "相同顏色的形狀歸到同一圖層",
+  "param.spatial": "空間",
+  "param.spatialStrategyTitle": "按空間位置聚类：包围盒相近的形狀歸到同一圖層，空間上分離的圖形各自獨立成層",
   "param.complexity": "複雜度",
   "param.complexityStrategyTitle": "簡單形狀作為底圖，複雜形狀單獨成層",
   "param.hybrid": "混合",

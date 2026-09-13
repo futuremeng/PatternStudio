@@ -280,6 +280,7 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
             { value: "none", label: t("param.singleLayer"), title: t("param.singleLayerTitle") },
             { value: "auto", label: t("param.auto"), title: t("param.autoStrategyTitle") },
             { value: "color", label: t("param.color"), title: t("param.colorStrategyTitle") },
+            { value: "spatial", label: t("param.spatial"), title: t("param.spatialStrategyTitle") },
             { value: "complexity", label: t("param.complexity"), title: t("param.complexityStrategyTitle") },
             { value: "hybrid", label: t("param.hybrid"), title: t("param.hybridStrategyTitle") },
           ]}

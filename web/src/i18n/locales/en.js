@@ -51,6 +51,7 @@ export default {
   "reason.fewColor": "{c} colors + detail budget {budget} < 40 → color layers",
   "reason.manyHybrid": "{c} colors + detail budget {budget} ≥ 60 → hybrid layers (color budget halved)",
   "reason.manyComplexity": "{c} colors + detail budget {budget} < 60 → complexity layers",
+  "reason.spatialSplit": "Spatial clustering: {layers} independent regions detected → spatial layers",
   // Smart tuning reason (backend SmartDecision.reasonKey)
   "smart.reasonScoped": "Image analysis: {colors} colors · colorfulness {colorfulness} · bimodality {bimodality} · texture {texture}% → tried {n} parameter sets within \"{family}\" (incl. preset baseline), \"{winner}\" won (fidelity {fidelity}, complexity {complexity}, {shapes} shapes)",
   "smart.reasonAuto": "Image analysis: {colors} colors · colorfulness {colorfulness} · bimodality {bimodality} · texture {texture}% → tried {n} parameter sets, \"{winner}\" won (fidelity {fidelity}, complexity {complexity}, {shapes} shapes)",
@@ -137,6 +138,8 @@ export default {
   "param.singleLayerTitle": "All shapes on one layer",
   "param.autoStrategyTitle": "Automatically picks the layer strategy for the current parameters and processes each layer with a coarse/standard/fine profile",
   "param.colorStrategyTitle": "Shapes of the same color go to one layer",
+  "param.spatial": "Spatial",
+  "param.spatialStrategyTitle": "Clusters shapes by spatial position: shapes with nearby bounding boxes share a layer; spatially-separated figures each get their own layer",
   "param.complexity": "Complexity",
   "param.complexityStrategyTitle": "Simple shapes form the base; complex shapes get their own layers",
   "param.hybrid": "Hybrid",

@@ -4,7 +4,7 @@
 //! and metadata. Each layer maps to a `<g>` element in the output SVG.
 
 use serde::{Deserialize, Serialize};
-use vtracer::ir::{Shape, VectorDoc};
+use vtracer::ir::{PathCmd, Shape, VectorDoc};
 use visioncortex::Color;
 
 /// Semantic role of a layer — determines SVG `<g id>` and edit behavior.
@@ -389,6 +389,136 @@ impl LayerAssignment {
         });
         result
     }
+
+    /// Spatial clustering: group shapes whose bounding boxes are close (within
+    /// `gap` pixels) into the same layer. Each spatially-separated cluster
+    /// becomes its own layer.
+    pub fn by_spatial(doc: &VectorDoc, max_layers: usize, gap: f64) -> Self {
+        if doc.shapes.is_empty() {
+            return Self::single_layer();
+        }
+        let bboxes: Vec<Option<(f64, f64, f64, f64)>> =
+            doc.shapes.iter().map(shape_bbox).collect();
+        let n = doc.shapes.len();
+        if n == 1 {
+            return Self::single_layer();
+        }
+        let mut parent: Vec<usize> = (0..n).collect();
+        let mut rank: Vec<usize> = vec![0; n];
+        fn find(parent: &mut Vec<usize>, mut x: usize) -> usize {
+            while parent[x] != x {
+                parent[x] = parent[parent[x]];
+                x = parent[x];
+            }
+            x
+        }
+        fn union(parent: &mut Vec<usize>, rank: &mut Vec<usize>, a: usize, b: usize) {
+            let ra = find(parent, a);
+            let rb = find(parent, b);
+            if ra == rb { return; }
+            if rank[ra] < rank[rb] { parent[ra] = rb; }
+            else if rank[ra] > rank[rb] { parent[rb] = ra; }
+            else { parent[rb] = ra; rank[ra] += 1; }
+        }
+        for i in 0..n {
+            if let Some((x1, y1, x2, y2)) = bboxes[i] {
+                for j in (i + 1)..n {
+                    if let Some((x3, y3, x4, y4)) = bboxes[j] {
+                        let gap_x = if x2 < x3 { x3 - x2 } else if x4 < x1 { x1 - x4 } else { 0.0 };
+                        let gap_y = if y2 < y3 { y3 - y2 } else if y4 < y1 { y1 - y4 } else { 0.0 };
+                        if gap_x <= gap && gap_y <= gap {
+                            union(&mut parent, &mut rank, i, j);
+                        }
+                    }
+                }
+            }
+        }
+        use std::collections::HashMap;
+        let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
+        for i in 0..n {
+            let root = find(&mut parent, i);
+            groups.entry(root).or_default().push(i);
+        }
+        let mut group_list: Vec<Vec<usize>> = groups.into_values().collect();
+        if group_list.len() <= 1 {
+            return Self::single_layer();
+        }
+        group_list.sort_by(|a, b| b.len().cmp(&a.len()));
+        let mut layers: Vec<LayerSpec> = Vec::new();
+        if group_list.len() <= max_layers {
+            for (idx, indices) in group_list.into_iter().enumerate() {
+                let name = format!("region-{}", idx + 1);
+                layers.push(LayerSpec {
+                    name: name.clone(),
+                    role: LayerRole::Custom(name),
+                    shape_indices: indices,
+                    editability: EditabilityFlags::full(),
+                    profile: crate::profiles::ProfileLevel::default(),
+                });
+            }
+        } else {
+            let keep = max_layers.saturating_sub(1);
+            for (idx, indices) in group_list[..keep].iter().enumerate() {
+                let name = format!("region-{}", idx + 1);
+                layers.push(LayerSpec {
+                    name: name.clone(),
+                    role: LayerRole::Custom(name),
+                    shape_indices: indices.clone(),
+                    editability: EditabilityFlags::full(),
+                    profile: crate::profiles::ProfileLevel::default(),
+                });
+            }
+            let mut other: Vec<usize> = Vec::new();
+            for indices in &group_list[keep..] {
+                other.extend(indices.iter().copied());
+            }
+            layers.push(LayerSpec {
+                name: "other".into(),
+                role: LayerRole::Custom("other".into()),
+                shape_indices: other,
+                editability: EditabilityFlags::full(),
+                profile: crate::profiles::ProfileLevel::default(),
+            });
+        }
+        Self { layers }
+    }
+}
+
+/// Compute the axis-aligned bounding box of a shape from its path commands.
+/// Returns `(min_x, min_y, max_x, max_y)`, or `None` if the shape has no
+/// coordinate commands. For cubic Bézier segments the control points are
+/// used, giving a conservative bound (the curve is always contained within
+/// the convex hull of its control points).
+pub fn shape_bbox(shape: &Shape) -> Option<(f64, f64, f64, f64)> {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut update = |x: f64, y: f64| {
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    };
+    for sub in &shape.path.subpaths {
+        for cmd in &sub.commands {
+            match cmd {
+                PathCmd::MoveTo(p) => update(p.x, p.y),
+                PathCmd::LineTo(p) => update(p.x, p.y),
+                PathCmd::CubicTo(p1, p2, p3) => {
+                    update(p1.x, p1.y);
+                    update(p2.x, p2.y);
+                    update(p3.x, p3.y);
+                }
+                PathCmd::Close => {}
+            }
+        }
+    }
+    if min_x.is_infinite() {
+        None
+    } else {
+        Some((min_x, min_y, max_x, max_y))
+    }
 }
 
 /// Layered document IR — PatternStudio's core output type.
@@ -651,6 +781,89 @@ mod tests {
         let mut doc = VectorDoc::new(10, 10);
         doc.shapes.push(test_shape(255));
         let assignment = LayerAssignment::by_complexity(&doc, 50, 1);
+        assert_eq!(assignment.layers.len(), 1);
+    }
+
+    /// Create a shape at a specific position with a given size.
+    fn positioned_shape(x: f64, y: f64, w: f64, h: f64) -> Shape {
+        let mut sub = SubPath::new();
+        sub.commands.push(PathCmd::MoveTo(PointF64 { x, y }));
+        sub.commands.push(PathCmd::LineTo(PointF64 { x: x + w, y }));
+        sub.commands.push(PathCmd::LineTo(PointF64 { x: x + w, y: y + h }));
+        sub.commands.push(PathCmd::LineTo(PointF64 { x, y: y + h }));
+        sub.commands.push(PathCmd::Close);
+        Shape {
+            paint: vtracer::ir::Paint::Solid(Color::new(0, 0, 0)),
+            path: MultiPath { subpaths: vec![sub] },
+        }
+    }
+
+    #[test]
+    fn shape_bbox_computes_correct_bounds() {
+        let shape = positioned_shape(10.0, 20.0, 30.0, 40.0);
+        let bbox = shape_bbox(&shape).unwrap();
+        assert_eq!(bbox, (10.0, 20.0, 40.0, 60.0));
+    }
+
+    #[test]
+    fn shape_bbox_empty_shape_returns_none() {
+        let shape = Shape {
+            paint: vtracer::ir::Paint::Solid(Color::new(0, 0, 0)),
+            path: MultiPath { subpaths: vec![] },
+        };
+        assert!(shape_bbox(&shape).is_none());
+    }
+
+    #[test]
+    fn by_spatial_splits_three_separated_shapes() {
+        // Three shapes far apart (like the user's pattern: left circle, middle crescent, right circle)
+        let mut doc = VectorDoc::new(1000, 200);
+        doc.shapes.push(positioned_shape(0.0, 50.0, 100.0, 100.0));    // left
+        doc.shapes.push(positioned_shape(400.0, 50.0, 200.0, 100.0));  // middle
+        doc.shapes.push(positioned_shape(800.0, 50.0, 100.0, 100.0));  // right
+
+        let assignment = LayerAssignment::by_spatial(&doc, 4, 10.0);
+        assert_eq!(assignment.layers.len(), 3);
+        // Each layer should have exactly one shape
+        for layer in &assignment.layers {
+            assert_eq!(layer.shape_indices.len(), 1);
+        }
+    }
+
+    #[test]
+    fn by_spatial_merges_overlapping_shapes() {
+        // Two shapes that overlap should be in the same layer (single layer)
+        let mut doc = VectorDoc::new(100, 100);
+        doc.shapes.push(positioned_shape(0.0, 0.0, 50.0, 50.0));
+        doc.shapes.push(positioned_shape(30.0, 30.0, 50.0, 50.0)); // overlaps
+
+        let assignment = LayerAssignment::by_spatial(&doc, 4, 10.0);
+        // Overlapping shapes form one cluster → single_layer() with empty indices (= all shapes)
+        assert_eq!(assignment.layers.len(), 1);
+        assert!(assignment.layers[0].shape_indices.is_empty());
+    }
+
+    #[test]
+    fn by_spatial_respects_max_layers() {
+        // 5 separated shapes but max_layers = 3 → 2 region layers + 1 "other"
+        let mut doc = VectorDoc::new(1000, 100);
+        for i in 0..5 {
+            let x = i as f64 * 200.0;
+            doc.shapes.push(positioned_shape(x, 0.0, 50.0, 50.0));
+        }
+
+        let assignment = LayerAssignment::by_spatial(&doc, 3, 10.0);
+        assert_eq!(assignment.layers.len(), 3);
+        // Last layer should be "other"
+        assert_eq!(assignment.layers.last().unwrap().name, "other");
+    }
+
+    #[test]
+    fn by_spatial_single_shape_returns_single_layer() {
+        let mut doc = VectorDoc::new(100, 100);
+        doc.shapes.push(positioned_shape(0.0, 0.0, 50.0, 50.0));
+
+        let assignment = LayerAssignment::by_spatial(&doc, 4, 10.0);
         assert_eq!(assignment.layers.len(), 1);
     }
 }

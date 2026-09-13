@@ -51,6 +51,7 @@ export default {
   "reason.fewColor": "{c} 色 + 詳細予算 {budget} < 40 → 色レイヤー",
   "reason.manyHybrid": "{c} 色 + 詳細予算 {budget} ≥ 60 → 混合レイヤー（色予算を半減）",
   "reason.manyComplexity": "{c} 色 + 詳細予算 {budget} < 60 → 複雑度レイヤー",
+  "reason.spatialSplit": "空間クラスタリング：{layers} 個の独立領域を検出 → 空間レイヤー",
   // Smart tuning reason (backend SmartDecision.reasonKey)
   "smart.reasonScoped": "画像分析：{colors} 色 · 彩度 {colorfulness} · 二峰性 {bimodality} · 質感 {texture}% → 「{family}」内で {n} 組のパラメータを試算（プリセット基準を含む）、「{winner}」が最適（忠実度 {fidelity}、複雑度 {complexity}、{shapes} 形状）",
   "smart.reasonAuto": "画像分析：{colors} 色 · 彩度 {colorfulness} · 二峰性 {bimodality} · 質感 {texture}% → {n} 組のパラメータを試算、「{winner}」が最適（忠実度 {fidelity}、複雑度 {complexity}、{shapes} 形状）",
@@ -137,6 +138,8 @@ export default {
   "param.singleLayerTitle": "すべての形状を同じレイヤーに",
   "param.autoStrategyTitle": "現在のパラメータに応じてレイヤー戦略を自動選択し、粗/標準/細の3段階のプロファイルで各レイヤーを処理",
   "param.colorStrategyTitle": "同色の形状を同じレイヤーに",
+  "param.spatial": "空間",
+  "param.spatialStrategyTitle": "空間位置でクラスタリング：バウンディングボックスが近い形状を同じレイヤーに、空間的に分離された図形はそれぞれ独立したレイヤーに",
   "param.complexity": "複雑度",
   "param.complexityStrategyTitle": "単純な形状をベースに、複雑な形状は別レイヤーに",
   "param.hybrid": "ハイブリッド",

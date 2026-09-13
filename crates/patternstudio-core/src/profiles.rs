@@ -310,9 +310,32 @@ impl AutoDecision {
     }
 
     /// Full auto path: decide from doc statistics, then build the assignment.
+    /// When the initial decision yields a single layer, spatial clustering is
+    /// tried as a fallback to separate spatially-independent shapes.
     pub fn assign(doc: &VectorDoc, ideal: &IdealParams) -> (LayerAssignment, Self) {
         let c = Self::distinct_colors(doc);
-        let decision = Self::decide(c, ideal);
+        let mut decision = Self::decide(c, ideal);
+
+        // For single-layer decisions, try spatial clustering as a fallback.
+        if decision.strategy == "none" {
+            let gap = (doc.width.min(doc.height) as f64 * 0.02).max(5.0);
+            let mut spatial = LayerAssignment::by_spatial(doc, 8, gap);
+            if spatial.layers.len() >= 2 {
+                decision = Self {
+                    strategy: "spatial".into(),
+                    layers: spatial.layers.len(),
+                    complexity_threshold: decision.complexity_threshold,
+                    reason_key: "spatialSplit".into(),
+                    distinct_colors: c,
+                    detail_budget: decision.detail_budget,
+                };
+                for spec in &mut spatial.layers {
+                    spec.profile = ProfileLevel::for_role(&spec.role);
+                }
+                return (spatial, decision);
+            }
+        }
+
         let assignment = Self::assignment_for(doc, &decision);
         (assignment, decision)
     }
@@ -329,6 +352,10 @@ impl AutoDecision {
             ),
             "hybrid" => {
                 LayerAssignment::hybrid(doc, decision.layers.max(2), decision.complexity_threshold)
+            }
+            "spatial" => {
+                let gap = (doc.width.min(doc.height) as f64 * 0.02).max(5.0);
+                LayerAssignment::by_spatial(doc, decision.layers.max(2), gap)
             }
             _ => LayerAssignment::single_layer(),
         };
@@ -726,6 +753,65 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("L0")
         );
+    }
+
+    /// Create a simple positioned rectangle shape for spatial tests.
+    fn rect_shape(x: f64, y: f64, w: f64, h: f64) -> vtracer::ir::Shape {
+        let mut sub = SubPath::new();
+        sub.commands.push(PathCmd::MoveTo(PointF64 { x, y }));
+        sub.commands.push(PathCmd::LineTo(PointF64 { x: x + w, y }));
+        sub.commands.push(PathCmd::LineTo(PointF64 { x: x + w, y: y + h }));
+        sub.commands.push(PathCmd::LineTo(PointF64 { x, y: y + h }));
+        sub.commands.push(PathCmd::Close);
+        vtracer::ir::Shape {
+            paint: vtracer::ir::Paint::Solid(visioncortex::Color::new(0, 0, 0)),
+            path: vtracer::ir::MultiPath { subpaths: vec![sub] },
+        }
+    }
+
+    #[test]
+    fn auto_assign_falls_back_to_spatial_for_binary_single_color() {
+        // Simulate the user's case: B/W image with 3 spatially-separated shapes.
+        // Binary clustering → budget < 70 → initial decision is "none".
+        // Spatial fallback should detect 3 independent regions.
+        let mut doc = VectorDoc::new(1000, 200);
+        doc.shapes.push(rect_shape(0.0, 50.0, 100.0, 100.0));
+        doc.shapes.push(rect_shape(400.0, 50.0, 200.0, 100.0));
+        doc.shapes.push(rect_shape(800.0, 50.0, 100.0, 100.0));
+
+        let ideal = IdealParams {
+            clustering: "binary",
+            line_art: false,
+            simplify: 0.1,
+            path_precision: 2,
+            corner_threshold: 60,
+            length_threshold: 4.0,
+            filter_speckle: 4,
+            optimize: 1,
+            ..IdealParams::default()
+        };
+
+        let (assignment, decision) = AutoDecision::assign(&doc, &ideal);
+        assert_eq!(decision.strategy, "spatial");
+        assert_eq!(decision.reason_key, "spatialSplit");
+        assert_eq!(assignment.layers.len(), 3);
+    }
+
+    #[test]
+    fn auto_assign_no_spatial_fallback_when_shapes_overlap() {
+        // All shapes overlap → spatial clustering finds only 1 group → no fallback.
+        let mut doc = VectorDoc::new(100, 100);
+        doc.shapes.push(rect_shape(0.0, 0.0, 80.0, 80.0));
+        doc.shapes.push(rect_shape(20.0, 20.0, 80.0, 80.0));
+
+        let ideal = IdealParams {
+            clustering: "binary",
+            ..IdealParams::default()
+        };
+
+        let (assignment, decision) = AutoDecision::assign(&doc, &ideal);
+        assert_eq!(decision.strategy, "none");
+        assert_eq!(assignment.layers.len(), 1);
     }
 }
 

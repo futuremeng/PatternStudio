@@ -51,6 +51,7 @@ export default {
   "reason.fewColor": "{c} couleurs + budget de détail {budget} < 40 → calques par couleur",
   "reason.manyHybrid": "{c} couleurs + budget de détail {budget} ≥ 60 → calques hybrides (budget couleur divisé par deux)",
   "reason.manyComplexity": "{c} couleurs + budget de détail {budget} < 60 → calques par complexité",
+  "reason.spatialSplit": "Regroupement spatial : {layers} régions indépendantes détectées → calques spatiaux",
   // Smart tuning reason (backend SmartDecision.reasonKey)
   "smart.reasonScoped": "Analyse d'image : {colors} couleurs · couleur {colorfulness} · bimodalité {bimodality} · texture {texture}% → {n} jeux de paramètres essayés dans « {family} » (dont la référence du préréglage), « {winner} » a gagné (fidélité {fidelity}, complexité {complexity}, {shapes} formes)",
   "smart.reasonAuto": "Analyse d'image : {colors} couleurs · couleur {colorfulness} · bimodalité {bimodality} · texture {texture}% → {n} jeux de paramètres essayés, « {winner} » a gagné (fidélité {fidelity}, complexité {complexity}, {shapes} formes)",
@@ -137,6 +138,8 @@ export default {
   "param.singleLayerTitle": "Toutes les formes sur un seul calque",
   "param.autoStrategyTitle": "Choisit automatiquement la stratégie de calques selon les paramètres actuels et traite chaque calque avec un profil grossier/standard/fine",
   "param.colorStrategyTitle": "Les formes de la même couleur vont sur un même calque",
+  "param.spatial": "Spatial",
+  "param.spatialStrategyTitle": "Regroupement par position spatiale : les formes aux boîtes englobantes proches partagent un calque ; les figures spatialement séparées obtiennent chacune leur propre calque",
   "param.complexity": "Complexité",
   "param.complexityStrategyTitle": "Les formes simples forment la base ; les formes complexes ont leurs propres calques",
   "param.hybrid": "Hybride",

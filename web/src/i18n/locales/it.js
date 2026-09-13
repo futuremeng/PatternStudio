@@ -51,6 +51,7 @@ export default {
   "reason.fewColor": "{c} colori + budget di dettaglio {budget} < 40 → livelli per colore",
   "reason.manyHybrid": "{c} colori + budget di dettaglio {budget} ≥ 60 → livelli ibridi (budget colori dimezzato)",
   "reason.manyComplexity": "{c} colori + budget di dettaglio {budget} < 60 → livelli per complessità",
+  "reason.spatialSplit": "Raggruppamento spaziale: {layers} regioni indipendenti rilevate → livelli spaziali",
   // Smart tuning reason (backend SmartDecision.reasonKey)
   "smart.reasonScoped": "Analisi immagine: {colors} colori · cromaticità {colorfulness} · bimodalità {bimodality} · texture {texture}% → provati {n} set di parametri in «{family}» (incl. riferimento preset), «{winner}» ha vinto (fedeltà {fidelity}, complessità {complexity}, {shapes} forme)",
   "smart.reasonAuto": "Analisi immagine: {colors} colori · cromaticità {colorfulness} · bimodalità {bimodality} · texture {texture}% → provati {n} set di parametri, «{winner}» ha vinto (fedeltà {fidelity}, complessità {complexity}, {shapes} forme)",
@@ -137,6 +138,8 @@ export default {
   "param.singleLayerTitle": "Tutte le forme su un livello",
   "param.autoStrategyTitle": "Sceglie automaticamente la strategia di livelli in base ai parametri correnti e tratta ogni livello con un profilo grezzo/standard/fine",
   "param.colorStrategyTitle": "Forme dello stesso colore su un livello",
+  "param.spatial": "Spaziale",
+  "param.spatialStrategyTitle": "Raggruppamento per posizione spaziale: forme con bounding box vicine condividono un livello; figure spazialmente separate ottengono ciascuna il proprio livello",
   "param.complexity": "Complessità",
   "param.complexityStrategyTitle": "Le forme semplici formano la base; quelle complesse hanno livelli propri",
   "param.hybrid": "Ibrido",

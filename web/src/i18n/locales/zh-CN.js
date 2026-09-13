@@ -51,6 +51,7 @@ export default {
   "reason.fewColor": "{c} 色 + 细节预算 {budget} < 40 → 颜色分层",
   "reason.manyHybrid": "{c} 色 + 细节预算 {budget} ≥ 60 → 混合分层（颜色预算减半）",
   "reason.manyComplexity": "{c} 色 + 细节预算 {budget} < 60 → 复杂度分层",
+  "reason.spatialSplit": "空间聚类：检测到 {layers} 个独立区域 → 空间分层",
   // Smart tuning reason (backend SmartDecision.reasonKey)
   "smart.reasonScoped": "图像分析：{colors} 色 · 色彩度 {colorfulness} · 双峰度 {bimodality} · 纹理 {texture}% → 在「{family}」内试算 {n} 组参数（含预设基线），「{winner}」胜出（保真 {fidelity}，复杂度 {complexity}，{shapes} 形状）",
   "smart.reasonAuto": "图像分析：{colors} 色 · 色彩度 {colorfulness} · 双峰度 {bimodality} · 纹理 {texture}% → 试算 {n} 组参数，「{winner}」胜出（保真 {fidelity}，复杂度 {complexity}，{shapes} 形状）",
@@ -137,6 +138,8 @@ export default {
   "param.singleLayerTitle": "所有形状放在同一个图层",
   "param.autoStrategyTitle": "根据当前参数组合自动选择分层策略，并按 粗/标准/细 三级参数剖面处理各层",
   "param.colorStrategyTitle": "相同颜色的形状归到同一图层",
+  "param.spatial": "空间",
+  "param.spatialStrategyTitle": "按空间位置聚类：包围盒相近的形状归到同一图层，空间上分离的图形各自独立成层",
   "param.complexity": "复杂度",
   "param.complexityStrategyTitle": "简单形状作为底图，复杂形状单独成层",
   "param.hybrid": "混合",

@@ -51,6 +51,7 @@ export default {
   "reason.fewColor": "{c} Farben + Detailbudget {budget} < 40 → Farbenebenen",
   "reason.manyHybrid": "{c} Farben + Detailbudget {budget} ≥ 60 → hybride Ebenen (Farbbudget halbiert)",
   "reason.manyComplexity": "{c} Farben + Detailbudget {budget} < 60 → Komplexitätsebenen",
+  "reason.spatialSplit": "Räumliche Clustering: {layers} unabhängige Bereiche erkannt → räumliche Ebenen",
   // Smart tuning reason (backend SmartDecision.reasonKey)
   "smart.reasonScoped": "Bildanalyse: {colors} Farben · Farbigkeit {colorfulness} · Bimodalität {bimodality} · Textur {texture}% → {n} Parametersätze in „{family}“ getestet (inkl. Preset-Referenz), „{winner}“ gewann (Treue {fidelity}, Komplexität {complexity}, {shapes} Formen)",
   "smart.reasonAuto": "Bildanalyse: {colors} Farben · Farbigkeit {colorfulness} · Bimodalität {bimodality} · Textur {texture}% → {n} Parametersätze getestet, „{winner}“ gewann (Treue {fidelity}, Komplexität {complexity}, {shapes} Formen)",
@@ -137,6 +138,8 @@ export default {
   "param.singleLayerTitle": "Alle Formen auf einer Ebene",
   "param.autoStrategyTitle": "Wählt automatisch die Ebenenstrategie für die aktuellen Parameter und verarbeitet jede Ebene mit einem grob/standard/fine-Profil",
   "param.colorStrategyTitle": "Formen gleicher Farbe auf einer Ebene",
+  "param.spatial": "Räumlich",
+  "param.spatialStrategyTitle": "Gruppierung nach räumlicher Position: Formen mit nahe Bounding-Boxes teilen sich eine Ebene; räumlich getrennte Figuren erhalten jeweils eigene Ebenen",
   "param.complexity": "Komplexität",
   "param.complexityStrategyTitle": "Einfache Formen bilden die Basis; komplexe Formen erhalten eigene Ebenen",
   "param.hybrid": "Hybrid",
