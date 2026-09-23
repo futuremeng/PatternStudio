@@ -9,3 +9,6 @@ web/dist/
 desktop/node_modules/
 desktop/src-tauri
 desktop/gen/
+# Preprocessing runtime (fetched via `make preprocess-setup`)
+resources/bin/
+resources/models/

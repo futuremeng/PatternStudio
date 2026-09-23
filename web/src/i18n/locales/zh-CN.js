@@ -74,6 +74,7 @@ export default {
   "editor.loading": "加载中",
   "editor.traceFailed": "Trace 失败: {msg}",
   "editor.smartFailed": "智能调参失败: {msg}",
+  "editor.preprocessFailed": "预处理失败: {msg}",
   "editor.customConfig": "自定义 {n}",
   "editor.smartLabel": "智能调参：",
   "editor.presetMetrics": "预设 保真 {f} · 复杂度 {c}",
@@ -90,6 +91,10 @@ export default {
 
   // Parameter panel
   "param.currentPreset": "当前预设",
+  "param.preprocess": "🎨 预处理",
+  "param.preprocessOn": "已预处理",
+  "param.preprocessBusy": "⏳ 增强中…",
+  "param.preprocessTitle": "描摹前用数字艺术模型增强源图；再次点击恢复原图",
   "param.smartTitle": "在「{family}」内试算多组参数，自动选出最佳",
   "param.smartTuning": "⏳ 正在试算最佳参数…",
   "param.smartTune": "✨ 智能调参",

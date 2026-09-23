@@ -89,7 +89,8 @@ export async function traceSource(source, params, opts = {}) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      project_id: source.projectId, filename: source.filename, params,
+      asset_id: source.assetId ?? null,
+      project_id: source.projectId ?? null, filename: source.filename ?? null, params,
       request_id: requestId ?? null, priority: priority ?? null,
     }),
   });
@@ -117,6 +118,44 @@ export async function smartSource(source, family) {
     body: JSON.stringify({ project_id: source.projectId, filename: source.filename, family: family || null }),
   });
   return handle(res);
+}
+
+/**
+ * Preprocess (digital-art enhancement) the source image with the Real-ESRGAN
+ * anime model before tracing. Returns:
+ * - `source`: a traceable source for the enhanced image (feed to traceSource)
+ * - `previewUrl`: displayable URL of the enhanced image
+ * - `width` / `height` / `elapsedMs` / `cached`
+ * Results are cached on disk, so re-enabling for the same file is instant.
+ */
+export async function preprocessSource(source) {
+  if (isTauri()) {
+    const out = await tauriInvoke("preprocess_file", { filePath: source.path });
+    const bytes = await tauriInvoke("read_image", { filePath: out.path });
+    const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
+    return {
+      source: { kind: "file", path: out.path },
+      previewUrl: URL.createObjectURL(blob),
+      width: out.width,
+      height: out.height,
+      elapsedMs: out.elapsedMs,
+      cached: out.cached,
+    };
+  }
+  const res = await fetch(`${BASE}/preprocess`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project_id: source.projectId, filename: source.filename }),
+  });
+  const out = await handle(res);
+  return {
+    source: { kind: "asset", assetId: out.assetId },
+    previewUrl: out.url,
+    width: out.width,
+    height: out.height,
+    elapsedMs: out.elapsedMs,
+    cached: out.cached,
+  };
 }
 
 /** One-shot trace of an in-memory file (upload on web, bytes on Tauri). */

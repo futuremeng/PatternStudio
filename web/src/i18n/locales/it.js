@@ -74,6 +74,7 @@ export default {
   "editor.loading": "Caricamento",
   "editor.traceFailed": "Trace non riuscita: {msg}",
   "editor.smartFailed": "Regolazione smart non riuscita: {msg}",
+  "editor.preprocessFailed": "Preelaborazione non riuscita: {msg}",
   "editor.customConfig": "Personalizzato {n}",
   "editor.smartLabel": "Regolazione smart: ",
   "editor.presetMetrics": "Preset fedeltà {f} · complessità {c}",
@@ -90,6 +91,10 @@ export default {
 
   // Parameter panel
   "param.currentPreset": "preset attuale",
+  "param.preprocess": "🎨 Preelabora",
+  "param.preprocessOn": "Preelaborato",
+  "param.preprocessBusy": "⏳ Miglioramento…",
+  "param.preprocessTitle": "Migliora l'immagine sorgente (arte digitale) prima del tracciamento; fai clic di nuovo per ripristinare",
   "param.smartTitle": "Prova più set di parametri in \"{family}\" e scegli automaticamente il migliore",
   "param.smartTuning": "⏳ Ricerca dei parametri migliori…",
   "param.smartTune": "✨ Regolazione smart",

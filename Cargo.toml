@@ -42,6 +42,9 @@ serde_json = "1"
 # Error handling
 thiserror = "2"
 
+# Hashing (preprocess cache keys)
+sha2 = "0.10"
+
 # Internal crates
 patternstudio-core = { path = "crates/patternstudio-core" }
 patternstudio-tracer = { path = "crates/patternstudio-tracer" }

@@ -566,6 +566,23 @@ body {
 .mode-thumb.kind-temp .svg-mini { border-style: dashed; }
 
 /* Smart tuning button (top of the parameter panel) */
+/* Preprocess (digital-art enhancement) toggle, above Smart tuning */
+.preprocess-btn {
+  display: block; width: 100%;
+  padding: 0.55rem 1rem; border-radius: var(--radius);
+  background: linear-gradient(135deg, color-mix(in srgb, #2dd4a7 14%, var(--surface)), var(--surface));
+  border: 1px dashed color-mix(in srgb, #2dd4a7 50%, var(--border));
+  color: var(--text); font-size: 0.85rem; cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.preprocess-btn:hover { border-color: #2dd4a7; }
+.preprocess-btn.on {
+  background: linear-gradient(135deg, color-mix(in srgb, #2dd4a7 26%, var(--surface)), var(--surface));
+  border: 1px solid #2dd4a7;
+}
+.preprocess-btn.busy { cursor: progress; opacity: 0.7; }
+.preprocess-btn:disabled { cursor: progress; }
+
 .smart-tune {
   display: block; width: 100%;
   padding: 0.55rem 1rem; border-radius: var(--radius);

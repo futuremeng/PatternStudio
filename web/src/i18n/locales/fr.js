@@ -74,6 +74,7 @@ export default {
   "editor.loading": "Chargement",
   "editor.traceFailed": "Trace échouée : {msg}",
   "editor.smartFailed": "Réglage intelligent échoué : {msg}",
+  "editor.preprocessFailed": "Prétraitement échoué : {msg}",
   "editor.customConfig": "Personnalisé {n}",
   "editor.smartLabel": "Réglage intelligent : ",
   "editor.presetMetrics": "Préréglage fidélité {f} · complexité {c}",
@@ -90,6 +91,10 @@ export default {
 
   // Parameter panel
   "param.currentPreset": "préréglage actuel",
+  "param.preprocess": "🎨 Prétraiter",
+  "param.preprocessOn": "Prétraité",
+  "param.preprocessBusy": "⏳ Amélioration…",
+  "param.preprocessTitle": "Améliorer l'image source (art numérique) avant le traçage ; cliquer à nouveau pour revenir en arrière",
   "param.smartTitle": "Essaie plusieurs jeux de paramètres dans « {family} » et choisit le meilleur automatiquement",
   "param.smartTuning": "⏳ Recherche des meilleurs paramètres…",
   "param.smartTune": "✨ Réglage intelligent",

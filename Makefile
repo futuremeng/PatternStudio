@@ -21,6 +21,10 @@ fmt:
 clippy:
 	cargo clippy --workspace -- -D warnings
 
+## Preprocessing runtime (Real-ESRGAN ncnn binary + digital-art model)
+preprocess-setup:
+	./scripts/fetch-preprocess.sh
+
 ## Convenience targets
 
 trace:

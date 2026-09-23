@@ -74,6 +74,7 @@ export default {
   "editor.loading": "Loading",
   "editor.traceFailed": "Trace failed: {msg}",
   "editor.smartFailed": "Smart tuning failed: {msg}",
+  "editor.preprocessFailed": "Preprocessing failed: {msg}",
   "editor.customConfig": "Custom {n}",
   "editor.smartLabel": "Smart tuning: ",
   "editor.presetMetrics": "Preset fidelity {f} · complexity {c}",
@@ -90,6 +91,10 @@ export default {
 
   // Parameter panel
   "param.currentPreset": "current preset",
+  "param.preprocess": "🎨 Preprocess",
+  "param.preprocessOn": "Preprocessed",
+  "param.preprocessBusy": "⏳ Enhancing…",
+  "param.preprocessTitle": "Enhance the source image (digital art) before tracing; click again to revert",
   "param.smartTitle": "Try multiple parameter sets within \"{family}\" and pick the best automatically",
   "param.smartTuning": "⏳ Finding best parameters…",
   "param.smartTune": "✨ Smart tuning",

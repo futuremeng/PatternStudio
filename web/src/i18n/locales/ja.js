@@ -74,6 +74,7 @@ export default {
   "editor.loading": "読み込み中",
   "editor.traceFailed": "Trace 失敗: {msg}",
   "editor.smartFailed": "スマート調整失敗: {msg}",
+  "editor.preprocessFailed": "前処理に失敗しました: {msg}",
   "editor.customConfig": "カスタム {n}",
   "editor.smartLabel": "スマート調整：",
   "editor.presetMetrics": "プリセット 忠実度 {f} · 複雑度 {c}",
@@ -90,6 +91,10 @@ export default {
 
   // Parameter panel
   "param.currentPreset": "現在のプリセット",
+  "param.preprocess": "🎨 前処理",
+  "param.preprocessOn": "前処理済み",
+  "param.preprocessBusy": "⏳ 強化中…",
+  "param.preprocessTitle": "トレース前にデジタルアートモデルで元画像を強化します。もう一度クリックすると元に戻ります",
   "param.smartTitle": "「{family}」内で複数のパラメータを試行し、自動的に最良を選択",
   "param.smartTuning": "⏳ 最良のパラメータを試行中…",
   "param.smartTune": "✨ スマート調整",

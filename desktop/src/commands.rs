@@ -544,6 +544,30 @@ pub async fn read_image(file_path: String) -> Result<Vec<u8>, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Preprocess (digital-art enhancement) a local image file with the
+/// Real-ESRGAN anime model. Returns the path of the enhanced image
+/// (same size as the input) plus timing info. Results are cached on disk.
+#[tauri::command]
+pub async fn preprocess_file(
+    app: tauri::AppHandle,
+    file_path: String,
+) -> Result<serde_json::Value, String> {
+    let resource_dir = app.path().resource_dir().ok();
+    let out = tauri::async_runtime::spawn_blocking(move || {
+        patternstudio_tracer::preprocess_image(std::path::Path::new(&file_path), resource_dir.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e)?;
+    Ok(serde_json::json!({
+        "path": out.path,
+        "width": out.width,
+        "height": out.height,
+        "elapsedMs": out.elapsed_ms,
+        "cached": out.cached,
+    }))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PatternParams {

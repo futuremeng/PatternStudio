@@ -54,7 +54,11 @@ function Group({ title, defaultOpen = true, children }) {
   );
 }
 
-export default function ParameterPanel({ params, onChange, onSmart, smartBusy, activeFamilyLabel }) {
+export default function ParameterPanel({
+  params, onChange, onSmart, smartBusy,
+  onPreprocess, onClearPreprocess, preprocessBusy, preprocessed,
+  activeFamilyLabel,
+}) {
   const { t } = useI18n();
   const set = (key) => (val) => onChange(prev => ({ ...prev, [key]: val }));
 
@@ -63,6 +67,23 @@ export default function ParameterPanel({ params, onChange, onSmart, smartBusy, a
 
   return (
     <div className="param-group">
+      <button
+        type="button"
+        className={`preprocess-btn${preprocessed ? " on" : ""}${preprocessBusy ? " busy" : ""}`}
+        onClick={() => {
+          if (preprocessBusy) return;
+          if (preprocessed) onClearPreprocess?.();
+          else onPreprocess?.();
+        }}
+        disabled={preprocessBusy}
+        title={t("param.preprocessTitle")}
+      >
+        {preprocessBusy
+          ? t("param.preprocessBusy")
+          : preprocessed
+            ? `✓ ${t("param.preprocessOn")}`
+            : t("param.preprocess")}
+      </button>
       <button
         type="button"
         className={`smart-tune${smartBusy ? " busy" : ""}`}

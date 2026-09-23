@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getImageUrl, prepareSource, traceSource, smartSource, newTraceRequestId, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams } from "../api.js";
+import { getImageUrl, prepareSource, traceSource, smartSource, preprocessSource, newTraceRequestId, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams } from "../api.js";
 import { getCachedTrace, setCachedTrace, stableStringify } from "../traceCache.js";
 import { createTraceQueue } from "../traceQueue.js";
 import { loadSavedConfigs, saveConfig, deleteSavedConfig } from "../configStore.js";
@@ -80,6 +80,15 @@ function saveLastPreset(key) {
   try { localStorage.setItem(LAST_PRESET_KEY, key); } catch { /* storage unavailable */ }
 }
 
+/**
+ * Normalize an error thrown by the API layer into a display string. Tauri
+ * command rejections are plain strings (not Error objects), so `e.message`
+ * would be undefined there; the web path throws real Error objects.
+ */
+function errMsg(e) {
+  return typeof e === "string" ? e : (e?.message || String(e));
+}
+
 /** Default configs from MODE_PRESETS (full param sets, ready to trace). */
 function buildDefaultConfigs(presetLabel) {
   return Object.entries(MODE_PRESETS).map(([key]) => ({
@@ -154,6 +163,10 @@ export default function ImageEditorPage() {
   const [savedLayers, setSavedLayers] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // What the error banner is about, so its retry button re-runs the right thing.
+  const [errorKind, setErrorKind] = useState(null); // "trace" | "smart" | "preprocess" | "load"
+  // Bumped to re-run the image-load effect (retry after a load failure).
+  const [reloadTick, setReloadTick] = useState(0);
   const [configs, setConfigs] = useState(() => buildDefaultConfigs(presetLabel));
   const [activeConfigId, setActiveConfigId] = useState(() => {
     const key = loadLastPreset();
@@ -163,6 +176,11 @@ export default function ImageEditorPage() {
   const [overlayPos, setOverlayPos] = useState(50); // divider position, percent
   const [smartInfo, setSmartInfo] = useState(null); // last Smart Preset decision
   const [smartBusy, setSmartBusy] = useState(false);
+  // Digital-art preprocessing (Real-ESRGAN anime): when set, traces run on the
+  // enhanced image instead of the original. `source` is traceable,
+  // `previewUrl` is displayable.
+  const [preprocessed, setPreprocessed] = useState(null);
+  const [preprocessBusy, setPreprocessBusy] = useState(false);
   const configTimerRef = useRef(null);
   const userConfigSeq = useRef(0);
   const configsRef = useRef(configs);
@@ -171,6 +189,9 @@ export default function ImageEditorPage() {
   const imageId = `${projectId}/${filename}`;
   const imageIdRef = useRef(imageId);
   useEffect(() => { imageIdRef.current = imageId; }, [imageId]);
+  // Trace-cache key: when preprocessing is on, results are cached under a
+  // "#pre" suffix so they never collide with the original image's results.
+  const traceCacheId = preprocessed ? `${imageId}#pre` : imageId;
 
   // --- Preview view controls: maximize, zoom, fit ---
   const [maximized, setMaximized] = useState(false);
@@ -350,11 +371,11 @@ export default function ImageEditorPage() {
         if (cancelled) return;
         setImageUrl(url);
       } catch (e) {
-        if (!cancelled) setError(e.message);
+        if (!cancelled) { setError(errMsg(e)); setErrorKind("load"); }
       }
     })();
     return () => { cancelled = true; };
-  }, [projectId, filename]);
+  }, [projectId, filename, reloadTick]);
 
   // Overlay compare: move the divider to a pointer x position (percent).
   const updateOverlayPos = useCallback((clientX) => {
@@ -787,14 +808,17 @@ export default function ImageEditorPage() {
    */
   const executeTask = useCallback(async (task) => {
     const imageIdNow = imageId;
-    const source = prepareSource(projectId, filename);
-    const cached = await getCachedTrace(imageIdNow, task.params).catch(() => null);
+    // Preprocessing on → trace the enhanced image, cached under its own key.
+    const source = preprocessed?.source ?? prepareSource(projectId, filename);
+    const cacheId = preprocessed ? `${imageIdNow}#pre` : imageIdNow;
+    const cached = await getCachedTrace(cacheId, task.params).catch(() => null);
     if (imageIdRef.current !== imageIdNow) return; // image switched mid-flight
     if (cached) {
       applyResultToConfigs(task.params, cached);
       if (task.kind === "interactive") {
         setResult(cached);
         setError(null);
+        setErrorKind(null);
         scheduleUserConfig(task.params, cached);
       }
       return;
@@ -805,19 +829,20 @@ export default function ImageEditorPage() {
         priority: task.kind === "interactive" ? "interactive" : "background",
       });
       if (imageIdRef.current !== imageIdNow) return;
-      setCachedTrace(imageIdNow, task.params, res).catch(() => {});
+      setCachedTrace(cacheId, task.params, res).catch(() => {});
       applyResultToConfigs(task.params, res);
       if (task.kind === "interactive") {
         setResult(res);
         setError(null);
+        setErrorKind(null);
         scheduleUserConfig(task.params, res);
       }
     } catch (e) {
       if (imageIdRef.current !== imageIdNow) return;
       if (e?.code === "cancelled" || e?.code === "busy") return; // superseded
-      if (task.kind === "interactive") setError(t("editor.traceFailed", { msg: e.message }));
+      if (task.kind === "interactive") { setError(t("editor.traceFailed", { msg: errMsg(e) })); setErrorKind("trace"); }
     }
-  }, [projectId, filename, imageId, applyResultToConfigs, scheduleUserConfig, t]);
+  }, [projectId, filename, imageId, preprocessed, applyResultToConfigs, scheduleUserConfig, t]);
 
   // One queue per image: interactive traces preempt background pre-warm.
   const queueRef = useRef(null);
@@ -835,7 +860,8 @@ export default function ImageEditorPage() {
     if (configTimerRef.current) clearTimeout(configTimerRef.current);
   }, []);
 
-  // Any param change (preset select, slider, smart tuning) enqueues an
+  // Any param change (preset select, slider, smart tuning) — or a
+  // preprocess toggle, which swaps the traced source — enqueues an
   // interactive trace. The queue debounces (merges slider drags), drops queued
   // background work, and the engine cancels whatever is in flight for this
   // image when the request lands — interactive traces always win the CPU.
@@ -843,7 +869,7 @@ export default function ImageEditorPage() {
   useEffect(() => {
     if (!imageUrl) return;
     queueRef.current?.enqueueInteractive(params);
-  }, [params, imageUrl, imageId]);
+  }, [params, imageUrl, imageId, preprocessed]);
 
   // Pre-warm in the background after each interactive trace settles: the
   // system presets plus any user-saved configs whose trace is not cached yet
@@ -902,8 +928,11 @@ export default function ImageEditorPage() {
     setSmartBusy(true);
     setSmartInfo(null);
     setError(null);
+    setErrorKind(null);
     try {
-      const source = prepareSource(projectId, filename);
+      // Smart-tune the image that is actually being traced (preprocessed
+      // when that toggle is on).
+      const source = preprocessed?.source ?? prepareSource(projectId, filename);
       const family = familyFromParams(params);
       const decision = await smartSource(source, family);
       setSmartInfo(decision);
@@ -915,11 +944,52 @@ export default function ImageEditorPage() {
         setActiveConfigId(null);
       }
     } catch (e) {
-      setError(t("editor.smartFailed", { msg: e.message }));
+      setError(t("editor.smartFailed", { msg: errMsg(e) }));
+      setErrorKind("smart");
     } finally {
       setSmartBusy(false);
     }
-  }, [imageUrl, smartBusy, projectId, filename, params, t]);
+  }, [imageUrl, smartBusy, projectId, filename, params, preprocessed, t]);
+
+  /**
+   * Digital-art preprocessing: enhance the source image (Real-ESRGAN anime)
+   * and switch tracing to the enhanced result. Toggling off restores the
+   * original. The param effect re-traces automatically on the source swap.
+   */
+  const runPreprocess = useCallback(async () => {
+    if (!imageUrl || preprocessBusy) return;
+    setPreprocessBusy(true);
+    setError(null);
+    setErrorKind(null);
+    try {
+      const source = prepareSource(projectId, filename);
+      const out = await preprocessSource(source);
+      setPreprocessed(prev => {
+        if (prev?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(prev.previewUrl);
+        return out;
+      });
+    } catch (e) {
+      setError(t("editor.preprocessFailed", { msg: errMsg(e) }));
+      setErrorKind("preprocess");
+    } finally {
+      setPreprocessBusy(false);
+    }
+  }, [imageUrl, preprocessBusy, projectId, filename, t]);
+
+  const clearPreprocess = useCallback(() => {
+    setPreprocessed(prev => {
+      if (prev?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+  }, []);
+
+  // Switching images drops the preprocessing state (and its blob URL).
+  useEffect(() => {
+    setPreprocessed(prev => {
+      if (prev?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+  }, [imageId]);
 
   /**
    * Apply the preset-default result (from the smart comparison) instead of the
@@ -949,13 +1019,13 @@ export default function ImageEditorPage() {
     let cancelled = false;
     (async () => {
       for (const c of pending) {
-        const res = await getCachedTrace(imageId, c.params).catch(() => null);
+        const res = await getCachedTrace(traceCacheId, c.params).catch(() => null);
         if (cancelled || !res) continue;
         applyResultToConfigs(c.params, res);
       }
     })();
     return () => { cancelled = true; };
-  }, [result, busy, applyResultToConfigs, imageId]);
+  }, [result, busy, applyResultToConfigs, traceCacheId]);
 
   const onConfigDelete = useCallback((id) => {
     const target = configsRef.current.find(c => c.id === id);
@@ -1021,6 +1091,10 @@ export default function ImageEditorPage() {
       })
     : smartInfo?.reason;
 
+  // The "original" panel shows the image that is actually being traced:
+  // the enhanced one when preprocessing is on, the source otherwise.
+  const activeSourceUrl = preprocessed?.previewUrl ?? imageUrl;
+
   return (
     <div className={`editor-page${maximized ? " maximized" : ""}${advancedMode ? " advanced" : ""}`}>
       <AppHeader
@@ -1048,6 +1122,10 @@ export default function ImageEditorPage() {
             onChange={onParamsChange}
             onSmart={runSmart}
             smartBusy={smartBusy}
+            onPreprocess={runPreprocess}
+            onClearPreprocess={clearPreprocess}
+            preprocessBusy={preprocessBusy}
+            preprocessed={!!preprocessed}
             activeFamilyLabel={presetLabel(familyFromParams(params))}
           />
         </aside>
@@ -1074,9 +1152,9 @@ export default function ImageEditorPage() {
                 <div className="before-after">
                   <div className="ba-panel">
                     <span className="label">{t("editor.original")}</span>
-                    {imageUrl ? (
+                    {activeSourceUrl ? (
                       <img
-                        src={imageUrl}
+                        src={activeSourceUrl}
                         alt="original"
                         style={imgStyle}
                         onLoad={(e) => setSrcSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
@@ -1096,7 +1174,7 @@ export default function ImageEditorPage() {
               ) : (
                 <div className="overlay-wrap">
                   {busy && result?.svg && <span className="busy-badge">{t("processing")}</span>}
-                  {imageUrl && result?.svg ? (
+                  {activeSourceUrl && result?.svg ? (
                     <div
                       className="overlay-compare"
                       ref={overlayRef}
@@ -1107,7 +1185,7 @@ export default function ImageEditorPage() {
                         updateOverlayPos(e.clientX);
                       }}
                     >
-                      <img src={imageUrl} alt="original" />
+                      <img src={activeSourceUrl} alt="original" />
                       <div className="overlay-top" style={{ clipPath: `inset(0 0 0 ${overlayPos}%)` }}>
                         <div className={`overlay-svg${tool === "select" ? " select-mode" : ""}`} ref={svgContainerRef} dangerouslySetInnerHTML={{ __html: result.svg }} />
                       </div>
@@ -1179,7 +1257,12 @@ export default function ImageEditorPage() {
           {error && (
             <div className="error preview-error">
               {error}
-              <button className="error-retry" onClick={() => queueRef.current?.enqueueInteractive(params)}>{t("retry")}</button>
+              <button className="error-retry" onClick={() => {
+                if (errorKind === "preprocess") runPreprocess();
+                else if (errorKind === "smart") runSmart();
+                else if (errorKind === "load") setReloadTick(x => x + 1);
+                else queueRef.current?.enqueueInteractive(params);
+              }}>{t("retry")}</button>
             </div>
           )}
         </div>

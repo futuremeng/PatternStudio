@@ -539,6 +539,59 @@ async fn smart(
     Ok(Json(result))
 }
 
+/// Preprocess: enhance the source image with the "digital art" model
+/// (Real-ESRGAN anime 4x, downscaled back to the original size) before
+/// tracing. The result is registered as an asset so the client can display
+/// it and pass it to /trace as `asset_id`. Reuses TraceRequest for the
+/// source-identifier fields (asset_id / project_id+filename / file_path).
+async fn preprocess(
+    State(state): State<AppState>,
+    Json(req): Json<TraceRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let img_path = resolve_source_path(&state, &req)?;
+    let out = tokio::task::spawn_blocking(move || {
+        patternstudio_tracer::preprocess_image(&img_path, None)
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let id = uuid::Uuid::new_v4().to_string();
+    state.assets.lock().unwrap().insert(id.clone(), out.path.clone());
+    Ok(Json(serde_json::json!({
+        "assetId": id,
+        "url": format!("/api/v1/assets/{id}"),
+        "width": out.width,
+        "height": out.height,
+        "elapsedMs": out.elapsed_ms,
+        "cached": out.cached,
+    })))
+}
+
+/// Serve a registered asset (preprocessed images).
+async fn serve_asset(
+    State(state): State<AppState>,
+    UrlPath(asset_id): UrlPath<String>,
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    let path = state
+        .assets
+        .lock()
+        .unwrap()
+        .get(&asset_id)
+        .cloned()
+        .ok_or((StatusCode::NOT_FOUND, "asset not found".into()))?;
+    if !path.exists() {
+        return Err((StatusCode::NOT_FOUND, "asset file missing".into()));
+    }
+    let data = tokio::task::spawn_blocking(move || std::fs::read(&path))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(axum::response::Response::builder()
+        .header(axum::http::header::CONTENT_TYPE, "image/png")
+        .body(axum::body::Body::from(data))
+        .unwrap())
+}
+
 #[derive(Deserialize)]
 struct PatternRequest {
     kind: String,
@@ -874,6 +927,8 @@ async fn main() {
         .route("/api/v1/uploads", post(upload))
         .route("/api/v1/trace", post(trace))
         .route("/api/v1/smart", post(smart))
+        .route("/api/v1/preprocess", post(preprocess))
+        .route("/api/v1/assets/{asset_id}", get(serve_asset))
         .route("/api/v1/pattern", post(generate_pattern))
         .route("/api/v1/patterns", get(list_patterns))
         .route("/api/v1/projects", post(create_project).get(list_projects))

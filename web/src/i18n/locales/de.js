@@ -74,6 +74,7 @@ export default {
   "editor.loading": "Lädt",
   "editor.traceFailed": "Trace fehlgeschlagen: {msg}",
   "editor.smartFailed": "Smart-Tuning fehlgeschlagen: {msg}",
+  "editor.preprocessFailed": "Vorverarbeitung fehlgeschlagen: {msg}",
   "editor.customConfig": "Benutzerdefiniert {n}",
   "editor.smartLabel": "Smart-Tuning: ",
   "editor.presetMetrics": "Voreinstellung Treue {f} · Komplexität {c}",
@@ -90,6 +91,10 @@ export default {
 
   // Parameter panel
   "param.currentPreset": "aktuelle Voreinstellung",
+  "param.preprocess": "🎨 Vorverarbeiten",
+  "param.preprocessOn": "Vorverarbeitet",
+  "param.preprocessBusy": "⏳ Wird verstärkt…",
+  "param.preprocessTitle": "Quellbild vor dem Nachzeichnen verstärken (Digital Art); erneut klicken zum Zurücksetzen",
   "param.smartTitle": "Mehrere Parametersätze in „{family}“ testen und das beste automatisch auswählen",
   "param.smartTuning": "⏳ Beste Parameter werden gesucht…",
   "param.smartTune": "✨ Smart-Tuning",

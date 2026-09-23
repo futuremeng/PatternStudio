@@ -1,0 +1,21 @@
+Preprocessing runtime — third-party components
+==============================================
+
+The image "preprocess" feature (digital-art enhancement before tracing) uses
+the following third-party components, fetched by `make preprocess-setup`
+(see scripts/fetch-preprocess.sh). They are NOT committed to this repository.
+
+1. realesrgan-ncnn-vulkan (inference binary)
+   - Project: https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan (v0.2.0)
+   - License: MIT (Copyright (c) 2021 Xintao Wang)
+   - Built on ncnn (https://github.com/Tencent/ncnn, BSD 2-Clause) and
+     MoltenVK (Vulkan for macOS, BSD 3-Clause).
+
+2. realesrgan-x4plus-anime-x4 (ncnn model, "digital art" enhancement)
+   - Project: https://github.com/xinntao/Real-ESRGAN (v0.2.2.4 release)
+   - Paper: "Real-ESRGAN: Training Real-World Blind Super-Resolution with
+     Pure Synthetic Data" (Wang et al., ICCVW 2021)
+   - Model weights: RealESRGAN_x4plus_anime_6B, converted to ncnn format.
+   - Same model family as the "digital art" model shipped with Upscayl.
+
+Attribution: this software includes Real-ESRGAN (MIT) and ncnn (BSD-2).

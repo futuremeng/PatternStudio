@@ -74,6 +74,7 @@ export default {
   "editor.loading": "載入中",
   "editor.traceFailed": "Trace 失敗: {msg}",
   "editor.smartFailed": "智慧調參失敗: {msg}",
+  "editor.preprocessFailed": "預處理失敗: {msg}",
   "editor.customConfig": "自訂 {n}",
   "editor.smartLabel": "智慧調參：",
   "editor.presetMetrics": "預設 保真 {f} · 複雜度 {c}",
@@ -90,6 +91,10 @@ export default {
 
   // Parameter panel
   "param.currentPreset": "目前預設",
+  "param.preprocess": "🎨 預處理",
+  "param.preprocessOn": "已預處理",
+  "param.preprocessBusy": "⏳ 增強中…",
+  "param.preprocessTitle": "描摹前用數位藝術模型增強源圖；再次點擊恢復原圖",
   "param.smartTitle": "在「{family}」內試算多組參數，自動選出最佳",
   "param.smartTuning": "⏳ 正在試算最佳參數…",
   "param.smartTune": "✨ 智慧調參",
