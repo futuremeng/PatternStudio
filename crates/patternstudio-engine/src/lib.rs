@@ -439,6 +439,21 @@ impl ActiveTraces {
             }
         }
     }
+
+    /// Cancel the in-flight trace for `image_key`, if any (e.g. the editor
+    /// switched to a different image and this work is no longer wanted).
+    /// The trace aborts at its next batch boundary. Returns true if a trace
+    /// was cancelled.
+    pub fn cancel(&self, image_key: &str) -> bool {
+        let mut map = self.map.lock().unwrap();
+        match map.remove(image_key) {
+            Some(old) => {
+                old.cancel.cancel();
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 #[cfg(test)]

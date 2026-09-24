@@ -88,6 +88,11 @@ export function createTraceQueue({ execute, onBusyChange }) {
     disposed = true;
     if (interactiveTimer) clearTimeout(interactiveTimer);
     pending = [];
+    // Release the busy flag if an interactive task is still in flight: its
+    // finally will no longer run (disposed), so without this the flag would
+    // stay stuck — e.g. a locale change recreates the queue without any new
+    // trace being enqueued to clear it.
+    if (inflightInteractive) onBusyChange?.(false);
   }
 
   return { enqueueInteractive, enqueueBackground, dispose };

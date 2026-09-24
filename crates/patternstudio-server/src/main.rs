@@ -295,6 +295,19 @@ async fn trace(
     }
 }
 
+/// Cancel any in-flight trace for the identified image (e.g. the editor
+/// switched to a different image and the old work is no longer wanted). The
+/// trace aborts at its next batch boundary.
+async fn cancel_trace(
+    State(state): State<AppState>,
+    Json(req): Json<TraceRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let img_path = resolve_source_path(&state, &req)?;
+    let image_key = img_path.to_string_lossy().to_string();
+    let cancelled = state.active_traces.cancel(&image_key);
+    Ok(Json(serde_json::json!({ "cancelled": cancelled })))
+}
+
 /// Smart Preset: analyze the image and trial-trace candidate parameter sets,
 /// returning the best one plus the full candidate report.
 async fn smart(
@@ -892,6 +905,7 @@ async fn main() {
         .route("/api/v1/health", get(health))
         .route("/api/v1/uploads", post(upload))
         .route("/api/v1/trace", post(trace))
+        .route("/api/v1/trace/cancel", post(cancel_trace))
         .route("/api/v1/smart", post(smart))
         .route("/api/v1/preprocess", post(preprocess))
         .route("/api/v1/assets/{asset_id}", get(serve_asset))

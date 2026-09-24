@@ -8,8 +8,8 @@ pub mod commands;
 
 pub fn run() {
     use commands::{
-        add_recent_project, batch_trace, cancel_batch_trace, generate_pattern, list_images,
-        list_patterns, open_folder, preprocess_file, read_image, recent_projects,
+        add_recent_project, batch_trace, cancel_batch_trace, cancel_trace, generate_pattern,
+        list_images, list_patterns, open_folder, preprocess_file, read_image, recent_projects,
         remove_recent_project, save_bytes, save_enhanced_image, save_svg, smart_file, trace_bytes,
         trace_file,
     };
@@ -18,6 +18,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             trace_bytes,
             trace_file,
+            cancel_trace,
             smart_file,
             open_folder,
             list_images,

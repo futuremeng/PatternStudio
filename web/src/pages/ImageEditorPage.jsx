@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getImageUrl, prepareSource, traceSource, newTraceRequestId, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams } from "../api.js";
+import { getImageUrl, prepareSource, traceSource, cancelTrace, newTraceRequestId, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams } from "../api.js";
 import { getCachedTrace, setCachedTrace, stableStringify } from "../traceCache.js";
 import { createTraceQueue } from "../traceQueue.js";
 import { loadSavedConfigs, saveConfig, deleteSavedConfig } from "../configStore.js";
@@ -60,6 +60,14 @@ export default function ImageEditorPage() {
   const imageId = `${projectId}/${filename}`;
   const imageIdRef = useRef(imageId);
   useEffect(() => { imageIdRef.current = imageId; }, [imageId]);
+  // Which image the current `imageUrl` belongs to (set by the load effect).
+  // The auto-trace effect waits for the *current* image's URL so the stale
+  // URL from the previous image can't kick off a throwaway trace that the
+  // fresh URL's trace would immediately preempt on the engine.
+  const urlImageIdRef = useRef(null);
+  // The previous { projectId, filename }, so a switch can cancel the old
+  // image's in-flight engine work (interactive trace or orphaned pre-warm).
+  const prevSourceRef = useRef(null);
 
   // --- Preview view controls: maximize ---
   const [maximized, setMaximized] = useState(false);
@@ -110,7 +118,13 @@ export default function ImageEditorPage() {
 
   // Reset the view when switching to a different image. The CompareViewer is
   // keyed by imageId so its zoom / overlay-divider state resets with it.
-  useEffect(() => { setAdvancedMode(false); }, [imageId]);
+  // `result` must be cleared too: otherwise the previous image's vector is
+  // shown for the new one (next to the "processing" badge) until its trace
+  // lands, which reads as a frozen/stuck editor.
+  useEffect(() => {
+    setAdvancedMode(false);
+    setResult(null);
+  }, [imageId]);
 
   const toggleMaximize = useCallback(() => setMaximized(m => !m), []);
 
@@ -147,13 +161,17 @@ export default function ImageEditorPage() {
   }, [imageId]);
 
   // Load the source image; the auto-trace effect below picks up from here.
+  // `imageUrl` is cleared first so a switched-to image shows a loading
+  // placeholder instead of the previous image's bitmap.
   useEffect(() => {
     let cancelled = false;
     setSrcSize({ w: 0, h: 0 });
+    setImageUrl(null);
     (async () => {
       try {
         const url = await getImageUrl(projectId, filename);
         if (cancelled) return;
+        urlImageIdRef.current = `${projectId}/${filename}`;
         setImageUrl(url);
       } catch (e) {
         if (!cancelled) { setError(errMsg(e)); setErrorKind("load"); }
@@ -161,6 +179,17 @@ export default function ImageEditorPage() {
     })();
     return () => { cancelled = true; };
   }, [projectId, filename, reloadTick]);
+
+  // Switching images: cancel the previous image's in-flight engine work (its
+  // interactive trace or an orphaned pre-warm) so it stops competing with the
+  // new image's trace for CPU. Fire-and-forget; a no-op when nothing runs.
+  useEffect(() => {
+    const prev = prevSourceRef.current;
+    prevSourceRef.current = { projectId, filename };
+    if (prev && (prev.projectId !== projectId || prev.filename !== filename)) {
+      cancelTrace(prepareSource(prev.projectId, prev.filename));
+    }
+  }, [projectId, filename]);
 
   // A new trace (or cached/preset result) replaces the working canvas, so any
   // previously-saved edited layers no longer apply — clear them. The one
@@ -319,7 +348,10 @@ export default function ImageEditorPage() {
   // image when the request lands — interactive traces always win the CPU.
   // (Declared after the queue effect so the queue exists when it runs.)
   useEffect(() => {
-    if (!imageUrl) return;
+    // Only trace once the URL actually belongs to the current image (see
+    // urlImageIdRef): on a switch, the stale URL from the previous image is
+    // still around for a frame and must not start a throwaway trace.
+    if (!imageUrl || urlImageIdRef.current !== imageId) return;
     queueRef.current?.enqueueInteractive(params);
   }, [params, imageUrl, imageId]);
 

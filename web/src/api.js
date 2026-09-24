@@ -103,6 +103,26 @@ export async function traceSource(source, params, opts = {}) {
 }
 
 /**
+ * Cancel any in-flight trace for a source prepared by {@link prepareSource}
+ * (e.g. the editor switched to a different image and the old work is no
+ * longer wanted). The engine aborts the trace at its next batch boundary.
+ * Fire-and-forget: never throws.
+ */
+export function cancelTrace(source) {
+  if (isTauri()) {
+    return tauriInvoke("cancel_trace", { filePath: source.path }).catch(() => {});
+  }
+  return fetch(`${BASE}/trace/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      project_id: source.projectId ?? null,
+      filename: source.filename ?? null,
+    }),
+  }).then(res => (res.ok ? res.json() : null)).catch(() => null);
+}
+
+/**
  * Smart Preset: analyze the image and trial-trace candidate parameter sets.
  * Returns { params, family, reasonKey, stats, candidates, elapsedMs } —
  * `params` is ready to feed into traceSource, and `reasonKey` ("scoped" |

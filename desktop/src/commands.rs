@@ -121,6 +121,14 @@ pub async fn trace_file(
     result
 }
 
+/// Cancel any in-flight trace for `file_path` (e.g. the editor switched to a
+/// different image and the old work is no longer wanted). The trace aborts at
+/// its next batch boundary. Returns true if a trace was cancelled.
+#[tauri::command]
+pub fn cancel_trace(file_path: String) -> bool {
+    active_traces().cancel(&file_path)
+}
+
 #[tauri::command]
 pub fn open_folder(title: Option<String>) -> Result<String, String> {
     let folder = rfd::FileDialog::new()
