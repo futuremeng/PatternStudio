@@ -475,30 +475,41 @@ impl LayerAssignment {
                 rank[ra] += 1;
             }
         }
-        for i in 0..n {
-            if let Some((x1, y1, x2, y2)) = bboxes[i] {
-                for (j, bbox) in bboxes.iter().enumerate().skip(i + 1) {
-                    if let Some((x3, y3, x4, y4)) = *bbox {
-                        let gap_x = if x2 < x3 {
-                            x3 - x2
-                        } else if x4 < x1 {
-                            x1 - x4
-                        } else {
-                            0.0
-                        };
-                        let gap_y = if y2 < y3 {
-                            y3 - y2
-                        } else if y4 < y1 {
-                            y1 - y4
-                        } else {
-                            0.0
-                        };
-                        if gap_x <= gap && gap_y <= gap {
-                            union(&mut parent, &mut rank, i, j);
-                        }
-                    }
+        // Sweep line over the x axis: process shapes in min-x order and keep
+        // an "active" list of shapes whose x range is still within `gap` of
+        // the current one. Every pair the old O(n²) scan would have unioned
+        // is still examined (and no others), but sparse layouts — the common
+        // case for pattern motifs — only touch their local neighbors.
+        let mut order: Vec<usize> = (0..n).filter(|&i| bboxes[i].is_some()).collect();
+        order.sort_by(|&a, &b| bboxes[a].unwrap().0.total_cmp(&bboxes[b].unwrap().0));
+        let mut active: Vec<usize> = Vec::new();
+        for &i in &order {
+            let (x1, y1, x2, y2) = bboxes[i].unwrap();
+            // Shapes whose x range ended more than `gap` ago can never be
+            // x-neighbors of this one or any later one (min-x is
+            // non-decreasing along the sweep).
+            active.retain(|&j| bboxes[j].unwrap().2 >= x1 - gap);
+            for &j in &active {
+                let (jx1, jy1, jx2, jy2) = bboxes[j].unwrap();
+                let gap_x = if x2 < jx1 {
+                    jx1 - x2
+                } else if jx2 < x1 {
+                    x1 - jx2
+                } else {
+                    0.0
+                };
+                let gap_y = if y2 < jy1 {
+                    jy1 - y2
+                } else if jy2 < y1 {
+                    y1 - jy2
+                } else {
+                    0.0
+                };
+                if gap_x <= gap && gap_y <= gap {
+                    union(&mut parent, &mut rank, i, j);
                 }
             }
+            active.push(i);
         }
         use std::collections::HashMap;
         let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -961,5 +972,29 @@ mod tests {
 
         let assignment = LayerAssignment::by_spatial(&doc, 4, 10.0);
         assert_eq!(assignment.layers.len(), 1);
+    }
+
+    #[test]
+    fn by_spatial_chains_transitive_overlap() {
+        // Two chains of 20 shapes: each shape overlaps only its immediate
+        // neighbor (60px wide, 40px apart, gap 10), so the first and last of
+        // a chain are far apart. Union-find must still merge each whole chain
+        // into one group via transitivity — a good check for the sweep-line
+        // neighbor scan, which only ever looks at local x-neighbors.
+        let mut doc = VectorDoc::new(2000, 100);
+        for i in 0..20 {
+            doc.shapes
+                .push(positioned_shape(i as f64 * 40.0, 0.0, 60.0, 50.0));
+        }
+        for i in 0..20 {
+            doc.shapes
+                .push(positioned_shape(1000.0 + i as f64 * 40.0, 0.0, 60.0, 50.0));
+        }
+
+        let assignment = LayerAssignment::by_spatial(&doc, 10, 10.0);
+        assert_eq!(assignment.layers.len(), 2);
+        for layer in &assignment.layers {
+            assert_eq!(layer.shape_indices.len(), 20);
+        }
     }
 }

@@ -2,8 +2,8 @@
 
 use patternstudio_core::{key_for_source, SessionCache};
 use patternstudio_engine::{
-    build_vtracer_config, trace_bytes_once, trace_bytes_smart, trace_with_session, ActiveTraces,
-    TraceParams, TraceResult,
+    build_vtracer_config, lock_session, trace_bytes_once, trace_bytes_smart, trace_with_session,
+    ActiveTraces, TraceParams, TraceResult,
 };
 use patternstudio_patterns::{generate_sized, list_kinds};
 use patternstudio_tracer::load_image;
@@ -109,13 +109,8 @@ pub async fn trace_file(
             })?
         };
         // A cancelled predecessor may still be finishing its current batch;
-        // poll until the session lock frees (cancellation is near-instant).
-        let mut guard = loop {
-            match session.try_lock() {
-                Ok(g) => break g,
-                Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
-            }
-        };
+        // block until it drops the lock (cancellation is near-instant).
+        let mut guard = lock_session(&session);
         trace_with_session(&mut guard, &config, &params, &cancel)
     })
     .await

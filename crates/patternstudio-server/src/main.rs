@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use axum::extract::{Multipart, Path as UrlPath, State};
 use axum::http::StatusCode;
@@ -15,7 +15,7 @@ use futures::stream::{Stream, StreamExt};
 use patternstudio_core::smart::SmartDecision;
 use patternstudio_core::{key_for_source, SessionCache};
 use patternstudio_engine::{
-    build_vtracer_config, trace_with_session, ActiveTraces, TraceParams, TraceResult,
+    build_vtracer_config, lock_session, trace_with_session, ActiveTraces, TraceParams, TraceResult,
 };
 use patternstudio_tracer::load_image;
 use serde::{Deserialize, Serialize};
@@ -267,13 +267,8 @@ async fn trace(
             })?
         };
         // A cancelled predecessor may still be finishing its current batch;
-        // poll until the session lock frees (cancellation is near-instant).
-        let mut guard = loop {
-            match session.try_lock() {
-                Ok(g) => break g,
-                Err(_) => std::thread::sleep(Duration::from_millis(20)),
-            }
-        };
+        // block until it drops the lock (cancellation is near-instant).
+        let mut guard = lock_session(&session);
         trace_with_session(&mut guard, &config, &params, &cancel)
     })
     .await

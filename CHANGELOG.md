@@ -23,6 +23,9 @@ All notable changes to PatternStudio are documented in this file.
 - In-flight trace preemption: a new interactive request cancels the older one
   between pipeline batches; background (pre-warm) requests yield with 409 busy
 - Project batch tracing with SSE progress stream and cancellation (web + desktop)
+- Spatial layering (`by_spatial`) uses an x-axis sweep line instead of an
+  O(n²) pair scan: same clusters, but sparse motif layouts only compare local
+  x-neighbors
 
 **UI**
 - Tauri desktop app: the same React frontend with in-process tracing
@@ -46,6 +49,13 @@ All notable changes to PatternStudio are documented in this file.
   attributes keep their precision) and is UTF-8 safe
 - Desktop byte transfer uses `Uint8Array` directly over Tauri IPC instead of
   number arrays
+- Waiting for a preempted trace to release its session now blocks on the
+  mutex (`lock_session`) instead of polling `try_lock` every 20 ms; a
+  poisoned lock (panicked predecessor) is recovered instead of spinning
+- `ImageEditorPage.jsx` (~1000 lines) split into focused modules:
+  `editorUtils.js` (pure helpers), `hooks/usePatchEditing.js` (patch
+  selection & dragging), `hooks/useSmartPreset.js` (smart tuning), and
+  `components/SmartBanner.jsx` (decision banner)
 
 ### Fixed
 

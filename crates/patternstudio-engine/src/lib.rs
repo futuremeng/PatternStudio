@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use patternstudio_core::ir::{LayerAssignment, LayeredDoc};
 use patternstudio_core::profiles::{apply_profiles, AutoDecision, IdealParams};
@@ -188,6 +188,21 @@ pub struct TraceResult {
 pub fn smart_to_trace_params(p: &SmartParams) -> Result<TraceParams, String> {
     let v = serde_json::to_value(p).map_err(|e| e.to_string())?;
     serde_json::from_value(v).map_err(|e| e.to_string())
+}
+
+/// Acquire a cached session's lock, blocking until a predecessor releases it.
+///
+/// A plain [`Mutex::lock`] is the right wait here: a preempted trace was just
+/// cancelled by [`ActiveTraces::register`] and drops the lock at its next
+/// batch boundary, so the wait is near-instant — and blocking avoids both the
+/// 20 ms polling latency and the infinite spin a `try_lock` loop would cause
+/// on a poisoned mutex. A poisoned lock (predecessor panicked) is recovered:
+/// the session's cache is keyed by segment parameters, so a stale entry is
+/// simply re-segmented on the next render.
+pub fn lock_session(session: &Mutex<Session>) -> MutexGuard<'_, Session> {
+    session
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Layering + SVG over a document produced by a [`Session`].
