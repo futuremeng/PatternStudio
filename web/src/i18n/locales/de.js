@@ -111,6 +111,7 @@ export default {
   "preprocess.iteration": "Verstärkung {n}",
   "preprocess.fullscreen": "Vollbild",
   "preprocess.exitFullscreen": "Vollbild beenden",
+  "preprocess.slider": "Ziehen, um die Verstärkungsergebnisse schnell zu durchsuchen",
   "param.preprocessTitle": "Vorverarbeitungsdialog öffnen: Quellbild iterativ mit dem Digital-Art-Modell verstärken und das Ergebnis als neues Bild speichern",
   "param.smartTitle": "Mehrere Parametersätze in „{family}“ testen und das beste automatisch auswählen",
   "param.smartTuning": "⏳ Beste Parameter werden gesucht…",

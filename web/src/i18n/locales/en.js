@@ -111,6 +111,7 @@ export default {
   "preprocess.iteration": "Enhancement {n}",
   "preprocess.fullscreen": "Fullscreen",
   "preprocess.exitFullscreen": "Exit fullscreen",
+  "preprocess.slider": "Drag to quickly preview each enhancement result",
   "param.preprocessTitle": "Open the preprocessing dialog: iteratively enhance the source image with the digital-art model and save the result as a new image",
   "param.smartTitle": "Try multiple parameter sets within \"{family}\" and pick the best automatically",
   "param.smartTuning": "⏳ Finding best parameters…",

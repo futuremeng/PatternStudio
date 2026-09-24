@@ -111,6 +111,7 @@ export default {
   "preprocess.iteration": "強化 {n}",
   "preprocess.fullscreen": "全画面",
   "preprocess.exitFullscreen": "全画面を終了",
+  "preprocess.slider": "スライダーをドラッグして強化結果を素早くプレビュー",
   "param.preprocessTitle": "前処理ダイアログを開く：デジタルアートモデルで元画像を反復強化し、結果を新しい画像として保存します",
   "param.smartTitle": "「{family}」内で複数のパラメータを試行し、自動的に最良を選択",
   "param.smartTuning": "⏳ 最良のパラメータを試行中…",

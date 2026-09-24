@@ -990,3 +990,21 @@ button.danger { color: var(--error); }
   background: var(--accent);
   border-color: var(--accent);
 }
+/* Iteration scrubber: drag to jump between the original and every
+   enhancement result in the strip (0 = original, N = last iteration). */
+.preprocess-slider-row {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.4rem 1rem 0.6rem;
+  background: var(--surface2);
+}
+.preprocess-slider {
+  flex: 1;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.preprocess-slider:disabled { opacity: 0.4; cursor: default; }
+.preprocess-slider-val {
+  font-size: 0.75rem; color: var(--text2);
+  min-width: 6em; text-align: right;
+  white-space: nowrap;
+}

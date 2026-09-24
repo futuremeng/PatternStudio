@@ -111,6 +111,7 @@ export default {
   "preprocess.iteration": "Miglioramento {n}",
   "preprocess.fullscreen": "Schermo intero",
   "preprocess.exitFullscreen": "Esci dallo schermo intero",
+  "preprocess.slider": "Trascina per anteprima rapida di ogni risultato",
   "param.preprocessTitle": "Apri la finestra di preelaborazione: migliora l'immagine sorgente in modo iterativo con il modello di arte digitale e salva il risultato come nuova immagine",
   "param.smartTitle": "Prova più set di parametri in \"{family}\" e scegli automaticamente il migliore",
   "param.smartTuning": "⏳ Ricerca dei parametri migliori…",

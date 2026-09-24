@@ -48,6 +48,12 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
   const runSeq = useRef(0);
   const iterationsRef = useRef([]);
   useEffect(() => { iterationsRef.current = iterations; }, [iterations]);
+  // Ref to the currently selected thumbnail so the slider can keep it in
+  // view while the strip scrolls horizontally.
+  const activeThumbRef = useRef(null);
+  useEffect(() => {
+    activeThumbRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [selectedIdx]);
 
   // Reset (and revoke the old blob URLs) when the modal opens or the image
   // it is about changes.
@@ -204,6 +210,7 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
           />
           <div className="preprocess-thumbs">
             <button
+              ref={selectedIdx === -1 ? activeThumbRef : null}
               className={`preprocess-thumb${selectedIdx === -1 ? " active" : ""}`}
               onClick={() => setSelectedIdx(-1)}
               title={t("preprocess.original")}
@@ -216,6 +223,7 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
               return (
                 <button
                   key={it.id}
+                  ref={selectedIdx === i ? activeThumbRef : null}
                   className={`preprocess-thumb${selectedIdx === i ? " active" : ""}`}
                   onClick={() => setSelectedIdx(i)}
                   title={t("preprocess.iteration", { n: i + 1 }) + (it.cached ? ` · ${t("preprocess.cached")}` : "")}
@@ -234,6 +242,28 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
                 </button>
               );
             })}
+          </div>
+          {/* Iteration scrubber: 0 = original, N = last enhancement. Dragging
+              it swaps the compare preview instantly, so fast scrubbing lets
+              the user flick through results to pick the best one. */}
+          <div className="preprocess-slider-row">
+            <input
+              className="preprocess-slider"
+              type="range"
+              min={0}
+              max={iterations.length}
+              step={1}
+              value={selectedIdx + 1}
+              onChange={(e) => setSelectedIdx(parseInt(e.target.value, 10) - 1)}
+              disabled={iterations.length === 0}
+              title={t("preprocess.slider")}
+              aria-label={t("preprocess.slider")}
+            />
+            <span className="preprocess-slider-val">
+              {selectedIdx >= 0
+                ? t("preprocess.iteration", { n: selectedIdx + 1 })
+                : t("preprocess.original")}
+            </span>
           </div>
         </div>
 

@@ -111,6 +111,7 @@ export default {
   "preprocess.iteration": "第 {n} 次增强",
   "preprocess.fullscreen": "全屏",
   "preprocess.exitFullscreen": "退出全屏",
+  "preprocess.slider": "拖动滑块快速预览各次增强结果",
   "param.preprocessTitle": "打开预处理弹框：用数字艺术模型迭代增强源图，并将结果保存为新图像",
   "param.smartTitle": "在「{family}」内试算多组参数，自动选出最佳",
   "param.smartTuning": "⏳ 正在试算最佳参数…",

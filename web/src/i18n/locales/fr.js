@@ -111,6 +111,7 @@ export default {
   "preprocess.iteration": "Amélioration {n}",
   "preprocess.fullscreen": "Plein écran",
   "preprocess.exitFullscreen": "Quitter le plein écran",
+  "preprocess.slider": "Faites glisser pour prévisualiser rapidement chaque résultat",
   "param.preprocessTitle": "Ouvrir la boîte de dialogue de prétraitement : améliorer l'image source de façon itérative avec le modèle art numérique et enregistrer le résultat comme nouvelle image",
   "param.smartTitle": "Essaie plusieurs jeux de paramètres dans « {family} » et choisit le meilleur automatiquement",
   "param.smartTuning": "⏳ Recherche des meilleurs paramètres…",
