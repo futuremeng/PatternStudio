@@ -173,11 +173,11 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
     ? t("preprocess.enhancingRound", { current: progress.current, total: progress.total })
     : t("preprocess.enhancing");
 
+  // Note: clicking the dark overlay area deliberately does NOT close this
+  // modal — a stray click would discard the in-progress enhancement state.
+  // Close via the × button or the Escape key instead.
   return (
-    <div
-      className="modal-overlay preprocess-modal-overlay"
-      onClick={(e) => { if (e.target === e.currentTarget && canClose) onClose(); }}
-    >
+    <div className="modal-overlay preprocess-modal-overlay">
       <div className={`modal preprocess-modal${fullscreen ? " fullscreen" : ""}`}>
         <div className="modal-header">
           <h2>{t("preprocess.title")}</h2>
