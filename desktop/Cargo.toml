@@ -24,4 +24,4 @@ patternstudio-core = { path = "../crates/patternstudio-core" }
 patternstudio-tracer = { path = "../crates/patternstudio-tracer" }
 patternstudio-svg = { path = "../crates/patternstudio-svg" }
 patternstudio-patterns = { path = "../crates/patternstudio-patterns" }
-vtracer = { path = "../../../vtracer/crates/vtracer" }
+vtracer = { workspace = true }

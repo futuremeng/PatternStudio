@@ -11,12 +11,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Cache VTracer
+      # The workspace depends on the PatternStudio VTracer fork (custom
+      # Session / CancelToken / segment_key APIs), pinned to a known-good
+      # commit. All crates resolve vtracer through [workspace.dependencies],
+      # so patching the root Cargo.toml is sufficient.
+      - name: Fetch VTracer fork
         run: |
-          git clone --depth 1 https://github.com/vtracer/vtracer.git /tmp/vtracer
+          git clone https://github.com/futuremeng/vtracer.git /tmp/vtracer
+          git -C /tmp/vtracer checkout 13435cf
       - name: Patch VTracer path
         run: |
-          sed -i 's|path = "../../vtracer/crates/vtracer"|path = "/tmp/vtracer/crates/vtracer"|' Cargo.toml
+          sed -i 's|path = "[^"]*/vtracer/crates/vtracer"|path = "/tmp/vtracer/crates/vtracer"|' Cargo.toml
       - name: Build
         run: cargo build --workspace
       - name: Test

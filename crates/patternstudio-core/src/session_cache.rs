@@ -200,10 +200,12 @@ mod tests {
         assert!(cache.get_or_create("c", make).is_ok());
         // "b" was evicted, so creating it again must invoke the loader.
         let calls = std::cell::Cell::new(0);
-        cache.get_or_create("b", || -> Result<ColorImage, String> {
-            calls.set(calls.get() + 1);
-            Ok(synthetic_image(8, 8))
-        }).unwrap();
+        cache
+            .get_or_create("b", || -> Result<ColorImage, String> {
+                calls.set(calls.get() + 1);
+                Ok(synthetic_image(8, 8))
+            })
+            .unwrap();
         assert_eq!(calls.get(), 1, "evicted key must be recreated");
     }
 }

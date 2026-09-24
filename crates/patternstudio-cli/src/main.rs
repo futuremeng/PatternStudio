@@ -4,13 +4,19 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use patternstudio_core::{LayerAssignment, PatternStudioConfig, PatternStudioPipeline, Resolution, Simplify};
+use patternstudio_core::{
+    LayerAssignment, PatternStudioConfig, PatternStudioPipeline, Resolution, Simplify,
+};
 use patternstudio_svg::LayeredWriter;
 use patternstudio_tracer::load_image;
 use vtracer::config::Preset;
 
 #[derive(Parser)]
-#[command(name = "patternstudio", version, about = "PatternStudio: image-to-layered-SVG tracing")]
+#[command(
+    name = "patternstudio",
+    version,
+    about = "PatternStudio: image-to-layered-SVG tracing"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -143,29 +149,88 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Trace { input, output, resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle, layers, no_background, threshold, preview, optimize, open, json, quiet, scale, rotate, flip } => {
-            cmd_trace(&input, &output, TraceOptions {
-                resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle,
-                layers, no_background, threshold, preview, optimize, open, json, quiet,
-                scale, rotate, flip,
-            })
-        }
-        Command::Pattern { kind, output, n_units, complexity, size, seed, color, open } => {
-            cmd_pattern(PatternOptions { kind, output, n_units, complexity, size, seed, color, open })
-        }
-        Command::List => {
-            cmd_list()
-        }
-        Command::Serve { port } => {
-            cmd_serve(port)
-        }
-        Command::Convert { input, output, simplify, mode, max_colors, layers, open } => {
-            cmd_convert(&input, &output, &simplify, &mode, max_colors, layers, open)
-        }
+        Command::Trace {
+            input,
+            output,
+            resolution,
+            simplify,
+            preset,
+            mode,
+            max_colors,
+            color_precision,
+            filter_speckle,
+            layers,
+            no_background,
+            threshold,
+            preview,
+            optimize,
+            open,
+            json,
+            quiet,
+            scale,
+            rotate,
+            flip,
+        } => cmd_trace(
+            &input,
+            &output,
+            TraceOptions {
+                resolution,
+                simplify,
+                preset,
+                mode,
+                max_colors,
+                color_precision,
+                filter_speckle,
+                layers,
+                no_background,
+                threshold,
+                preview,
+                optimize,
+                open,
+                json,
+                quiet,
+                scale,
+                rotate,
+                flip,
+            },
+        ),
+        Command::Pattern {
+            kind,
+            output,
+            n_units,
+            complexity,
+            size,
+            seed,
+            color,
+            open,
+        } => cmd_pattern(PatternOptions {
+            kind,
+            output,
+            n_units,
+            complexity,
+            size,
+            seed,
+            color,
+            open,
+        }),
+        Command::List => cmd_list(),
+        Command::Serve { port } => cmd_serve(port),
+        Command::Convert {
+            input,
+            output,
+            simplify,
+            mode,
+            max_colors,
+            layers,
+            open,
+        } => cmd_convert(&input, &output, &simplify, &mode, max_colors, layers, open),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
-        Err(e) => { eprintln!("error: {e}"); ExitCode::FAILURE }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -192,7 +257,11 @@ struct TraceOptions {
     flip: String,
 }
 
-fn cmd_trace(input: &PathBuf, output: &PathBuf, opts: TraceOptions) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_trace(
+    input: &PathBuf,
+    output: &PathBuf,
+    opts: TraceOptions,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Batch mode: input is a directory
     if input.is_dir() {
         let out_dir = output.clone();
@@ -201,7 +270,11 @@ fn cmd_trace(input: &PathBuf, output: &PathBuf, opts: TraceOptions) -> Result<()
         let mut files: Vec<PathBuf> = std::fs::read_dir(input)?
             .filter_map(|e| e.ok())
             .map(|e| e.path())
-            .filter(|p| p.extension().map(|e| exts.contains(&e.to_string_lossy().to_lowercase().as_str())).unwrap_or(false))
+            .filter(|p| {
+                p.extension()
+                    .map(|e| exts.contains(&e.to_string_lossy().to_lowercase().as_str()))
+                    .unwrap_or(false)
+            })
             .collect();
         files.sort();
 
@@ -220,7 +293,9 @@ fn cmd_trace(input: &PathBuf, output: &PathBuf, opts: TraceOptions) -> Result<()
             batch_opts.rotate = 0.0;
             batch_opts.flip = "none".to_string();
             match trace_single(file, &out_svg, batch_opts) {
-                Ok(()) => { ok += 1; }
+                Ok(()) => {
+                    ok += 1;
+                }
                 Err(e) => eprintln!("  [{}] FAILED: {e}", file.display()),
             }
             if (i + 1) % 10 == 0 {
@@ -236,12 +311,29 @@ fn cmd_trace(input: &PathBuf, output: &PathBuf, opts: TraceOptions) -> Result<()
 }
 
 fn trace_single(
-    input: &PathBuf, output: &PathBuf, opts: TraceOptions,
+    input: &PathBuf,
+    output: &PathBuf,
+    opts: TraceOptions,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let TraceOptions {
-        resolution, simplify, preset, mode, max_colors, color_precision, filter_speckle,
-        layers, no_background, threshold, preview, optimize, open, json, quiet,
-        scale, rotate, flip,
+        resolution,
+        simplify,
+        preset,
+        mode,
+        max_colors,
+        color_precision,
+        filter_speckle,
+        layers,
+        no_background,
+        threshold,
+        preview,
+        optimize,
+        open,
+        json,
+        quiet,
+        scale,
+        rotate,
+        flip,
     } = opts;
     if !quiet {
         eprintln!("Loading: {}", input.display());
@@ -314,7 +406,8 @@ fn trace_single(
     // shapes left over from the masked (black) background pixels
     let layered = if no_background {
         let mut l = layered;
-        l.layers.retain(|layer| layer.role != patternstudio_core::LayerRole::Background);
+        l.layers
+            .retain(|layer| layer.role != patternstudio_core::LayerRole::Background);
         let removed = l.remove_color(visioncortex::Color::new(0, 0, 0), threshold);
         if !quiet && removed > 0 {
             eprintln!("Removed {removed} background shape(s)");
@@ -325,7 +418,11 @@ fn trace_single(
     };
 
     if !quiet {
-        eprintln!("Done: {} shapes in {} layer(s)", layered.total_shapes(), layered.layers.len());
+        eprintln!(
+            "Done: {} shapes in {} layer(s)",
+            layered.total_shapes(),
+            layered.layers.len()
+        );
     }
 
     let mut svg = LayeredWriter::write(&layered);
@@ -421,14 +518,25 @@ struct PatternOptions {
 }
 
 fn cmd_pattern(opts: PatternOptions) -> Result<(), Box<dyn std::error::Error>> {
-    let PatternOptions { kind, output, n_units, complexity, size, color, open, .. } = opts;
+    let PatternOptions {
+        kind,
+        output,
+        n_units,
+        complexity,
+        size,
+        color,
+        open,
+        ..
+    } = opts;
     eprintln!("Generating pattern: {kind} (n={n_units}, complexity={complexity}, size={size})");
     let mut svg = patternstudio_patterns::generate_sized(&kind, n_units, complexity, size)?;
     // Override stroke color if specified
     if let Some(c) = color {
         let c = c.trim_start_matches('#');
         if c.len() == 6 {
-            svg = svg.replace("#333", &format!("#{c}")).replace("#666", &format!("#{c}"));
+            svg = svg
+                .replace("#333", &format!("#{c}"))
+                .replace("#666", &format!("#{c}"));
         }
     }
     std::fs::write(&output, &svg)?;
@@ -448,7 +556,11 @@ fn cmd_list() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn parse_resolution(s: &str) -> Resolution {
-    match s { "coarse" => Resolution::Coarse, "fine" => Resolution::Fine, _ => Resolution::Medium }
+    match s {
+        "coarse" => Resolution::Coarse,
+        "fine" => Resolution::Fine,
+        _ => Resolution::Medium,
+    }
 }
 
 fn parse_simplify(s: &str) -> Simplify {
@@ -462,8 +574,13 @@ fn parse_simplify(s: &str) -> Simplify {
 }
 
 fn cmd_convert(
-    input: &PathBuf, output: &PathBuf,
-    simplify: &str, mode: &str, max_colors: usize, layers: usize, open: bool,
+    input: &PathBuf,
+    output: &PathBuf,
+    simplify: &str,
+    mode: &str,
+    max_colors: usize,
+    layers: usize,
+    open: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Converting: {}", input.display());
 
@@ -477,7 +594,10 @@ fn cmd_convert(
     // For SVG input, we need to rasterize first. Use a simple approach:
     // If the file is actually an image (misnamed), trace it normally.
     // Otherwise, report that SVG re-tracing requires a rasterizer.
-    let ext = input.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let ext = input
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
     if ext == "svg" {
         eprintln!("Note: SVG re-tracing requires rasterization. Using passthrough mode.");
         eprintln!("For best results, convert SVG to PNG first, then use `trace`.");
@@ -485,26 +605,30 @@ fn cmd_convert(
         eprintln!("Copied: {}", output.display());
     } else {
         // It's actually an image file - trace it
-        trace_single(input, output, TraceOptions {
-            resolution: "medium".to_string(),
-            simplify: simplify.to_string(),
-            preset: "poster".to_string(),
-            mode: mode.to_string(),
-            max_colors,
-            color_precision: 4,
-            filter_speckle: 2,
-            layers,
-            no_background: false,
-            threshold: 30,
-            preview: false,
-            optimize: false,
-            open,
-            json: false,
-            quiet: false,
-            scale: 1.0,
-            rotate: 0.0,
-            flip: "none".to_string(),
-        })?;
+        trace_single(
+            input,
+            output,
+            TraceOptions {
+                resolution: "medium".to_string(),
+                simplify: simplify.to_string(),
+                preset: "poster".to_string(),
+                mode: mode.to_string(),
+                max_colors,
+                color_precision: 4,
+                filter_speckle: 2,
+                layers,
+                no_background: false,
+                threshold: 30,
+                preview: false,
+                optimize: false,
+                open,
+                json: false,
+                quiet: false,
+                scale: 1.0,
+                rotate: 0.0,
+                flip: "none".to_string(),
+            },
+        )?;
     }
     Ok(())
 }
@@ -527,10 +651,14 @@ fn optimize_svg(svg: &str) -> String {
     let bytes = svg.as_bytes();
     while i < bytes.len() {
         // Look for number patterns (digits, dots, minus)
-        if bytes[i].is_ascii_digit() || (bytes[i] == b'.' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit()) {
+        if bytes[i].is_ascii_digit()
+            || (bytes[i] == b'.' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit())
+        {
             // Find the start of the number
             let start = i;
-            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.' || bytes[i] == b'-') {
+            while i < bytes.len()
+                && (bytes[i].is_ascii_digit() || bytes[i] == b'.' || bytes[i] == b'-')
+            {
                 i += 1;
             }
             let num_str = std::str::from_utf8(&bytes[start..i]).unwrap_or("0");
@@ -563,6 +691,9 @@ fn open_in_browser(path: &PathBuf) {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("cmd").args(["/C", "start"]).arg(path).spawn();
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start"])
+            .arg(path)
+            .spawn();
     }
 }

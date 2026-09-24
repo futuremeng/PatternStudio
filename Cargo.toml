@@ -23,7 +23,6 @@ repository = "https://github.com/futuremeng/PatternStudio"
 # VTracer 1.0 (path dep during dev)
 vtracer = { path = "../../vtracer/crates/vtracer" }
 visioncortex = "0.9.3"
-flo_curves = "0.8"
 
 # Image I/O
 image = "0.25"

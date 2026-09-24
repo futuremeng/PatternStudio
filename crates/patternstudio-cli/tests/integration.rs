@@ -83,7 +83,9 @@ fn by_color_preserves_all_shapes() {
     let config = PatternStudioConfig::from_preset(Preset::Poster);
     let pipeline = PatternStudioPipeline::new(&config).unwrap();
 
-    let single = pipeline.trace_layered(&img, &LayerAssignment::single_layer()).unwrap();
+    let single = pipeline
+        .trace_layered(&img, &LayerAssignment::single_layer())
+        .unwrap();
     let total_single = single.total_shapes();
 
     let auto = pipeline.trace_layered_auto(&img, 3).unwrap();

@@ -19,12 +19,21 @@ pub fn list_kinds() -> Vec<(&'static str, &'static str)> {
 }
 
 /// Generate a pattern SVG (default 400x400).
-pub fn generate(kind: &str, n_units: u32, complexity: u8) -> Result<String, Box<dyn std::error::Error>> {
+pub fn generate(
+    kind: &str,
+    n_units: u32,
+    complexity: u8,
+) -> Result<String, Box<dyn std::error::Error>> {
     generate_sized(kind, n_units, complexity, 400)
 }
 
 /// Generate a pattern SVG with explicit size.
-pub fn generate_sized(kind: &str, n_units: u32, complexity: u8, size: u32) -> Result<String, Box<dyn std::error::Error>> {
+pub fn generate_sized(
+    kind: &str,
+    n_units: u32,
+    complexity: u8,
+    size: u32,
+) -> Result<String, Box<dyn std::error::Error>> {
     let s = size as f64;
     let svg = match kind {
         "rosette" => rosette(n_units, complexity, s),
@@ -37,7 +46,11 @@ pub fn generate_sized(kind: &str, n_units: u32, complexity: u8, size: u32) -> Re
         "greek_key" => greek_key(n_units, complexity, s),
         other => {
             let available: Vec<&str> = list_kinds().iter().map(|(k, _)| *k).collect();
-            return Err(format!("unknown pattern type: {other}. Available: {}", available.join(", ")).into());
+            return Err(format!(
+                "unknown pattern type: {other}. Available: {}",
+                available.join(", ")
+            )
+            .into());
         }
     };
     Ok(svg)
@@ -57,7 +70,8 @@ fn rosette(n_units: u32, complexity: u8, size: f64) -> String {
 
     let mut paths = String::new();
     for i in 0..petal_count {
-        let angle = (2.0 * std::f64::consts::PI * i as f64 / petal_count as f64) - std::f64::consts::PI / 2.0;
+        let angle = (2.0 * std::f64::consts::PI * i as f64 / petal_count as f64)
+            - std::f64::consts::PI / 2.0;
         let cx = center + radius * 0.6 * angle.cos();
         let cy = center + radius * 0.6 * angle.sin();
         let petal_r = radius * 0.35 * (0.8 + 0.2 * detail / 4.0);
@@ -73,7 +87,8 @@ fn rosette(n_units: u32, complexity: u8, size: f64) -> String {
     ));
     if complexity > 30 {
         for i in 0..petal_count {
-            let angle = (2.0 * std::f64::consts::PI * i as f64 / petal_count as f64) - std::f64::consts::PI / 2.0;
+            let angle = (2.0 * std::f64::consts::PI * i as f64 / petal_count as f64)
+                - std::f64::consts::PI / 2.0;
             let cx = center + radius * 0.35 * angle.cos();
             let cy = center + radius * 0.35 * angle.sin();
             paths.push_str(&format!(
@@ -96,7 +111,13 @@ fn meander(n_units: u32, complexity: u8, size: f64) -> String {
         paths.push_str(&format!(
             "    <path d=\"M{:.1} 0 V{:.1} H{:.1} V{:.1} H{:.1} V{:.1}\" \
              fill=\"none\" stroke=\"#333\" stroke-width=\"{:.1}\"/>\n",
-            x, depth, x + unit_w * 0.8, depth * 0.6, x + unit_w * 0.4, depth * 0.3, sw
+            x,
+            depth,
+            x + unit_w * 0.8,
+            depth * 0.6,
+            x + unit_w * 0.4,
+            depth * 0.3,
+            sw
         ));
     }
     svg_wrap(size, &paths)
@@ -220,7 +241,13 @@ fn wave(n_units: u32, complexity: u8, size: f64) -> String {
             let x1 = (i as f64 + 0.5) * wavelength / 2.0;
             let x2 = (i as f64 + 1.0) * wavelength / 2.0;
             let dir = if i % 2 == 0 { -1.0 } else { 1.0 };
-            d.push_str(&format!(" Q{:.1} {:.1} {:.1} {:.1}", x1, y_base + dir * amplitude, x2, y_base));
+            d.push_str(&format!(
+                " Q{:.1} {:.1} {:.1} {:.1}",
+                x1,
+                y_base + dir * amplitude,
+                x2,
+                y_base
+            ));
         }
         d.push_str("\" fill=\"none\" stroke=\"#333\" stroke-width=\"1.5\"/>\n");
         paths.push_str(&d);
@@ -239,10 +266,14 @@ fn greek_key(n_units: u32, complexity: u8, size: f64) -> String {
         paths.push_str(&format!(
             "    <path d=\"M{:.1} 0 V{:.1} H{:.1} V{:.1} H{:.1} V{:.1} H{:.1}\" \
              fill=\"none\" stroke=\"#333\" stroke-width=\"{:.1}\"/>\n",
-            x, unit - inset,
-            x + inset, unit - inset * 2.0,
-            x + inset * 2.0, inset,
-            x + unit, inset
+            x,
+            unit - inset,
+            x + inset,
+            unit - inset * 2.0,
+            x + inset * 2.0,
+            inset,
+            x + unit,
+            inset
         ));
     }
     svg_wrap(size, &paths)

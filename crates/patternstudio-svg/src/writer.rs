@@ -1,8 +1,8 @@
 //! Layered SVG writer: converts LayeredDoc to SVG string.
 
 use patternstudio_core::ir::LayeredDoc;
-use vtracer::ir::Shape;
 use visioncortex::Color;
+use vtracer::ir::Shape;
 
 pub struct LayeredWriter;
 
@@ -156,19 +156,24 @@ impl LayeredWriter {
 mod tests {
     use super::*;
     use patternstudio_core::ir::{LayerAssignment, LayeredDoc};
-    use vtracer::ir::{MultiPath, Paint, SubPath, VectorDoc};
     use visioncortex::PointF64;
+    use vtracer::ir::{MultiPath, Paint, SubPath, VectorDoc};
 
     fn make_test_doc() -> LayeredDoc {
         let mut doc = VectorDoc::new(100, 100);
         let mut sub = SubPath::new();
-        sub.commands.push(vtracer::ir::PathCmd::MoveTo(PointF64 { x: 0.0, y: 0.0 }));
-        sub.commands.push(vtracer::ir::PathCmd::LineTo(PointF64 { x: 50.0, y: 0.0 }));
-        sub.commands.push(vtracer::ir::PathCmd::LineTo(PointF64 { x: 50.0, y: 50.0 }));
+        sub.commands
+            .push(vtracer::ir::PathCmd::MoveTo(PointF64 { x: 0.0, y: 0.0 }));
+        sub.commands
+            .push(vtracer::ir::PathCmd::LineTo(PointF64 { x: 50.0, y: 0.0 }));
+        sub.commands
+            .push(vtracer::ir::PathCmd::LineTo(PointF64 { x: 50.0, y: 50.0 }));
         sub.commands.push(vtracer::ir::PathCmd::Close);
         doc.shapes.push(Shape {
             paint: Paint::Solid(Color::new(255, 0, 0)),
-            path: MultiPath { subpaths: vec![sub] },
+            path: MultiPath {
+                subpaths: vec![sub],
+            },
         });
         LayeredDoc::from_vector_doc(&doc, &LayerAssignment::single_layer())
     }

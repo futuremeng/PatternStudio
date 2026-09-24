@@ -11,7 +11,7 @@ pub mod preprocess;
 
 pub use frontend::MaskFrontend;
 pub use image_io::{load_image, load_image_from_memory};
-pub use preprocess::{PreprocessOut, find_models_dir, find_realesrgan_bin, preprocess_image};
+pub use preprocess::{find_models_dir, find_realesrgan_bin, preprocess_image, PreprocessOut};
 
 /// Parse a comma/whitespace/newline separated list of `#rrggbb` colors.
 /// Empty or whitespace-only input yields an empty palette (= no fixed palette).

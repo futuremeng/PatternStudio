@@ -14,7 +14,9 @@ pub fn load_image_from_memory(data: &[u8]) -> Result<ColorImage, Box<dyn std::er
     image_to_color_image(&img)
 }
 
-fn image_to_color_image(img: &image::DynamicImage) -> Result<ColorImage, Box<dyn std::error::Error>> {
+fn image_to_color_image(
+    img: &image::DynamicImage,
+) -> Result<ColorImage, Box<dyn std::error::Error>> {
     // `to_rgba8` yields an `RgbaImage` whose backing buffer is already laid out
     // as row-major RGBA — exactly the memory layout `ColorImage` expects. Move
     // the buffer instead of copying pixel-by-pixel (the old per-pixel loop was

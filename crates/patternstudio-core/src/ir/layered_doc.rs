@@ -4,8 +4,8 @@
 //! and metadata. Each layer maps to a `<g>` element in the output SVG.
 
 use serde::{Deserialize, Serialize};
-use vtracer::ir::{PathCmd, Shape, VectorDoc};
 use visioncortex::Color;
+use vtracer::ir::{PathCmd, Shape, VectorDoc};
 
 /// Semantic role of a layer — determines SVG `<g id>` and edit behavior.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,11 +52,21 @@ impl EditabilityFlags {
 
     pub fn to_svg_attr(&self) -> String {
         let mut parts = Vec::new();
-        if self.movable { parts.push("move"); }
-        if self.recolorable { parts.push("recolor"); }
-        if self.resizable { parts.push("resize"); }
-        if self.deletable { parts.push("delete"); }
-        if self.editable_paths { parts.push("paths"); }
+        if self.movable {
+            parts.push("move");
+        }
+        if self.recolorable {
+            parts.push("recolor");
+        }
+        if self.resizable {
+            parts.push("resize");
+        }
+        if self.deletable {
+            parts.push("delete");
+        }
+        if self.editable_paths {
+            parts.push("paths");
+        }
         parts.join(",")
     }
 }
@@ -333,7 +343,9 @@ impl LayerAssignment {
                     LayerRole::Custom(name.clone())
                 };
                 layers.push(LayerSpec {
-                    name, role, shape_indices: base,
+                    name,
+                    role,
+                    shape_indices: base,
                     editability: EditabilityFlags::full(),
                     profile: crate::profiles::ProfileLevel::default(),
                 });
@@ -363,29 +375,66 @@ impl LayerAssignment {
         groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
 
         if groups.len() <= max_layers {
-            return groups.into_iter().enumerate().map(|(idx, (color, indices))| {
-                let name = if idx == 0 { "base".into() } else {
-                    format!("color-{:02x}{:02x}{:02x}", color[0], color[1], color[2])
-                };
-                let role = if idx == 0 { LayerRole::Structure } else { LayerRole::Custom(name.clone()) };
-                LayerSpec { name, role, shape_indices: indices, editability: EditabilityFlags::full(), profile: crate::profiles::ProfileLevel::default() }
-            }).collect();
+            return groups
+                .into_iter()
+                .enumerate()
+                .map(|(idx, (color, indices))| {
+                    let name = if idx == 0 {
+                        "base".into()
+                    } else {
+                        format!("color-{:02x}{:02x}{:02x}", color[0], color[1], color[2])
+                    };
+                    let role = if idx == 0 {
+                        LayerRole::Structure
+                    } else {
+                        LayerRole::Custom(name.clone())
+                    };
+                    LayerSpec {
+                        name,
+                        role,
+                        shape_indices: indices,
+                        editability: EditabilityFlags::full(),
+                        profile: crate::profiles::ProfileLevel::default(),
+                    }
+                })
+                .collect();
         }
 
         let keep = max_layers.saturating_sub(1);
         let top: Vec<([u8; 3], Vec<usize>)> = groups[..keep].to_vec();
         let mut other: Vec<usize> = Vec::new();
-        for (_, indices) in &groups[keep..] { other.extend(indices.iter().copied()); }
-        let mut result: Vec<LayerSpec> = top.into_iter().enumerate().map(|(idx, (color, indices))| {
-            let name = if idx == 0 { "base".into() } else {
-                format!("color-{:02x}{:02x}{:02x}", color[0], color[1], color[2])
-            };
-            let role = if idx == 0 { LayerRole::Structure } else { LayerRole::Custom(name.clone()) };
-            LayerSpec { name, role, shape_indices: indices, editability: EditabilityFlags::full(), profile: crate::profiles::ProfileLevel::default() }
-        }).collect();
+        for (_, indices) in &groups[keep..] {
+            other.extend(indices.iter().copied());
+        }
+        let mut result: Vec<LayerSpec> = top
+            .into_iter()
+            .enumerate()
+            .map(|(idx, (color, indices))| {
+                let name = if idx == 0 {
+                    "base".into()
+                } else {
+                    format!("color-{:02x}{:02x}{:02x}", color[0], color[1], color[2])
+                };
+                let role = if idx == 0 {
+                    LayerRole::Structure
+                } else {
+                    LayerRole::Custom(name.clone())
+                };
+                LayerSpec {
+                    name,
+                    role,
+                    shape_indices: indices,
+                    editability: EditabilityFlags::full(),
+                    profile: crate::profiles::ProfileLevel::default(),
+                }
+            })
+            .collect();
         result.push(LayerSpec {
-            name: "other".into(), role: LayerRole::Details,
-            shape_indices: other, editability: EditabilityFlags::full(), profile: crate::profiles::ProfileLevel::default(),
+            name: "other".into(),
+            role: LayerRole::Details,
+            shape_indices: other,
+            editability: EditabilityFlags::full(),
+            profile: crate::profiles::ProfileLevel::default(),
         });
         result
     }
@@ -397,35 +446,53 @@ impl LayerAssignment {
         if doc.shapes.is_empty() {
             return Self::single_layer();
         }
-        let bboxes: Vec<Option<(f64, f64, f64, f64)>> =
-            doc.shapes.iter().map(shape_bbox).collect();
+        let bboxes: Vec<Option<(f64, f64, f64, f64)>> = doc.shapes.iter().map(shape_bbox).collect();
         let n = doc.shapes.len();
         if n == 1 {
             return Self::single_layer();
         }
         let mut parent: Vec<usize> = (0..n).collect();
         let mut rank: Vec<usize> = vec![0; n];
-        fn find(parent: &mut Vec<usize>, mut x: usize) -> usize {
+        fn find(parent: &mut [usize], mut x: usize) -> usize {
             while parent[x] != x {
                 parent[x] = parent[parent[x]];
                 x = parent[x];
             }
             x
         }
-        fn union(parent: &mut Vec<usize>, rank: &mut Vec<usize>, a: usize, b: usize) {
+        fn union(parent: &mut [usize], rank: &mut [usize], a: usize, b: usize) {
             let ra = find(parent, a);
             let rb = find(parent, b);
-            if ra == rb { return; }
-            if rank[ra] < rank[rb] { parent[ra] = rb; }
-            else if rank[ra] > rank[rb] { parent[rb] = ra; }
-            else { parent[rb] = ra; rank[ra] += 1; }
+            if ra == rb {
+                return;
+            }
+            if rank[ra] < rank[rb] {
+                parent[ra] = rb;
+            } else if rank[ra] > rank[rb] {
+                parent[rb] = ra;
+            } else {
+                parent[rb] = ra;
+                rank[ra] += 1;
+            }
         }
         for i in 0..n {
             if let Some((x1, y1, x2, y2)) = bboxes[i] {
-                for j in (i + 1)..n {
-                    if let Some((x3, y3, x4, y4)) = bboxes[j] {
-                        let gap_x = if x2 < x3 { x3 - x2 } else if x4 < x1 { x1 - x4 } else { 0.0 };
-                        let gap_y = if y2 < y3 { y3 - y2 } else if y4 < y1 { y1 - y4 } else { 0.0 };
+                for (j, bbox) in bboxes.iter().enumerate().skip(i + 1) {
+                    if let Some((x3, y3, x4, y4)) = *bbox {
+                        let gap_x = if x2 < x3 {
+                            x3 - x2
+                        } else if x4 < x1 {
+                            x1 - x4
+                        } else {
+                            0.0
+                        };
+                        let gap_y = if y2 < y3 {
+                            y3 - y2
+                        } else if y4 < y1 {
+                            y1 - y4
+                        } else {
+                            0.0
+                        };
                         if gap_x <= gap && gap_y <= gap {
                             union(&mut parent, &mut rank, i, j);
                         }
@@ -443,7 +510,7 @@ impl LayerAssignment {
         if group_list.len() <= 1 {
             return Self::single_layer();
         }
-        group_list.sort_by(|a, b| b.len().cmp(&a.len()));
+        group_list.sort_by_key(|g| std::cmp::Reverse(g.len()));
         let mut layers: Vec<LayerSpec> = Vec::new();
         if group_list.len() <= max_layers {
             for (idx, indices) in group_list.into_iter().enumerate() {
@@ -576,10 +643,7 @@ impl LayeredDoc {
                     profile: spec.profile,
                     metadata: {
                         let mut m = serde_json::Map::new();
-                        m.insert(
-                            "profile".into(),
-                            serde_json::json!(spec.profile.as_str()),
-                        );
+                        m.insert("profile".into(), serde_json::json!(spec.profile.as_str()));
                         m
                     },
                 });
@@ -652,18 +716,23 @@ impl LayeredDoc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vtracer::ir::{MultiPath, SubPath};
     use visioncortex::PointF64;
+    use vtracer::ir::{MultiPath, SubPath};
 
     fn test_shape(color: u8) -> Shape {
         let mut sub = SubPath::new();
-        sub.commands.push(vtracer::ir::PathCmd::MoveTo(PointF64 { x: 0.0, y: 0.0 }));
-        sub.commands.push(vtracer::ir::PathCmd::LineTo(PointF64 { x: 10.0, y: 0.0 }));
-        sub.commands.push(vtracer::ir::PathCmd::LineTo(PointF64 { x: 10.0, y: 10.0 }));
+        sub.commands
+            .push(vtracer::ir::PathCmd::MoveTo(PointF64 { x: 0.0, y: 0.0 }));
+        sub.commands
+            .push(vtracer::ir::PathCmd::LineTo(PointF64 { x: 10.0, y: 0.0 }));
+        sub.commands
+            .push(vtracer::ir::PathCmd::LineTo(PointF64 { x: 10.0, y: 10.0 }));
         sub.commands.push(vtracer::ir::PathCmd::Close);
         Shape {
             paint: vtracer::ir::Paint::Solid(Color::new(color, color, color)),
-            path: MultiPath { subpaths: vec![sub] },
+            path: MultiPath {
+                subpaths: vec![sub],
+            },
         }
     }
 
@@ -740,12 +809,24 @@ mod tests {
         // Complex shape: many commands
         let mut complex_sub = SubPath::new();
         for i in 0..20 {
-            complex_sub.commands.push(vtracer::ir::PathCmd::MoveTo(PointF64 { x: i as f64, y: 0.0 }));
-            complex_sub.commands.push(vtracer::ir::PathCmd::LineTo(PointF64 { x: i as f64, y: 1.0 }));
+            complex_sub
+                .commands
+                .push(vtracer::ir::PathCmd::MoveTo(PointF64 {
+                    x: i as f64,
+                    y: 0.0,
+                }));
+            complex_sub
+                .commands
+                .push(vtracer::ir::PathCmd::LineTo(PointF64 {
+                    x: i as f64,
+                    y: 1.0,
+                }));
         }
         doc.shapes.push(Shape {
             paint: vtracer::ir::Paint::Solid(Color::new(100, 100, 100)),
-            path: MultiPath { subpaths: vec![complex_sub] },
+            path: MultiPath {
+                subpaths: vec![complex_sub],
+            },
         });
 
         let assignment = LayerAssignment::by_complexity(&doc, 50, 3);
@@ -762,12 +843,24 @@ mod tests {
         // Complex shape with different color
         let mut complex_sub = SubPath::new();
         for i in 0..30 {
-            complex_sub.commands.push(vtracer::ir::PathCmd::MoveTo(PointF64 { x: i as f64, y: 0.0 }));
-            complex_sub.commands.push(vtracer::ir::PathCmd::LineTo(PointF64 { x: i as f64, y: 1.0 }));
+            complex_sub
+                .commands
+                .push(vtracer::ir::PathCmd::MoveTo(PointF64 {
+                    x: i as f64,
+                    y: 0.0,
+                }));
+            complex_sub
+                .commands
+                .push(vtracer::ir::PathCmd::LineTo(PointF64 {
+                    x: i as f64,
+                    y: 1.0,
+                }));
         }
         doc.shapes.push(Shape {
             paint: vtracer::ir::Paint::Solid(Color::new(50, 50, 50)),
-            path: MultiPath { subpaths: vec![complex_sub] },
+            path: MultiPath {
+                subpaths: vec![complex_sub],
+            },
         });
 
         let assignment = LayerAssignment::hybrid(&doc, 4, 50);
@@ -789,12 +882,15 @@ mod tests {
         let mut sub = SubPath::new();
         sub.commands.push(PathCmd::MoveTo(PointF64 { x, y }));
         sub.commands.push(PathCmd::LineTo(PointF64 { x: x + w, y }));
-        sub.commands.push(PathCmd::LineTo(PointF64 { x: x + w, y: y + h }));
+        sub.commands
+            .push(PathCmd::LineTo(PointF64 { x: x + w, y: y + h }));
         sub.commands.push(PathCmd::LineTo(PointF64 { x, y: y + h }));
         sub.commands.push(PathCmd::Close);
         Shape {
             paint: vtracer::ir::Paint::Solid(Color::new(0, 0, 0)),
-            path: MultiPath { subpaths: vec![sub] },
+            path: MultiPath {
+                subpaths: vec![sub],
+            },
         }
     }
 
@@ -818,9 +914,9 @@ mod tests {
     fn by_spatial_splits_three_separated_shapes() {
         // Three shapes far apart (like the user's pattern: left circle, middle crescent, right circle)
         let mut doc = VectorDoc::new(1000, 200);
-        doc.shapes.push(positioned_shape(0.0, 50.0, 100.0, 100.0));    // left
-        doc.shapes.push(positioned_shape(400.0, 50.0, 200.0, 100.0));  // middle
-        doc.shapes.push(positioned_shape(800.0, 50.0, 100.0, 100.0));  // right
+        doc.shapes.push(positioned_shape(0.0, 50.0, 100.0, 100.0)); // left
+        doc.shapes.push(positioned_shape(400.0, 50.0, 200.0, 100.0)); // middle
+        doc.shapes.push(positioned_shape(800.0, 50.0, 100.0, 100.0)); // right
 
         let assignment = LayerAssignment::by_spatial(&doc, 4, 10.0);
         assert_eq!(assignment.layers.len(), 3);

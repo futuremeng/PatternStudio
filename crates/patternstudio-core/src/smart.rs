@@ -63,21 +63,45 @@ fn criteria_for(family: &str) -> Criteria {
         // for a little extra ink so faint lines aren't dropped. Judged by ink
         // capture (F1), which is far more sensitive to missing strokes than
         // color RMSE (dominated by the white background).
-        "lineArt" => Criteria { lambda: 0.15, ink_aware: true },
+        "lineArt" => Criteria {
+            lambda: 0.15,
+            ink_aware: true,
+        },
         // Black & white: whole-image binarization (filled regions), so judge
         // by overall color fidelity rather than stroke capture.
-        "bw" => Criteria { lambda: 0.2, ink_aware: false },
+        "bw" => Criteria {
+            lambda: 0.2,
+            ink_aware: false,
+        },
         // Color poster: faithful, clean quantization.
-        "color" => Criteria { lambda: 0.25, ink_aware: false },
+        "color" => Criteria {
+            lambda: 0.25,
+            ink_aware: false,
+        },
         // Gradient: needs many colors to avoid banding — barely penalize
         // complexity so detail is preserved.
-        "gradient" => Criteria { lambda: 0.08, ink_aware: false },
+        "gradient" => Criteria {
+            lambda: 0.08,
+            ink_aware: false,
+        },
         // Low-poly: should stay simple — heavy complexity penalty.
-        "lowPoly" => Criteria { lambda: 0.5, ink_aware: false },
+        "lowPoly" => Criteria {
+            lambda: 0.5,
+            ink_aware: false,
+        },
         // Auto-mode families (not user-selectable presets).
-        "photo" => Criteria { lambda: 0.1, ink_aware: false },
-        "flat" => Criteria { lambda: 0.3, ink_aware: false },
-        _ => Criteria { lambda: 0.25, ink_aware: false },
+        "photo" => Criteria {
+            lambda: 0.1,
+            ink_aware: false,
+        },
+        "flat" => Criteria {
+            lambda: 0.3,
+            ink_aware: false,
+        },
+        _ => Criteria {
+            lambda: 0.25,
+            ink_aware: false,
+        },
     }
 }
 
@@ -147,7 +171,11 @@ pub fn downsample(img: &ColorImage, max_side: u32) -> ColorImage {
             out[o + 3] = (a / n).round() as u8;
         }
     }
-    ColorImage { pixels: out, width: nw, height: nh }
+    ColorImage {
+        pixels: out,
+        width: nw,
+        height: nh,
+    }
 }
 
 /// Compute [`ImageStats`] from a downsampled copy of the image.
@@ -194,8 +222,8 @@ pub fn analyze_image(img: &ColorImage) -> ImageStats {
     let mean_yb = sum_yb / n_f;
     let std_rg = (sum_rg2 / n_f - mean_rg * mean_rg).max(0.0).sqrt();
     let std_yb = (sum_yb2 / n_f - mean_yb * mean_yb).max(0.0).sqrt();
-    let colorfulness =
-        (std_rg * std_rg + std_yb * std_yb).sqrt() + 0.3 * (mean_rg * mean_rg + mean_yb * mean_yb).sqrt();
+    let colorfulness = (std_rg * std_rg + std_yb * std_yb).sqrt()
+        + 0.3 * (mean_rg * mean_rg + mean_yb * mean_yb).sqrt();
 
     // Effective colors: quantized buckets covering ≥ 0.1% of the pixels.
     let min_count = (n_f * 0.001).max(1.0) as usize;
@@ -236,7 +264,7 @@ fn histogram_stats(hist: &[f64; 256]) -> (f64, u8) {
 
     // 5-bin box smoothing.
     let mut smooth = [0f64; 256];
-    for i in 0..256 {
+    for (i, slot) in smooth.iter_mut().enumerate() {
         let (mut s, mut c) = (0.0f64, 0usize);
         for j in (i as i32 - 2)..=(i as i32 + 2) {
             if (0..256).contains(&j) {
@@ -244,17 +272,15 @@ fn histogram_stats(hist: &[f64; 256]) -> (f64, u8) {
                 c += 1;
             }
         }
-        smooth[i] = s / c.max(1) as f64;
+        *slot = s / c.max(1) as f64;
     }
 
     // Peak 1: global max. Peak 2: strongest bin at least 16 away from it.
     let p1 = (0..256usize)
-        .into_iter()
         .max_by(|a, b| smooth[*a].total_cmp(&smooth[*b]))
         .unwrap();
     let bimodality = if smooth[p1] > 0.0 {
         let p2 = (0..256usize)
-            .into_iter()
             .filter(|&i| i.abs_diff(p1) >= 16)
             .max_by(|a, b| smooth[*a].total_cmp(&smooth[*b]))
             .filter(|&i| smooth[i] >= 0.05 * smooth[p1]);
@@ -285,8 +311,8 @@ fn histogram_stats(hist: &[f64; 256]) -> (f64, u8) {
     let sum_total: f64 = (0..256).map(|i| i as f64 * hist[i]).sum();
     let (mut sum_b, mut w_b) = (0.0f64, 0.0f64);
     let (mut best, mut best_lo, mut best_hi) = (-1.0f64, 128, 128);
-    for t in 0..256 {
-        w_b += hist[t];
+    for (t, &h) in hist.iter().enumerate() {
+        w_b += h;
         if w_b == 0.0 {
             continue;
         }
@@ -294,7 +320,7 @@ fn histogram_stats(hist: &[f64; 256]) -> (f64, u8) {
         if w_f == 0.0 {
             break;
         }
-        sum_b += t as f64 * hist[t];
+        sum_b += t as f64 * h;
         let m_b = sum_b / w_b;
         let m_f = (sum_total - sum_b) / w_f;
         let between = w_b * w_f * (m_b - m_f) * (m_b - m_f);
@@ -309,7 +335,6 @@ fn histogram_stats(hist: &[f64; 256]) -> (f64, u8) {
     (bimodality, ((best_lo + best_hi) / 2) as u8)
 }
 
-
 /// Sobel-based texture (strong-edge fraction) and noise (mean gradient over
 /// near-flat pixels) statistics.
 fn gradient_stats(lum: &[f64], w: usize, h: usize) -> (f64, f64) {
@@ -321,9 +346,13 @@ fn gradient_stats(lum: &[f64], w: usize, h: usize) -> (f64, f64) {
         for x in 1..w - 1 {
             let i = y * w + x;
             let gx = -lum[i - w - 1] - 2.0 * lum[i - 1] - lum[i + w - 1]
-                + lum[i - w + 1] + 2.0 * lum[i + 1] + lum[i + w + 1];
+                + lum[i - w + 1]
+                + 2.0 * lum[i + 1]
+                + lum[i + w + 1];
             let gy = -lum[i - w - 1] - 2.0 * lum[i - w] - lum[i - w + 1]
-                + lum[i + w - 1] + 2.0 * lum[i + w] + lum[i + w + 1];
+                + lum[i + w - 1]
+                + 2.0 * lum[i + w]
+                + lum[i + w + 1];
             let mag = (gx * gx + gy * gy).sqrt();
             if mag > 64.0 {
                 strong += 1;
@@ -335,7 +364,11 @@ fn gradient_stats(lum: &[f64], w: usize, h: usize) -> (f64, f64) {
     }
     let inner = ((w - 2) * (h - 2)).max(1) as f64;
     let texture = strong as f64 / inner;
-    let noise = if flat_count > 0 { flat_sum / flat_count as f64 } else { 0.0 };
+    let noise = if flat_count > 0 {
+        flat_sum / flat_count as f64
+    } else {
+        0.0
+    };
     (texture, noise)
 }
 
@@ -363,7 +396,6 @@ fn block_luminance_std(lum: &[f64], w: usize, h: usize) -> f64 {
     let mean = sums.iter().sum::<f64>() / sums.len() as f64;
     (sums.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / sums.len() as f64).sqrt()
 }
-
 
 // ── Candidate parameters ────────────────────────────────────────────────────
 
@@ -471,7 +503,6 @@ impl SmartParams {
         config
     }
 }
-
 
 /// One trial candidate: a named parameter family with its full params at the
 /// original image scale. `label` is an i18n key (a preset family id, or
@@ -650,67 +681,116 @@ pub fn family_candidates(stats: &ImageStats, family: &str) -> Vec<SmartCandidate
 }
 
 fn line_art_candidate(stats: &ImageStats, adaptive: bool, speckle: u32) -> SmartCandidate {
-    let mut p = SmartParams::default();
-    p.preset = "bw".into();
-    p.clustering = "binary".into();
-    p.line_art = true;
-    p.filter_speckle = speckle;
-    p.binary_adaptive = adaptive;
-    p.binary_threshold = stats.otsu_threshold;
-    SmartCandidate { family: "lineArt", label: "lineArt", params: p, is_baseline: false }
+    let p = SmartParams {
+        preset: "bw".into(),
+        clustering: "binary".into(),
+        line_art: true,
+        filter_speckle: speckle,
+        binary_adaptive: adaptive,
+        binary_threshold: stats.otsu_threshold,
+        ..Default::default()
+    };
+    SmartCandidate {
+        family: "lineArt",
+        label: "lineArt",
+        params: p,
+        is_baseline: false,
+    }
 }
 
 fn bw_candidate(stats: &ImageStats, adaptive: bool, speckle: u32) -> SmartCandidate {
-    let mut p = SmartParams::default();
-    p.preset = "bw".into();
-    p.clustering = "binary".into();
-    p.filter_speckle = speckle;
-    p.binary_adaptive = adaptive;
-    p.binary_threshold = stats.otsu_threshold;
-    SmartCandidate { family: "bw", label: "bw", params: p, is_baseline: false }
+    let p = SmartParams {
+        preset: "bw".into(),
+        clustering: "binary".into(),
+        filter_speckle: speckle,
+        binary_adaptive: adaptive,
+        binary_threshold: stats.otsu_threshold,
+        ..Default::default()
+    };
+    SmartCandidate {
+        family: "bw",
+        label: "bw",
+        params: p,
+        is_baseline: false,
+    }
 }
 
 fn poster_candidate(speckle: u32) -> SmartCandidate {
-    let mut p = SmartParams::default();
-    p.filter_speckle = speckle;
-    SmartCandidate { family: "color", label: "color", params: p, is_baseline: false }
+    let p = SmartParams {
+        filter_speckle: speckle,
+        ..Default::default()
+    };
+    SmartCandidate {
+        family: "color",
+        label: "color",
+        params: p,
+        is_baseline: false,
+    }
 }
 
 fn photo_candidate(speckle: u32) -> SmartCandidate {
-    let mut p = SmartParams::default();
-    p.preset = "photo".into();
-    p.color_precision = 8;
-    p.layer_difference = 48;
-    p.filter_speckle = speckle.max(8);
-    p.corner_threshold = 180;
-    p.simplify = 0.2;
-    SmartCandidate { family: "photo", label: "photo", params: p, is_baseline: false }
+    let p = SmartParams {
+        preset: "photo".into(),
+        color_precision: 8,
+        layer_difference: 48,
+        filter_speckle: speckle.max(8),
+        corner_threshold: 180,
+        simplify: 0.2,
+        ..Default::default()
+    };
+    SmartCandidate {
+        family: "photo",
+        label: "photo",
+        params: p,
+        is_baseline: false,
+    }
 }
 
 fn gradient_candidate(speckle: u32) -> SmartCandidate {
-    let mut p = SmartParams::default();
-    p.preset = "photo".into();
-    p.color_precision = 8;
-    p.layer_difference = 4;
-    p.filter_speckle = speckle;
-    p.simplify = 0.2;
-    SmartCandidate { family: "gradient", label: "gradient", params: p, is_baseline: false }
+    let p = SmartParams {
+        preset: "photo".into(),
+        color_precision: 8,
+        layer_difference: 4,
+        filter_speckle: speckle,
+        simplify: 0.2,
+        ..Default::default()
+    };
+    SmartCandidate {
+        family: "gradient",
+        label: "gradient",
+        params: p,
+        is_baseline: false,
+    }
 }
 
 fn low_poly_candidate(speckle: u32) -> SmartCandidate {
-    let mut p = SmartParams::default();
-    p.color_precision = 4;
-    p.layer_difference = 32;
-    p.filter_speckle = speckle;
-    p.mode = "polygon".into();
-    SmartCandidate { family: "lowPoly", label: "lowPoly", params: p, is_baseline: false }
+    let p = SmartParams {
+        color_precision: 4,
+        layer_difference: 32,
+        filter_speckle: speckle,
+        mode: "polygon".into(),
+        ..Default::default()
+    };
+    SmartCandidate {
+        family: "lowPoly",
+        label: "lowPoly",
+        params: p,
+        is_baseline: false,
+    }
 }
 
 fn flat_candidate(speckle: u32) -> SmartCandidate {
-    let mut p = SmartParams::default();
-    p.clustering = "watershed".into();
-    p.filter_speckle = speckle;
-    SmartCandidate { family: "flat", label: "flat", params: p, is_baseline: false }
+    let p = SmartParams {
+        clustering: "watershed".into(),
+        filter_speckle: speckle,
+        ..Default::default()
+    };
+    SmartCandidate {
+        family: "flat",
+        label: "flat",
+        params: p,
+        is_baseline: false,
+    }
 }
 
 /// Scale the pixel-unit parameters from the original image scale to a test
@@ -730,7 +810,6 @@ fn scale_params(p: &SmartParams, scale: f64) -> SmartParams {
         ..p.clone()
     }
 }
-
 
 // ── Trial scoring ───────────────────────────────────────────────────────────
 
@@ -860,7 +939,9 @@ pub fn ink_fidelity(seg: &Segmentation, img: &ColorImage) -> f64 {
         }
     }
     let luma = |i: usize| {
-        0.2126 * canvas[i * 3] as f64 + 0.7152 * canvas[i * 3 + 1] as f64 + 0.0722 * canvas[i * 3 + 2] as f64
+        0.2126 * canvas[i * 3] as f64
+            + 0.7152 * canvas[i * 3 + 1] as f64
+            + 0.0722 * canvas[i * 3 + 2] as f64
     };
     let src_luma = |i: usize| {
         0.2126 * img.pixels[i * 4] as f64
@@ -906,11 +987,13 @@ fn doc_stats(doc: &VectorDoc) -> (usize, usize) {
     (doc.shapes.len(), commands)
 }
 
-
 /// Trial-trace the candidates at reduced resolution and score each one.
 /// Candidates sharing a segmentation key (e.g. 线稿 vs 黑白) reuse the
 /// expensive clustering result.
-fn trial_candidates(img: &ColorImage, candidates: &[SmartCandidate]) -> Result<Vec<CandidateReport>, Error> {
+fn trial_candidates(
+    img: &ColorImage,
+    candidates: &[SmartCandidate],
+) -> Result<Vec<CandidateReport>, Error> {
     // Trial at reduced resolution; scale pixel-unit params accordingly.
     let test_scale = (TEST_MAX_SIDE as f64 / img.width.max(img.height) as f64).min(1.0);
     let test_img = downsample(img, TEST_MAX_SIDE);
@@ -963,8 +1046,17 @@ fn trial_candidates(img: &ColorImage, candidates: &[SmartCandidate]) -> Result<V
 
 /// Build the final decision from scored reports. `scope` carries the family
 /// id when the search was restricted to one preset family.
-fn decision_from(stats: ImageStats, mut reports: Vec<CandidateReport>, scope: Option<&str>, t0: Instant) -> SmartDecision {
-    reports.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+fn decision_from(
+    stats: ImageStats,
+    mut reports: Vec<CandidateReport>,
+    scope: Option<&str>,
+    t0: Instant,
+) -> SmartDecision {
+    reports.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // The preset baseline report (for the UI comparison), if present.
     let baseline_idx = reports.iter().position(|r| r.is_baseline);
@@ -1047,12 +1139,13 @@ pub fn recommend_for(img: &ColorImage, family: &str) -> Result<SmartDecision, Er
         );
     }
     if candidates.is_empty() {
-        return Err(Error::Config(format!("no smart candidates for family {family_id}")));
+        return Err(Error::Config(format!(
+            "no smart candidates for family {family_id}"
+        )));
     }
     let reports = trial_candidates(img, &candidates)?;
     Ok(decision_from(stats, reports, Some(family_id), t0))
 }
-
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
@@ -1060,7 +1153,11 @@ pub fn recommend_for(img: &ColorImage, family: &str) -> Result<SmartDecision, Er
 mod tests {
     use super::*;
 
-    fn make_image(w: usize, h: usize, mut f: impl FnMut(usize, usize) -> (u8, u8, u8)) -> ColorImage {
+    fn make_image(
+        w: usize,
+        h: usize,
+        mut f: impl FnMut(usize, usize) -> (u8, u8, u8),
+    ) -> ColorImage {
         let mut pixels = Vec::with_capacity(w * h * 4);
         for y in 0..h {
             for x in 0..w {
@@ -1068,7 +1165,11 @@ mod tests {
                 pixels.extend_from_slice(&[r, g, b, 255]);
             }
         }
-        ColorImage { pixels, width: w, height: h }
+        ColorImage {
+            pixels,
+            width: w,
+            height: h,
+        }
     }
 
     /// Left half black, right half white.
@@ -1125,8 +1226,16 @@ mod tests {
     fn analyze_two_tone_detects_bimodality() {
         let stats = analyze_image(&two_tone(256, 256));
         assert!(stats.bimodality > 0.5, "bimodality = {}", stats.bimodality);
-        assert!(stats.colorfulness < 10.0, "colorfulness = {}", stats.colorfulness);
-        assert!(stats.effective_colors <= 4, "colors = {}", stats.effective_colors);
+        assert!(
+            stats.colorfulness < 10.0,
+            "colorfulness = {}",
+            stats.colorfulness
+        );
+        assert!(
+            stats.effective_colors <= 4,
+            "colors = {}",
+            stats.effective_colors
+        );
         assert!((stats.otsu_threshold as i32 - 128).abs() < 40);
     }
 
@@ -1140,7 +1249,11 @@ mod tests {
             (v, v, v)
         }));
         assert!(stats.bimodality > 0.45, "bimodality = {}", stats.bimodality);
-        assert!(stats.colorfulness < 10.0, "colorfulness = {}", stats.colorfulness);
+        assert!(
+            stats.colorfulness < 10.0,
+            "colorfulness = {}",
+            stats.colorfulness
+        );
         let c = candidate_params(&stats);
         assert_eq!(c[0].family, "lineArt");
     }
@@ -1165,7 +1278,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn candidates_two_tone_prefers_line_art() {
         let stats = analyze_image(&two_tone(256, 256));
@@ -1186,15 +1298,19 @@ mod tests {
     fn candidates_photo_like_includes_photo() {
         let stats = analyze_image(&photo_like(256, 256));
         let c = candidate_params(&stats);
-        assert!(c.iter().any(|x| x.family == "photo" || x.family == "gradient"));
+        assert!(c
+            .iter()
+            .any(|x| x.family == "photo" || x.family == "gradient"));
     }
 
     #[test]
     fn scale_params_scales_pixel_units() {
-        let mut p = SmartParams::default();
-        p.filter_speckle = 8;
-        p.length_threshold = 4.0;
-        p.binary_adaptive_window = 64;
+        let p = SmartParams {
+            filter_speckle: 8,
+            length_threshold: 4.0,
+            binary_adaptive_window: 64,
+            ..Default::default()
+        };
         let s = scale_params(&p, 0.5);
         assert_eq!(s.filter_speckle, 4);
         assert!((s.length_threshold - 2.0).abs() < 1e-9);
@@ -1264,7 +1380,9 @@ mod tests {
         let stats = analyze_image(&two_tone(256, 256));
         // lineArt: binary clustering + line-art flag in every candidate.
         let la = family_candidates(&stats, "lineArt");
-        assert!(la.iter().all(|c| c.params.clustering == "binary" && c.params.line_art));
+        assert!(la
+            .iter()
+            .all(|c| c.params.clustering == "binary" && c.params.line_art));
         // lowPoly: polygon fit in every candidate.
         let lp = family_candidates(&stats, "lowPoly");
         assert!(lp.iter().all(|c| c.params.mode == "polygon"));
@@ -1359,7 +1477,10 @@ mod tests {
         let preset = decision.preset.as_ref().expect("preset report present");
         assert!(preset.is_baseline);
         // The applied winner is one of the trial candidates.
-        assert!(decision.candidates.iter().any(|c| c.params == decision.params));
+        assert!(decision
+            .candidates
+            .iter()
+            .any(|c| c.params == decision.params));
     }
 
     #[test]
@@ -1385,4 +1506,3 @@ mod tests {
         }
     }
 }
-

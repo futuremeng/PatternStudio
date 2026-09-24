@@ -1,10 +1,10 @@
 //! Custom Frontend: MaskFrontend with background removal.
 
+use visioncortex::Color;
 use vtracer::error::Error;
 use vtracer::frontend::ColorClusterFrontend;
 use vtracer::ir::Segmentation;
 use vtracer::ColorImage;
-use visioncortex::Color;
 
 /// Frontend that removes background before color-cluster segmentation.
 pub struct MaskFrontend {

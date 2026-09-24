@@ -1,9 +1,5 @@
 //! Tauri commands: in-process access to the tracing engine.
 
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
 use patternstudio_core::ir::LayeredDoc;
 use patternstudio_core::profiles::{apply_profiles, AutoDecision, IdealParams};
 use patternstudio_core::{key_for_source, LayerAssignment, SessionCache};
@@ -11,6 +7,10 @@ use patternstudio_patterns::{generate_sized, list_kinds};
 use patternstudio_svg::LayeredWriter;
 use patternstudio_tracer::{load_image, load_image_from_memory};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{Emitter, Manager};
 use vtracer::config::{Clustering, FitMode, Hierarchical, Preset};
 use vtracer::progress::CancelToken;
@@ -125,9 +125,15 @@ fn build_vtracer_config(params: &TraceParams) -> Result<vtracer::Config, String>
             _ => Hierarchical::Stacked,
         };
     }
-    if let Some(v) = params.color_precision { config.color_precision = v as i32; }
-    if let Some(v) = params.layer_difference { config.layer_difference = v as i32; }
-    if let Some(v) = params.filter_speckle { config.filter_speckle = v as usize; }
+    if let Some(v) = params.color_precision {
+        config.color_precision = v as i32;
+    }
+    if let Some(v) = params.layer_difference {
+        config.layer_difference = v as i32;
+    }
+    if let Some(v) = params.filter_speckle {
+        config.filter_speckle = v as usize;
+    }
     if let Some(ref m) = params.mode {
         config.mode = match m.as_str() {
             "pixel" => FitMode::Pixel,
@@ -135,22 +141,40 @@ fn build_vtracer_config(params: &TraceParams) -> Result<vtracer::Config, String>
             _ => FitMode::Spline,
         };
     }
-    if let Some(v) = params.simplify { config.simplify = Some(v); }
-    if let Some(v) = params.path_precision { config.path_precision = Some(v as u32); }
+    if let Some(v) = params.simplify {
+        config.simplify = Some(v);
+    }
+    if let Some(v) = params.path_precision {
+        config.path_precision = Some(v as u32);
+    }
     if let Some(v) = params.max_colors {
         config.max_colors = Some(v);
     }
     config.binary_adaptive = params.binary_adaptive;
-    if let Some(v) = params.binary_threshold { config.binary_threshold = v; }
-    if let Some(v) = params.watershed_detail { config.watershed_detail = v; }
+    if let Some(v) = params.binary_threshold {
+        config.binary_threshold = v;
+    }
+    if let Some(v) = params.watershed_detail {
+        config.watershed_detail = v;
+    }
     if let Some(ref p) = params.palette {
         config.palette = patternstudio_tracer::parse_palette(p)?;
     }
-    if let Some(v) = params.corner_threshold { config.corner_threshold = v; }
-    if let Some(v) = params.length_threshold { config.length_threshold = v; }
-    if let Some(v) = params.optimize { config.optimize = v; }
-    if let Some(v) = params.binary_adaptive_t { config.binary_adaptive_t = v; }
-    if let Some(v) = params.binary_adaptive_window { config.binary_adaptive_window = v; }
+    if let Some(v) = params.corner_threshold {
+        config.corner_threshold = v;
+    }
+    if let Some(v) = params.length_threshold {
+        config.length_threshold = v;
+    }
+    if let Some(v) = params.optimize {
+        config.optimize = v;
+    }
+    if let Some(v) = params.binary_adaptive_t {
+        config.binary_adaptive_t = v;
+    }
+    if let Some(v) = params.binary_adaptive_window {
+        config.binary_adaptive_window = v;
+    }
     Ok(config)
 }
 
@@ -166,7 +190,9 @@ fn trace_bytes_internal(data: &[u8], params: &TraceParams) -> Result<TraceOut, S
 /// Convert a smart-recommended parameter set into the command's `TraceParams`.
 /// Both structs use camelCase with identical field names, so a JSON round-trip
 /// is a safe, field-agnostic mapping.
-fn smart_to_trace_params(p: &patternstudio_core::smart::SmartParams) -> Result<TraceParams, String> {
+fn smart_to_trace_params(
+    p: &patternstudio_core::smart::SmartParams,
+) -> Result<TraceParams, String> {
     let v = serde_json::to_value(p).map_err(|e| e.to_string())?;
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
@@ -174,7 +200,10 @@ fn smart_to_trace_params(p: &patternstudio_core::smart::SmartParams) -> Result<T
 /// Smart trace of in-memory image bytes: analyze, trial-trace candidate
 /// parameter sets, then trace with the winner. `family` restricts the search
 /// to one preset family (absent = auto). Returns the result plus the decision.
-fn trace_bytes_smart(data: &[u8], family: Option<&str>) -> Result<(TraceOut, patternstudio_core::smart::SmartDecision), String> {
+fn trace_bytes_smart(
+    data: &[u8],
+    family: Option<&str>,
+) -> Result<(TraceOut, patternstudio_core::smart::SmartDecision), String> {
     let img = load_image_from_memory(data).map_err(|e| format!("failed to decode image: {e}"))?;
     let decision = match family {
         Some(f) => patternstudio_core::smart::recommend_for(&img, f),
@@ -194,15 +223,25 @@ fn trace_bytes_smart(data: &[u8], family: Option<&str>) -> Result<(TraceOut, pat
 /// parameters are unchanged and only re-runs the cheap downstream stages — the
 /// core of the interactive tuning loop. Split out from the one-shot path so the
 /// `trace_file` command can drive a cached session.
-fn trace_with_session(session: &mut Session, config: &vtracer::Config, params: &TraceParams, cancel: &CancelToken) -> Result<TraceOut, String> {
+fn trace_with_session(
+    session: &mut Session,
+    config: &vtracer::Config,
+    params: &TraceParams,
+    cancel: &CancelToken,
+) -> Result<TraceOut, String> {
     let mut on_progress = |_p: vtracer::progress::Progress| {};
-    let doc = session.render_with_progress(config, cancel, &mut on_progress)
-        .map_err(|e| if matches!(e, vtracer::Error::Cancelled) {
-            "cancelled".into()
-        } else {
-            e.to_string()
+    let doc = session
+        .render_with_progress(config, cancel, &mut on_progress)
+        .map_err(|e| {
+            if matches!(e, vtracer::Error::Cancelled) {
+                "cancelled".into()
+            } else {
+                e.to_string()
+            }
         })?;
-    if cancel.is_cancelled() { return Err("cancelled".into()); }
+    if cancel.is_cancelled() {
+        return Err("cancelled".into());
+    }
 
     // "auto": derive the strategy + multi-level profiles from the ideal params.
     let is_auto = params.layer_strategy.as_deref() == Some("auto");
@@ -247,7 +286,9 @@ fn trace_with_session(session: &mut Session, config: &vtracer::Config, params: &
         };
         (assignment, None)
     };
-    if cancel.is_cancelled() { return Err("cancelled".into()); }
+    if cancel.is_cancelled() {
+        return Err("cancelled".into());
+    }
     let mut layered = LayeredDoc::from_vector_doc(&doc, &assignment);
     let mut profile_ms: Option<u64> = None;
     if is_auto {
@@ -291,14 +332,16 @@ fn trace_with_session(session: &mut Session, config: &vtracer::Config, params: &
 /// Smart Preset: analyze the image and trial-trace candidate parameter sets,
 /// returning the best one plus the full candidate report.
 #[tauri::command]
-pub async fn smart_file(path: String, family: Option<String>) -> Result<patternstudio_core::smart::SmartDecision, String> {
+pub async fn smart_file(
+    path: String,
+    family: Option<String>,
+) -> Result<patternstudio_core::smart::SmartDecision, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let p = Path::new(&path);
         if !p.exists() {
             return Err(format!("image not found: {path}"));
         }
-        let image = load_image(p)
-            .map_err(|e| format!("failed to load image: {e}"))?;
+        let image = load_image(p).map_err(|e| format!("failed to load image: {e}"))?;
         // Family-scoped when the client picked a preset, auto otherwise.
         let decision = match family.as_deref() {
             Some(f) => patternstudio_core::smart::recommend_for(&image, f),
@@ -375,10 +418,13 @@ pub async fn trace_file(
             Some(old) => old.cancel.cancel(),
             None => {}
         }
-        active.insert(image_key.clone(), ActiveTrace {
-            request_id: request_id.clone(),
-            cancel: cancel.clone(),
-        });
+        active.insert(
+            image_key.clone(),
+            ActiveTrace {
+                request_id: request_id.clone(),
+                cancel: cancel.clone(),
+            },
+        );
     }
 
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -414,7 +460,10 @@ pub async fn trace_file(
     // Drop our registration only if we are still the current trace for this image.
     {
         let mut active = active_traces().lock().unwrap();
-        if active.get(&image_key).is_some_and(|a| a.request_id == request_id) {
+        if active
+            .get(&image_key)
+            .is_some_and(|a| a.request_id == request_id)
+        {
             active.remove(&image_key);
         }
     }
@@ -554,11 +603,13 @@ pub async fn preprocess_file(
 ) -> Result<serde_json::Value, String> {
     let resource_dir = app.path().resource_dir().ok();
     let out = tauri::async_runtime::spawn_blocking(move || {
-        patternstudio_tracer::preprocess_image(std::path::Path::new(&file_path), resource_dir.as_deref())
+        patternstudio_tracer::preprocess_image(
+            std::path::Path::new(&file_path),
+            resource_dir.as_deref(),
+        )
     })
     .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e)?;
+    .map_err(|e| e.to_string())??;
     Ok(serde_json::json!({
         "path": out.path,
         "width": out.width,
@@ -602,9 +653,15 @@ pub struct PatternParams {
     pub size: u32,
 }
 
-fn default_n_units() -> u32 { 8 }
-fn default_complexity() -> u8 { 50 }
-fn default_size() -> u32 { 400 }
+fn default_n_units() -> u32 {
+    8
+}
+fn default_complexity() -> u8 {
+    50
+}
+fn default_size() -> u32 {
+    400
+}
 
 fn batch_cancel_flags() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     static FLAGS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
@@ -655,42 +712,54 @@ pub async fn batch_trace(
     image_files.sort_by(|a, b| a.0.cmp(&b.0));
 
     let cancelled = Arc::new(AtomicBool::new(false));
-    batch_cancel_flags().lock().unwrap().insert(job_id.clone(), cancelled.clone());
+    batch_cancel_flags()
+        .lock()
+        .unwrap()
+        .insert(job_id.clone(), cancelled.clone());
     let job_id_cleanup = job_id.clone();
 
     tauri::async_runtime::spawn(async move {
         let start = std::time::Instant::now();
         let total = image_files.len();
 
-        let _ = app.emit("batch-trace", serde_json::json!({
-            "type": "start",
-            "total": total,
-            "files": image_files.iter().map(|f| f.0.clone()).collect::<Vec<_>>(),
-        }));
+        let _ = app.emit(
+            "batch-trace",
+            serde_json::json!({
+                "type": "start",
+                "total": total,
+                "files": image_files.iter().map(|f| f.0.clone()).collect::<Vec<_>>(),
+            }),
+        );
 
         let mut success = 0usize;
         let mut failed = 0usize;
 
         for (i, (name, file_path)) in image_files.iter().enumerate() {
             if cancelled.load(Ordering::SeqCst) {
-                let _ = app.emit("batch-trace", serde_json::json!({
-                    "type": "cancelled",
-                    "index": i,
-                    "total": total,
-                    "success": success,
-                    "failed": failed,
-                    "total_elapsed_ms": start.elapsed().as_millis() as u64,
-                }));
+                let _ = app.emit(
+                    "batch-trace",
+                    serde_json::json!({
+                        "type": "cancelled",
+                        "index": i,
+                        "total": total,
+                        "success": success,
+                        "failed": failed,
+                        "total_elapsed_ms": start.elapsed().as_millis() as u64,
+                    }),
+                );
                 break;
             }
             let elapsed = start.elapsed().as_millis() as u64;
-            let _ = app.emit("batch-trace", serde_json::json!({
-                "type": "processing",
-                "index": i,
-                "total": total,
-                "file": name,
-                "elapsed_ms": elapsed,
-            }));
+            let _ = app.emit(
+                "batch-trace",
+                serde_json::json!({
+                    "type": "processing",
+                    "index": i,
+                    "total": total,
+                    "file": name,
+                    "elapsed_ms": elapsed,
+                }),
+            );
 
             let file_path = file_path.clone();
             let params_clone = params.clone();
@@ -712,48 +781,59 @@ pub async fn batch_trace(
             match result {
                 Ok((out, decision)) => {
                     success += 1;
-                    let smart_info = decision.as_ref().map(|d| serde_json::json!({
-                        "family": d.family,
-                        "reasonKey": d.reason_key,
-                        "params": d.params,
-                    }));
-                    let _ = app.emit("batch-trace", serde_json::json!({
-                        "type": "done",
-                        "index": i,
-                        "total": total,
-                        "file": name,
-                        "svg": out.svg,
-                        "width": out.width,
-                        "height": out.height,
-                        "shapeCount": out.shape_count,
-                        "layers": out.layers,
-                        "strategyInfo": out.strategy_info,
-                        "smart": smart_info,
-                        "elapsed_ms": elapsed,
-                    }));
+                    let smart_info = decision.as_ref().map(|d| {
+                        serde_json::json!({
+                            "family": d.family,
+                            "reasonKey": d.reason_key,
+                            "params": d.params,
+                        })
+                    });
+                    let _ = app.emit(
+                        "batch-trace",
+                        serde_json::json!({
+                            "type": "done",
+                            "index": i,
+                            "total": total,
+                            "file": name,
+                            "svg": out.svg,
+                            "width": out.width,
+                            "height": out.height,
+                            "shapeCount": out.shape_count,
+                            "layers": out.layers,
+                            "strategyInfo": out.strategy_info,
+                            "smart": smart_info,
+                            "elapsed_ms": elapsed,
+                        }),
+                    );
                 }
                 Err(e) => {
                     failed += 1;
-                    let _ = app.emit("batch-trace", serde_json::json!({
-                        "type": "error",
-                        "index": i,
-                        "total": total,
-                        "file": name,
-                        "error": e,
-                        "elapsed_ms": elapsed,
-                    }));
+                    let _ = app.emit(
+                        "batch-trace",
+                        serde_json::json!({
+                            "type": "error",
+                            "index": i,
+                            "total": total,
+                            "file": name,
+                            "error": e,
+                            "elapsed_ms": elapsed,
+                        }),
+                    );
                 }
             }
         }
 
         if !cancelled.load(Ordering::SeqCst) {
-            let _ = app.emit("batch-trace", serde_json::json!({
-                "type": "complete",
-                "total": total,
-                "success": success,
-                "failed": failed,
-                "total_elapsed_ms": start.elapsed().as_millis() as u64,
-            }));
+            let _ = app.emit(
+                "batch-trace",
+                serde_json::json!({
+                    "type": "complete",
+                    "total": total,
+                    "success": success,
+                    "failed": failed,
+                    "total_elapsed_ms": start.elapsed().as_millis() as u64,
+                }),
+            );
         }
         batch_cancel_flags().lock().unwrap().remove(&job_id_cleanup);
     });

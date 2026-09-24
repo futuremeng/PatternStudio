@@ -15,7 +15,9 @@ use pyo3::prelude::*;
 use vtracer::config::Preset;
 use vtracer::ColorImage;
 
-use patternstudio_core::{LayerAssignment, PatternStudioConfig, PatternStudioPipeline, Resolution, Simplify};
+use patternstudio_core::{
+    LayerAssignment, PatternStudioConfig, PatternStudioPipeline, Resolution, Simplify,
+};
 use patternstudio_patterns::{generate_sized, list_kinds};
 use patternstudio_svg::LayeredWriter;
 use patternstudio_tracer::{load_image, load_image_from_memory};
@@ -67,8 +69,8 @@ fn run_trace(
     config.resolution = parse_resolution(resolution)?;
     config.simplify = parse_simplify(simplify)?;
 
-    let pipeline = PatternStudioPipeline::new(&config)
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let pipeline =
+        PatternStudioPipeline::new(&config).map_err(|e| PyValueError::new_err(e.to_string()))?;
 
     let doc = if layers > 0 {
         pipeline
@@ -198,11 +200,13 @@ mod tests {
         img.put_pixel(0, 1, image::Rgba([0, 0, 255, 255]));
         img.put_pixel(1, 1, image::Rgba([255, 0, 0, 255]));
         let mut bytes = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
-            .unwrap();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
 
         let svg = trace_bytes(&bytes, "poster", "medium", "low", 2).unwrap();
         assert!(svg.contains("<svg"));
     }
 }
-

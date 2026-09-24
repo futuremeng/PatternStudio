@@ -17,13 +17,13 @@
 //! L2 keeps full coordinate precision and removes redundant segments only.
 
 use serde::{Deserialize, Serialize};
+use visioncortex::PointF64;
 use vtracer::fitter::FittedGeom;
 use vtracer::ir::{MultiPath, PathCmd, SubPath, VectorDoc};
 use vtracer::optimize::{CleanupPass, OptimizerPass, QuantizePass};
 use vtracer::simplify::{CurvePass, SimplifyCurves};
-use visioncortex::PointF64;
 
-use crate::ir::{LayerAssignment, LayeredDoc, LayerRole};
+use crate::ir::{LayerAssignment, LayerRole, LayeredDoc};
 
 /// The user's ideal parameter combination — the quality anchor for auto
 /// layering. Defaults mirror the web editor's `DEFAULT_PARAMS`.
@@ -94,8 +94,12 @@ impl IdealParams {
                 _ => d.clustering,
             },
             line_art,
-            color_precision: color_precision.map(|v| v as i32).unwrap_or(d.color_precision),
-            layer_difference: layer_difference.map(|v| v as i32).unwrap_or(d.layer_difference),
+            color_precision: color_precision
+                .map(|v| v as i32)
+                .unwrap_or(d.color_precision),
+            layer_difference: layer_difference
+                .map(|v| v as i32)
+                .unwrap_or(d.layer_difference),
             max_colors,
             simplify: simplify.unwrap_or(d.simplify),
             path_precision: path_precision.map(|v| v as i32).unwrap_or(d.path_precision),
@@ -124,21 +128,16 @@ impl IdealParams {
 }
 
 /// Per-level parameter profile for one layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProfileLevel {
     /// Coarse: background / base layer — simplified, quantized.
     L0,
     /// Standard: the ideal result, kept verbatim.
+    #[default]
     L1,
     /// Fine: details layer — full precision, redundant segments removed.
     L2,
-}
-
-impl Default for ProfileLevel {
-    fn default() -> Self {
-        ProfileLevel::L1
-    }
 }
 
 impl ProfileLevel {
@@ -202,7 +201,6 @@ impl LayerProfile {
     }
 }
 
-
 /// Outcome of the automatic strategy decision. The frontend translates
 /// `reason_key` (plus `distinct_colors` / `detail_budget`) into the
 /// human-readable reason shown in the UI.
@@ -227,7 +225,7 @@ impl AutoDecision {
     pub fn decide(c: usize, ideal: &IdealParams) -> Self {
         let budget = ideal.detail_budget();
         let binary = ideal.clustering == "binary" || ideal.line_art;
-        let threshold = (70 + (40 - budget) as i32 / 2).clamp(10, 90) as u8;
+        let threshold = (70 + (40 - budget) / 2).clamp(10, 90) as u8;
 
         if binary {
             if budget >= 70 {
@@ -236,16 +234,18 @@ impl AutoDecision {
                     layers: 4,
                     complexity_threshold: threshold,
                     reason_key: "binaryComplexity".into(),
-                distinct_colors: 1,
-                detail_budget: budget,                };
+                    distinct_colors: 1,
+                    detail_budget: budget,
+                };
             }
             return Self {
                 strategy: "none".into(),
                 layers: 1,
                 complexity_threshold: threshold,
                 reason_key: "binarySingle".into(),
-            distinct_colors: 1,
-            detail_budget: budget,            };
+                distinct_colors: 1,
+                detail_budget: budget,
+            };
         }
 
         if c <= 1 {
@@ -255,7 +255,8 @@ impl AutoDecision {
                 complexity_threshold: threshold,
                 reason_key: "singleColor".into(),
                 distinct_colors: c,
-                detail_budget: budget,            };
+                detail_budget: budget,
+            };
         }
 
         if c <= 4 {
@@ -266,7 +267,8 @@ impl AutoDecision {
                     complexity_threshold: threshold,
                     reason_key: "fewHybrid".into(),
                     distinct_colors: c,
-                    detail_budget: budget,                };
+                    detail_budget: budget,
+                };
             }
             return Self {
                 strategy: "color".into(),
@@ -365,7 +367,6 @@ impl AutoDecision {
         assignment
     }
 }
-
 
 /// Apply the per-layer parameter profiles to a layered doc, in place.
 ///
@@ -529,7 +530,6 @@ fn polyline_to_subpath(points: Vec<PointF64>) -> SubPath {
     sub
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,7 +541,8 @@ mod tests {
     fn cubic_shape() -> vtracer::ir::Shape {
         // A rounded square as 16 collinear cubic segments (4 per side).
         let mut sub = SubPath::new();
-        sub.commands.push(PathCmd::MoveTo(PointF64 { x: 0.0, y: 0.0 }));
+        sub.commands
+            .push(PathCmd::MoveTo(PointF64 { x: 0.0, y: 0.0 }));
         for (x, y) in [
             (10.0, 0.0),
             (20.0, 0.0),
@@ -569,7 +570,9 @@ mod tests {
         sub.commands.push(PathCmd::Close);
         vtracer::ir::Shape {
             paint: vtracer::ir::Paint::Solid(visioncortex::Color::new(10, 20, 30)),
-            path: MultiPath { subpaths: vec![sub] },
+            path: MultiPath {
+                subpaths: vec![sub],
+            },
         }
     }
 
@@ -661,30 +664,42 @@ mod tests {
         assert!(t_detail < t_coarse, "{t_detail} should be < {t_coarse}");
     }
 
-
     #[test]
     fn auto_assign_stamps_profiles_by_role() {
         let mut doc = VectorDoc::new(100, 100);
         // Two simple shapes of the dominant color + one complex other color.
         for _ in 0..2 {
             let mut sub = SubPath::new();
-            sub.commands.push(PathCmd::MoveTo(PointF64 { x: 0.0, y: 0.0 }));
-            sub.commands.push(PathCmd::LineTo(PointF64 { x: 10.0, y: 0.0 }));
-            sub.commands.push(PathCmd::LineTo(PointF64 { x: 10.0, y: 10.0 }));
+            sub.commands
+                .push(PathCmd::MoveTo(PointF64 { x: 0.0, y: 0.0 }));
+            sub.commands
+                .push(PathCmd::LineTo(PointF64 { x: 10.0, y: 0.0 }));
+            sub.commands
+                .push(PathCmd::LineTo(PointF64 { x: 10.0, y: 10.0 }));
             sub.commands.push(PathCmd::Close);
             doc.shapes.push(vtracer::ir::Shape {
                 paint: vtracer::ir::Paint::Solid(visioncortex::Color::new(255, 255, 255)),
-                path: MultiPath { subpaths: vec![sub] },
+                path: MultiPath {
+                    subpaths: vec![sub],
+                },
             });
         }
         let mut complex = SubPath::new();
         for i in 0..30 {
-            complex.commands.push(PathCmd::MoveTo(PointF64 { x: i as f64, y: 0.0 }));
-            complex.commands.push(PathCmd::LineTo(PointF64 { x: i as f64, y: 1.0 }));
+            complex.commands.push(PathCmd::MoveTo(PointF64 {
+                x: i as f64,
+                y: 0.0,
+            }));
+            complex.commands.push(PathCmd::LineTo(PointF64 {
+                x: i as f64,
+                y: 1.0,
+            }));
         }
         doc.shapes.push(vtracer::ir::Shape {
             paint: vtracer::ir::Paint::Solid(visioncortex::Color::new(50, 50, 50)),
-            path: MultiPath { subpaths: vec![complex] },
+            path: MultiPath {
+                subpaths: vec![complex],
+            },
         });
 
         let (assignment, decision) = AutoDecision::assign(&doc, &detail_hungry());
@@ -712,7 +727,10 @@ mod tests {
         let mut shape = shape;
         refine_shape(&mut shape, &profiles[0]);
         let after = cmd_count(&shape);
-        assert!(after < before, "L0 should reduce commands: {before} -> {after}");
+        assert!(
+            after < before,
+            "L0 should reduce commands: {before} -> {after}"
+        );
     }
 
     #[test]
@@ -760,12 +778,15 @@ mod tests {
         let mut sub = SubPath::new();
         sub.commands.push(PathCmd::MoveTo(PointF64 { x, y }));
         sub.commands.push(PathCmd::LineTo(PointF64 { x: x + w, y }));
-        sub.commands.push(PathCmd::LineTo(PointF64 { x: x + w, y: y + h }));
+        sub.commands
+            .push(PathCmd::LineTo(PointF64 { x: x + w, y: y + h }));
         sub.commands.push(PathCmd::LineTo(PointF64 { x, y: y + h }));
         sub.commands.push(PathCmd::Close);
         vtracer::ir::Shape {
             paint: vtracer::ir::Paint::Solid(visioncortex::Color::new(0, 0, 0)),
-            path: vtracer::ir::MultiPath { subpaths: vec![sub] },
+            path: vtracer::ir::MultiPath {
+                subpaths: vec![sub],
+            },
         }
     }
 
@@ -814,4 +835,3 @@ mod tests {
         assert_eq!(assignment.layers.len(), 1);
     }
 }
-

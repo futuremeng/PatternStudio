@@ -13,7 +13,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::stream::{Stream, StreamExt};
 use patternstudio_core::ir::LayeredDoc;
-use patternstudio_core::profiles::{AutoDecision, IdealParams, apply_profiles};
+use patternstudio_core::profiles::{apply_profiles, AutoDecision, IdealParams};
 use patternstudio_core::smart::SmartDecision;
 use patternstudio_core::{key_for_source, LayerAssignment, SessionCache};
 use patternstudio_svg::LayeredWriter;
@@ -92,7 +92,9 @@ fn load_projects(file: &Path) -> HashMap<String, Project> {
 }
 
 fn save_projects(file: &Path, projects: &HashMap<String, Project>) {
-    let pf = ProjectsFile { projects: projects.values().cloned().collect() };
+    let pf = ProjectsFile {
+        projects: projects.values().cloned().collect(),
+    };
     if let Ok(json) = serde_json::to_string_pretty(&pf) {
         let _ = std::fs::write(file, json);
     }
@@ -149,7 +151,9 @@ struct TraceParams {
     complexity_threshold: Option<u8>,
 }
 
-fn default_preset() -> String { "poster".into() }
+fn default_preset() -> String {
+    "poster".into()
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -200,9 +204,15 @@ fn build_vtracer_config(params: &TraceParams) -> Result<vtracer::Config, String>
             _ => Hierarchical::Stacked,
         };
     }
-    if let Some(v) = params.color_precision { config.color_precision = v as i32; }
-    if let Some(v) = params.layer_difference { config.layer_difference = v as i32; }
-    if let Some(v) = params.filter_speckle { config.filter_speckle = v as usize; }
+    if let Some(v) = params.color_precision {
+        config.color_precision = v as i32;
+    }
+    if let Some(v) = params.layer_difference {
+        config.layer_difference = v as i32;
+    }
+    if let Some(v) = params.filter_speckle {
+        config.filter_speckle = v as usize;
+    }
     if let Some(ref m) = params.mode {
         config.mode = match m.as_str() {
             "pixel" => FitMode::Pixel,
@@ -210,20 +220,40 @@ fn build_vtracer_config(params: &TraceParams) -> Result<vtracer::Config, String>
             _ => FitMode::Spline,
         };
     }
-    if let Some(v) = params.simplify { config.simplify = Some(v); }
-    if let Some(v) = params.path_precision { config.path_precision = Some(v as u32); }
-    if let Some(v) = params.max_colors { config.max_colors = Some(v); }
+    if let Some(v) = params.simplify {
+        config.simplify = Some(v);
+    }
+    if let Some(v) = params.path_precision {
+        config.path_precision = Some(v as u32);
+    }
+    if let Some(v) = params.max_colors {
+        config.max_colors = Some(v);
+    }
     config.binary_adaptive = params.binary_adaptive;
-    if let Some(v) = params.binary_threshold { config.binary_threshold = v; }
-    if let Some(v) = params.watershed_detail { config.watershed_detail = v; }
+    if let Some(v) = params.binary_threshold {
+        config.binary_threshold = v;
+    }
+    if let Some(v) = params.watershed_detail {
+        config.watershed_detail = v;
+    }
     if let Some(ref p) = params.palette {
         config.palette = patternstudio_tracer::parse_palette(p)?;
     }
-    if let Some(v) = params.corner_threshold { config.corner_threshold = v; }
-    if let Some(v) = params.length_threshold { config.length_threshold = v; }
-    if let Some(v) = params.optimize { config.optimize = v; }
-    if let Some(v) = params.binary_adaptive_t { config.binary_adaptive_t = v; }
-    if let Some(v) = params.binary_adaptive_window { config.binary_adaptive_window = v; }
+    if let Some(v) = params.corner_threshold {
+        config.corner_threshold = v;
+    }
+    if let Some(v) = params.length_threshold {
+        config.length_threshold = v;
+    }
+    if let Some(v) = params.optimize {
+        config.optimize = v;
+    }
+    if let Some(v) = params.binary_adaptive_t {
+        config.binary_adaptive_t = v;
+    }
+    if let Some(v) = params.binary_adaptive_window {
+        config.binary_adaptive_window = v;
+    }
     Ok(config)
 }
 
@@ -239,7 +269,9 @@ fn do_trace(img_path: &Path, params: &TraceParams) -> Result<TraceResult, String
 /// Convert a smart-recommended parameter set into the API's `TraceParams`.
 /// Both structs use camelCase with identical field names, so a JSON round-trip
 /// is a safe, field-agnostic mapping.
-fn smart_to_trace_params(p: &patternstudio_core::smart::SmartParams) -> Result<TraceParams, String> {
+fn smart_to_trace_params(
+    p: &patternstudio_core::smart::SmartParams,
+) -> Result<TraceParams, String> {
     let v = serde_json::to_value(p).map_err(|e| e.to_string())?;
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
@@ -248,7 +280,10 @@ fn smart_to_trace_params(p: &patternstudio_core::smart::SmartParams) -> Result<T
 /// candidate parameter sets, then trace at full resolution with the winner.
 /// `family` restricts the search to one preset family (absent = auto).
 /// Returns the trace result plus the decision (family, reason, params).
-fn do_trace_smart(img_path: &Path, family: Option<&str>) -> Result<(TraceResult, patternstudio_core::smart::SmartDecision), String> {
+fn do_trace_smart(
+    img_path: &Path,
+    family: Option<&str>,
+) -> Result<(TraceResult, patternstudio_core::smart::SmartDecision), String> {
     let img = load_image(img_path).map_err(|e| format!("failed to load image: {e}"))?;
     let decision = match family {
         Some(f) => patternstudio_core::smart::recommend_for(&img, f),
@@ -268,15 +303,25 @@ fn do_trace_smart(img_path: &Path, family: Option<&str>) -> Result<(TraceResult,
 /// parameters are unchanged and only re-runs the cheap downstream stages — the
 /// core of the interactive tuning loop. Split out from the one-shot path so the
 /// `/trace` handler can drive a cached session.
-fn do_trace_with_session(session: &mut Session, config: &vtracer::Config, params: &TraceParams, cancel: &CancelToken) -> Result<TraceResult, String> {
+fn do_trace_with_session(
+    session: &mut Session,
+    config: &vtracer::Config,
+    params: &TraceParams,
+    cancel: &CancelToken,
+) -> Result<TraceResult, String> {
     let mut on_progress = |_p: vtracer::progress::Progress| {};
-    let doc = session.render_with_progress(config, cancel, &mut on_progress)
-        .map_err(|e| if matches!(e, vtracer::Error::Cancelled) {
-            "cancelled".into()
-        } else {
-            format!("trace failed: {e}")
+    let doc = session
+        .render_with_progress(config, cancel, &mut on_progress)
+        .map_err(|e| {
+            if matches!(e, vtracer::Error::Cancelled) {
+                "cancelled".into()
+            } else {
+                format!("trace failed: {e}")
+            }
         })?;
-    if cancel.is_cancelled() { return Err("cancelled".into()); }
+    if cancel.is_cancelled() {
+        return Err("cancelled".into());
+    }
 
     // "auto": derive the strategy + multi-level profiles from the ideal params.
     let is_auto = params.layer_strategy.as_deref() == Some("auto");
@@ -321,7 +366,9 @@ fn do_trace_with_session(session: &mut Session, config: &vtracer::Config, params
         };
         (assignment, None)
     };
-    if cancel.is_cancelled() { return Err("cancelled".into()); }
+    if cancel.is_cancelled() {
+        return Err("cancelled".into());
+    }
     let mut layered = LayeredDoc::from_vector_doc(&doc, &assignment);
     let mut profile_ms: Option<u64> = None;
     if is_auto {
@@ -334,7 +381,10 @@ fn do_trace_with_session(session: &mut Session, config: &vtracer::Config, params
     } else {
         LayeredWriter::write(&layered)
     };
-    let layers: Vec<LayerInfo> = layered.layers.iter().enumerate()
+    let layers: Vec<LayerInfo> = layered
+        .layers
+        .iter()
+        .enumerate()
         .map(|(i, layer)| LayerInfo {
             name: layer.name.clone(),
             role: layer.role.to_string(),
@@ -342,20 +392,31 @@ fn do_trace_with_session(session: &mut Session, config: &vtracer::Config, params
             dominant_color: LayeredWriter::layer_dominant_color(layer),
             preview_svg: LayeredWriter::layer_preview_svg(&layered, i),
             profile: layer.profile.as_str().into(),
-        }).collect();
+        })
+        .collect();
     Ok(TraceResult {
-        svg, width: layered.width, height: layered.height,
-        shape_count: layered.total_shapes(), layer_count: layered.layers.len(), layers,
+        svg,
+        width: layered.width,
+        height: layered.height,
+        shape_count: layered.total_shapes(),
+        layer_count: layered.layers.len(),
+        layers,
         strategy_info: decision,
         profile_ms,
     })
 }
 
 #[derive(Serialize)]
-struct HealthResponse { status: String, version: String }
+struct HealthResponse {
+    status: String,
+    version: String,
+}
 
 async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "ok".into(), version: env!("CARGO_PKG_VERSION").into() })
+    Json(HealthResponse {
+        status: "ok".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
+    })
 }
 
 async fn upload(
@@ -366,7 +427,10 @@ async fn upload(
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("file").to_string();
         if name == "file" {
-            let content = field.bytes().await.map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+            let content = field
+                .bytes()
+                .await
+                .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
             let id = uuid::Uuid::new_v4().to_string();
             let path = state.upload_dir.join(format!("{id}.png"));
             let write_path = path.clone();
@@ -419,10 +483,20 @@ fn resolve_source_path(
     req: &TraceRequest,
 ) -> Result<PathBuf, (StatusCode, String)> {
     if let Some(ref asset_id) = req.asset_id {
-        state.assets.lock().unwrap().get(asset_id).cloned()
+        state
+            .assets
+            .lock()
+            .unwrap()
+            .get(asset_id)
+            .cloned()
             .ok_or((StatusCode::NOT_FOUND, format!("asset {asset_id} not found")))
     } else if let (Some(ref pid), Some(ref name)) = (&req.project_id, &req.filename) {
-        let project = state.projects.lock().unwrap().get(pid).cloned()
+        let project = state
+            .projects
+            .lock()
+            .unwrap()
+            .get(pid)
+            .cloned()
             .ok_or((StatusCode::NOT_FOUND, "project not found".into()))?;
         if name.contains("..") || name.contains('/') || name.contains('\\') {
             return Err((StatusCode::BAD_REQUEST, "invalid filename".into()));
@@ -435,8 +509,10 @@ fn resolve_source_path(
     } else if let Some(ref fp) = req.file_path {
         Ok(PathBuf::from(fp))
     } else {
-        Err((StatusCode::BAD_REQUEST,
-            "asset_id, project_id+filename, or file_path required".into()))
+        Err((
+            StatusCode::BAD_REQUEST,
+            "asset_id, project_id+filename, or file_path required".into(),
+        ))
     }
 }
 
@@ -447,7 +523,10 @@ async fn trace(
     let img_path = resolve_source_path(&state, &req)
         .map_err(|(s, e)| (s, Json(serde_json::json!({ "error": e }))))?;
     let params = req.params.unwrap_or_default();
-    let request_id = req.request_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let request_id = req
+        .request_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let is_background = req.priority.as_deref() == Some("background");
     let image_key = img_path.to_string_lossy().to_string();
     let sessions = state.sessions.clone();
@@ -460,15 +539,21 @@ async fn trace(
         let mut active = state.active_traces.lock().unwrap();
         match active.get(&image_key) {
             Some(old) if is_background => {
-                return Err((StatusCode::CONFLICT, Json(serde_json::json!({ "busy": true }))));
+                return Err((
+                    StatusCode::CONFLICT,
+                    Json(serde_json::json!({ "busy": true })),
+                ));
             }
             Some(old) => old.cancel.cancel(),
             None => {}
         }
-        active.insert(image_key.clone(), ActiveTrace {
-            request_id: request_id.clone(),
-            cancel: cancel.clone(),
-        });
+        active.insert(
+            image_key.clone(),
+            ActiveTrace {
+                request_id: request_id.clone(),
+                cancel: cancel.clone(),
+            },
+        );
     }
 
     let result = tokio::task::spawn_blocking(move || {
@@ -495,22 +580,34 @@ async fn trace(
         do_trace_with_session(&mut guard, &config, &params, &cancel)
     })
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+    })?;
 
     // Drop our registration only if we are still the current trace for this image.
     {
         let mut active = state.active_traces.lock().unwrap();
-        if active.get(&image_key).is_some_and(|a| a.request_id == request_id) {
+        if active
+            .get(&image_key)
+            .is_some_and(|a| a.request_id == request_id)
+        {
             active.remove(&image_key);
         }
     }
 
     match result {
         Ok(r) => Ok(Json(r)),
-        Err(e) if e == "cancelled" => {
-            Err((StatusCode::CONFLICT, Json(serde_json::json!({ "cancelled": true }))))
-        }
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))),
+        Err(e) if e == "cancelled" => Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "cancelled": true })),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e })),
+        )),
     }
 }
 
@@ -523,8 +620,7 @@ async fn smart(
     let img_path = resolve_source_path(&state, &req)?;
     let family = req.family;
     let result = tokio::task::spawn_blocking(move || {
-        let image = load_image(&img_path)
-            .map_err(|e| format!("failed to load image: {e}"))?;
+        let image = load_image(&img_path).map_err(|e| format!("failed to load image: {e}"))?;
         // Family-scoped when the client picked a preset, auto otherwise.
         let decision = match family.as_deref() {
             Some(f) => patternstudio_core::smart::recommend_for(&image, f),
@@ -556,7 +652,11 @@ async fn preprocess(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     let id = uuid::Uuid::new_v4().to_string();
-    state.assets.lock().unwrap().insert(id.clone(), out.path.clone());
+    state
+        .assets
+        .lock()
+        .unwrap()
+        .insert(id.clone(), out.path.clone());
     Ok(Json(serde_json::json!({
         "assetId": id,
         "url": format!("/api/v1/assets/{id}"),
@@ -603,12 +703,20 @@ struct PatternRequest {
     size: u32,
 }
 
-fn default_n_units() -> u32 { 8 }
-fn default_complexity() -> u8 { 50 }
-fn default_size() -> u32 { 400 }
+fn default_n_units() -> u32 {
+    8
+}
+fn default_complexity() -> u8 {
+    50
+}
+fn default_size() -> u32 {
+    400
+}
 
 #[derive(Serialize)]
-struct PatternResponse { svg: String }
+struct PatternResponse {
+    svg: String,
+}
 
 async fn generate_pattern(
     Json(req): Json<PatternRequest>,
@@ -639,7 +747,9 @@ fn list_image_files(folder: &Path) -> Vec<String> {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
-            if IMAGE_EXTS.contains(&ext.as_str()) { files.push(name); }
+            if IMAGE_EXTS.contains(&ext.as_str()) {
+                files.push(name);
+            }
         }
     }
     files.sort();
@@ -647,7 +757,9 @@ fn list_image_files(folder: &Path) -> Vec<String> {
 }
 
 #[derive(Deserialize)]
-struct CreateProjectRequest { path: String }
+struct CreateProjectRequest {
+    path: String,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -675,11 +787,17 @@ async fn create_project(
 ) -> Result<Json<ProjectInfo>, (StatusCode, String)> {
     let path = PathBuf::from(&req.path);
     if !path.is_dir() {
-        return Err((StatusCode::BAD_REQUEST, format!("not a directory: {}", req.path)));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("not a directory: {}", req.path),
+        ));
     }
     let images = list_image_files(&path);
     if images.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "no image files found in directory".into()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "no image files found in directory".into(),
+        ));
     }
     // Check if project already exists (same path)
     {
@@ -689,9 +807,16 @@ async fn create_project(
         }
     }
     let id = uuid::Uuid::new_v4().to_string();
-    let name = path.file_name().map(|n| n.to_string_lossy().to_string())
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "project".into());
-    let project = Project { id: id.clone(), path: path.clone(), name, images };
+    let project = Project {
+        id: id.clone(),
+        path: path.clone(),
+        name,
+        images,
+    };
     let info = project_to_info(&project);
     state.projects.lock().unwrap().insert(id, project);
     save_projects(&state.projects_file, &state.projects.lock().unwrap());
@@ -711,8 +836,13 @@ async fn delete_project(
 }
 
 async fn list_projects(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let projects: Vec<ProjectInfo> = state.projects.lock().unwrap().values()
-        .map(project_to_info).collect();
+    let projects: Vec<ProjectInfo> = state
+        .projects
+        .lock()
+        .unwrap()
+        .values()
+        .map(project_to_info)
+        .collect();
     Json(serde_json::json!({ "projects": projects }))
 }
 
@@ -720,7 +850,12 @@ async fn get_project(
     State(state): State<AppState>,
     UrlPath(id): UrlPath<String>,
 ) -> Result<Json<ProjectInfo>, (StatusCode, String)> {
-    let project = state.projects.lock().unwrap().get(&id).cloned()
+    let project = state
+        .projects
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
         .ok_or((StatusCode::NOT_FOUND, "project not found".into()))?;
     Ok(Json(project_to_info(&project)))
 }
@@ -729,7 +864,12 @@ async fn serve_image(
     State(state): State<AppState>,
     UrlPath((project_id, filename)): UrlPath<(String, String)>,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
-    let project = state.projects.lock().unwrap().get(&project_id).cloned()
+    let project = state
+        .projects
+        .lock()
+        .unwrap()
+        .get(&project_id)
+        .cloned()
         .ok_or((StatusCode::NOT_FOUND, "project not found".into()))?;
     if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
         return Err((StatusCode::BAD_REQUEST, "invalid filename".into()));
@@ -742,7 +882,13 @@ async fn serve_image(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let content_type = match filename.rsplit('.').next().unwrap_or("").to_lowercase().as_str() {
+    let content_type = match filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_lowercase()
+        .as_str()
+    {
         "jpg" | "jpeg" => "image/jpeg",
         "png" => "image/png",
         "webp" => "image/webp",
@@ -777,12 +923,25 @@ async fn save_image(
     if req.filename.contains("..") || req.filename.contains('/') || req.filename.contains('\\') {
         return Err((StatusCode::BAD_REQUEST, "invalid filename".into()));
     }
-    let src = state.assets.lock().unwrap().get(&req.asset_id).cloned()
-        .ok_or((StatusCode::NOT_FOUND, format!("asset {} not found", req.asset_id)))?;
+    let src = state
+        .assets
+        .lock()
+        .unwrap()
+        .get(&req.asset_id)
+        .cloned()
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            format!("asset {} not found", req.asset_id),
+        ))?;
     if !src.exists() {
         return Err((StatusCode::NOT_FOUND, "asset file missing".into()));
     }
-    let project = state.projects.lock().unwrap().get(&id).cloned()
+    let project = state
+        .projects
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
         .ok_or((StatusCode::NOT_FOUND, "project not found".into()))?;
     let dst = project.path.join(&req.filename);
     let src_path = src.clone();
@@ -823,7 +982,12 @@ async fn start_batch_trace(
     UrlPath(project_id): UrlPath<String>,
     Json(req): Json<BatchTraceRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let project = state.projects.lock().unwrap().get(&project_id).cloned()
+    let project = state
+        .projects
+        .lock()
+        .unwrap()
+        .get(&project_id)
+        .cloned()
         .ok_or((StatusCode::NOT_FOUND, "project not found".into()))?;
     let job_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = tokio::sync::mpsc::channel(64);
@@ -842,32 +1006,53 @@ async fn start_batch_trace(
     let smart = req.smart;
     let family = req.family;
     let cancelled = Arc::new(AtomicBool::new(false));
-    state.cancels.lock().unwrap().insert(job_id.clone(), cancelled.clone());
+    state
+        .cancels
+        .lock()
+        .unwrap()
+        .insert(job_id.clone(), cancelled.clone());
     let job_id_cleanup = job_id.clone();
 
     tokio::spawn(async move {
         let start = Instant::now();
         let total = files.len();
-        let _ = tx.send(Event::default().event("start")
-            .data(serde_json::json!({ "total": total }).to_string())).await;
+        let _ = tx
+            .send(
+                Event::default()
+                    .event("start")
+                    .data(serde_json::json!({ "total": total }).to_string()),
+            )
+            .await;
         let mut success = 0usize;
         let mut failed = 0usize;
         for (i, file) in files.iter().enumerate() {
             if cancelled.load(Ordering::SeqCst) {
-                let _ = tx.send(Event::default().event("progress")
-                    .data(serde_json::json!({
-                        "index": i, "total": total,
-                        "status": "cancelled", "success": success, "failed": failed,
-                        "total_elapsed_ms": start.elapsed().as_millis() as u64
-                    }).to_string())).await;
+                let _ = tx
+                    .send(
+                        Event::default().event("progress").data(
+                            serde_json::json!({
+                                "index": i, "total": total,
+                                "status": "cancelled", "success": success, "failed": failed,
+                                "total_elapsed_ms": start.elapsed().as_millis() as u64
+                            })
+                            .to_string(),
+                        ),
+                    )
+                    .await;
                 break;
             }
             let elapsed = start.elapsed().as_millis() as u64;
-            let _ = tx.send(Event::default().event("progress")
-                .data(serde_json::json!({
-                    "index": i, "total": total, "file": file,
-                    "status": "processing", "elapsed_ms": elapsed
-                }).to_string())).await;
+            let _ = tx
+                .send(
+                    Event::default().event("progress").data(
+                        serde_json::json!({
+                            "index": i, "total": total, "file": file,
+                            "status": "processing", "elapsed_ms": elapsed
+                        })
+                        .to_string(),
+                    ),
+                )
+                .await;
             let img_path = folder.join(file);
             let params_clone = params.clone();
             let family_clone = family.clone();
@@ -878,7 +1063,8 @@ async fn start_batch_trace(
                     do_trace(&img_path, &params_clone).map(|tr| (tr, None))
                 }
             })
-            .await.unwrap_or_else(|e| Err(e.to_string()));
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()));
             let elapsed = start.elapsed().as_millis() as u64;
             match result {
                 Ok((tr, decision)) => {
@@ -886,39 +1072,61 @@ async fn start_batch_trace(
                     // Smart mode: report which family won and with which
                     // params, so the client can cache the result under those
                     // params and show the recommendation.
-                    let smart_info = decision.as_ref().map(|d| serde_json::json!({
-                        "family": d.family,
-                        "reasonKey": d.reason_key,
-                        "params": d.params,
-                    }));
-                    let _ = tx.send(Event::default().event("progress")
-                        .data(serde_json::json!({
-                            "index": i, "total": total, "file": file,
-                            "status": "done", "svg": tr.svg,
-                            "width": tr.width, "height": tr.height,
-                            "shape_count": tr.shape_count, "layers": tr.layers,
-                            "strategy_info": tr.strategy_info,
-                            "smart": smart_info,
-                            "elapsed_ms": elapsed
-                        }).to_string())).await;
+                    let smart_info = decision.as_ref().map(|d| {
+                        serde_json::json!({
+                            "family": d.family,
+                            "reasonKey": d.reason_key,
+                            "params": d.params,
+                        })
+                    });
+                    let _ = tx
+                        .send(
+                            Event::default().event("progress").data(
+                                serde_json::json!({
+                                    "index": i, "total": total, "file": file,
+                                    "status": "done", "svg": tr.svg,
+                                    "width": tr.width, "height": tr.height,
+                                    "shape_count": tr.shape_count, "layers": tr.layers,
+                                    "strategy_info": tr.strategy_info,
+                                    "smart": smart_info,
+                                    "elapsed_ms": elapsed
+                                })
+                                .to_string(),
+                            ),
+                        )
+                        .await;
                 }
                 Err(e) => {
                     failed += 1;
-                    let _ = tx.send(Event::default().event("progress")
-                        .data(serde_json::json!({
-                            "index": i, "total": total, "file": file,
-                            "status": "error", "error": e, "elapsed_ms": elapsed
-                        }).to_string())).await;
+                    let _ = tx
+                        .send(
+                            Event::default().event("progress").data(
+                                serde_json::json!({
+                                    "index": i, "total": total, "file": file,
+                                    "status": "error", "error": e, "elapsed_ms": elapsed
+                                })
+                                .to_string(),
+                            ),
+                        )
+                        .await;
                 }
             }
-            if tx.is_closed() { break; }
+            if tx.is_closed() {
+                break;
+            }
         }
         if !cancelled.load(Ordering::SeqCst) {
-            let _ = tx.send(Event::default().event("complete")
-                .data(serde_json::json!({
-                    "total": total, "success": success, "failed": failed,
-                    "total_elapsed_ms": start.elapsed().as_millis() as u64
-                }).to_string())).await;
+            let _ = tx
+                .send(
+                    Event::default().event("complete").data(
+                        serde_json::json!({
+                            "total": total, "success": success, "failed": failed,
+                            "total_elapsed_ms": start.elapsed().as_millis() as u64
+                        })
+                        .to_string(),
+                    ),
+                )
+                .await;
         }
         state.cancels.lock().unwrap().remove(&job_id_cleanup);
     });
@@ -942,17 +1150,28 @@ async fn cancel_batch_trace(
 async fn batch_trace_events(
     State(state): State<AppState>,
     UrlPath((_project_id, job_id)): UrlPath<(String, String)>,
-) -> Result<Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>, (StatusCode, String)> {
-    let rx = state.jobs.lock().unwrap().remove(&job_id)
+) -> Result<Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>, (StatusCode, String)>
+{
+    let rx = state
+        .jobs
+        .lock()
+        .unwrap()
+        .remove(&job_id)
         .and_then(|opt| opt)
-        .ok_or((StatusCode::NOT_FOUND, "job not found or already consumed".into()))?;
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            "job not found or already consumed".into(),
+        ))?;
     let stream = ReceiverStream::new(rx).map(Ok);
     Ok(Sse::new(stream))
 }
 
 #[tokio::main]
 async fn main() {
-    let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8000);
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8000);
     let upload_dir = PathBuf::from("/tmp/patternstudio-uploads");
     std::fs::create_dir_all(&upload_dir).ok();
     let projects_file = projects_file_path();
@@ -977,19 +1196,30 @@ async fn main() {
         .route("/api/v1/pattern", post(generate_pattern))
         .route("/api/v1/patterns", get(list_patterns))
         .route("/api/v1/projects", post(create_project).get(list_projects))
-        .route("/api/v1/projects/{id}", get(get_project).delete(delete_project))
+        .route(
+            "/api/v1/projects/{id}",
+            get(get_project).delete(delete_project),
+        )
         .route("/api/v1/projects/{id}/images/{filename}", get(serve_image))
         .route("/api/v1/projects/{id}/save-image", post(save_image))
         .route("/api/v1/projects/{id}/batch-trace", post(start_batch_trace))
-        .route("/api/v1/projects/{id}/batch-trace/{job_id}/events", get(batch_trace_events))
-        .route("/api/v1/projects/{id}/batch-trace/{job_id}/cancel", post(cancel_batch_trace))
+        .route(
+            "/api/v1/projects/{id}/batch-trace/{job_id}/events",
+            get(batch_trace_events),
+        )
+        .route(
+            "/api/v1/projects/{id}/batch-trace/{job_id}/cancel",
+            post(cancel_batch_trace),
+        )
         .fallback_service(ServeDir::new("web/dist").append_index_html_on_directories(true))
         .layer(CorsLayer::permissive())
         .with_state(state);
     let addr = format!("0.0.0.0:{port}");
     println!("PatternStudio API server listening on {addr}");
     if !PathBuf::from("web/dist/index.html").exists() {
-        println!("Note: web/dist not found - build the UI first: cd web && npm install && npm run build");
+        println!(
+            "Note: web/dist not found - build the UI first: cd web && npm install && npm run build"
+        );
     }
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();

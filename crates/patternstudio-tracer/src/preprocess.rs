@@ -89,7 +89,9 @@ pub fn find_realesrgan_bin(resource_dir: Option<&Path>) -> Result<PathBuf, Strin
         if p.exists() {
             return Ok(p);
         }
-        return Err(format!("PATTERNSTUDIO_REALESRGAN_BIN is set but {p:?} does not exist"));
+        return Err(format!(
+            "PATTERNSTUDIO_REALESRGAN_BIN is set but {p:?} does not exist"
+        ));
     }
     if let Some(rd) = resource_dir {
         let p = rd.join("bin").join(bin_name());
@@ -97,7 +99,12 @@ pub fn find_realesrgan_bin(resource_dir: Option<&Path>) -> Result<PathBuf, Strin
             return Ok(p);
         }
     }
-    let rel = |base: &Path| base.join("resources").join("bin").join(platform_dir()).join(bin_name());
+    let rel = |base: &Path| {
+        base.join("resources")
+            .join("bin")
+            .join(platform_dir())
+            .join(bin_name())
+    };
     if let Ok(cwd) = std::env::current_dir() {
         if let Some(p) = find_up(&cwd, 5, rel) {
             return Ok(p);
@@ -168,7 +175,9 @@ fn cache_dir() -> Result<PathBuf, String> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map_err(|_| "cannot resolve home directory".to_string())?;
-    let dir = PathBuf::from(home).join(".patternstudio").join("preprocess");
+    let dir = PathBuf::from(home)
+        .join(".patternstudio")
+        .join("preprocess");
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create cache dir {dir:?}: {e}"))?;
     Ok(dir)
 }
@@ -251,9 +260,12 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<std::process:
     let _ = (t_out.join(), t_err.join());
     let stdout = stdout_buf.lock().unwrap().clone();
     let stderr = stderr_buf.lock().unwrap().clone();
-    Ok(std::process::Output { status, stdout, stderr })
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
-
 
 /// Scale factor to apply to the input before the model so the 4x output's
 /// long side stays at or below [`MAX_MODEL_SIDE`]. Returns 1.0 when no
@@ -274,7 +286,10 @@ fn input_scale_for(width: u32, height: u32) -> f64 {
 ///
 /// `resource_dir` is the Tauri bundle resource directory on desktop (None on
 /// the server); see [`find_realesrgan_bin`] / [`find_models_dir`].
-pub fn preprocess_image(input: &Path, resource_dir: Option<&Path>) -> Result<PreprocessOut, String> {
+pub fn preprocess_image(
+    input: &Path,
+    resource_dir: Option<&Path>,
+) -> Result<PreprocessOut, String> {
     let start = Instant::now();
     if !input.exists() {
         return Err(format!("image not found: {}", input.display()));
@@ -328,21 +343,32 @@ pub fn preprocess_image(input: &Path, resource_dir: Option<&Path>) -> Result<Pre
     };
 
     let mut cmd = Command::new(&bin);
-    cmd.arg("-i").arg(model_input)
-        .arg("-o").arg(&tmp4x)
-        .arg("-m").arg(&models)
-        .arg("-n").arg(MODEL_NAME)
-        .arg("-s").arg(MODEL_SCALE.to_string())
-        .arg("-f").arg("png");
-    let output = run_with_timeout(cmd, RUN_TIMEOUT)
-        .map_err(|e| {
-            std::fs::remove_file(&model_in_path).ok();
-            format!("preprocess failed: {e}")
-        })?;
+    cmd.arg("-i")
+        .arg(model_input)
+        .arg("-o")
+        .arg(&tmp4x)
+        .arg("-m")
+        .arg(&models)
+        .arg("-n")
+        .arg(MODEL_NAME)
+        .arg("-s")
+        .arg(MODEL_SCALE.to_string())
+        .arg("-f")
+        .arg("png");
+    let output = run_with_timeout(cmd, RUN_TIMEOUT).map_err(|e| {
+        std::fs::remove_file(&model_in_path).ok();
+        format!("preprocess failed: {e}")
+    })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let lines: Vec<&str> = stderr.lines().collect();
-        let tail: String = lines.iter().rev().take(5).copied().collect::<Vec<_>>().join(" | ");
+        let tail: String = lines
+            .iter()
+            .rev()
+            .take(5)
+            .copied()
+            .collect::<Vec<_>>()
+            .join(" | ");
         std::fs::remove_file(&tmp4x).ok();
         std::fs::remove_file(&model_in_path).ok();
         return Err(format!(
@@ -364,8 +390,12 @@ pub fn preprocess_image(input: &Path, resource_dir: Option<&Path>) -> Result<Pre
     let enhanced = image::open(&tmp4x)
         .map_err(|e| format!("failed to read model output: {e}"))?
         .to_rgb8();
-    let same_size =
-        image::imageops::resize(&enhanced, width, height, image::imageops::FilterType::Lanczos3);
+    let same_size = image::imageops::resize(
+        &enhanced,
+        width,
+        height,
+        image::imageops::FilterType::Lanczos3,
+    );
     // Write atomically so a crashed run never leaves a truncated cache entry.
     let tmp_out = cached_path.with_file_name(format!("{key}.tmp.png"));
     same_size
@@ -436,4 +466,3 @@ mod tests {
         assert_eq!(out2.path, out.path);
     }
 }
-

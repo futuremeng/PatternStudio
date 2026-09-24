@@ -10,8 +10,10 @@ pub mod smart;
 
 pub use config::{PatternStudioConfig, Resolution, Simplify};
 pub use error::Error;
-pub use ir::{Layer, LayerAssignment, LayeredDoc, LayerRole, SemanticMetadata};
+pub use ir::{Layer, LayerAssignment, LayerRole, LayeredDoc, SemanticMetadata};
 pub use pipeline::PatternStudioPipeline;
 pub use profiles::{apply_profiles, AutoDecision, IdealParams, LayerProfile, ProfileLevel};
-pub use session_cache::{SessionCache, key_for_path, key_for_source};
-pub use smart::{ImageStats, SmartDecision, SmartParams, analyze_image, candidate_params, recommend};
+pub use session_cache::{key_for_path, key_for_source, SessionCache};
+pub use smart::{
+    analyze_image, candidate_params, recommend, ImageStats, SmartDecision, SmartParams,
+};
