@@ -45,6 +45,10 @@ thiserror = "2"
 # Hashing (preprocess cache keys)
 sha2 = "0.10"
 
+# HTTP client (Qwen-Image redraw API)
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "multipart", "blocking"] }
+base64 = "0.22"
+
 # Internal crates
 patternstudio-core = { path = "crates/patternstudio-core" }
 patternstudio-tracer = { path = "crates/patternstudio-tracer" }

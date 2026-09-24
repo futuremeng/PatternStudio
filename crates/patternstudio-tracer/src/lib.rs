@@ -8,10 +8,17 @@ use visioncortex::Color;
 pub mod frontend;
 pub mod image_io;
 pub mod preprocess;
+pub mod redraw;
+pub mod settings;
 
 pub use frontend::MaskFrontend;
 pub use image_io::{load_image, load_image_from_memory};
 pub use preprocess::{find_models_dir, find_realesrgan_bin, preprocess_image, PreprocessOut};
+pub use redraw::{redraw_image, RedrawConfig, RedrawOut};
+pub use settings::{
+    apply_qwen_edit, load_qwen_settings, mask_api_key, save_qwen_settings, QwenSettings,
+    QwenSettingsView,
+};
 
 /// Parse a comma/whitespace/newline separated list of `#rrggbb` colors.
 /// Empty or whitespace-only input yields an empty palette (= no fixed palette).

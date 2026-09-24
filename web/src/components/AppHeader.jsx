@@ -1,16 +1,19 @@
-import React, { useSyncExternalStore } from "react";
+import React, { useState, useSyncExternalStore } from "react";
 import { useI18n } from "../i18n/index.jsx";
 import { getEffectiveTheme, subscribeTheme, toggleTheme } from "../theme.js";
+import SettingsModal from "./SettingsModal.jsx";
 import appIcon from "../assets/icon.png";
 
 /**
  * Unified app header: brand + optional back button + page title/meta + actions.
  * Used by every page so the top bar looks the same everywhere.
- * The language switcher lives here so it is available on every page.
+ * The language switcher and settings dialog live here so they are available
+ * on every page.
  */
 export default function AppHeader({ title, meta, onBack, children }) {
   const { locale, setLocale, t, supported } = useI18n();
   const theme = useSyncExternalStore(subscribeTheme, getEffectiveTheme);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <header className="app-header">
       <img className="brand" src={appIcon} alt="PatternStudio" />
@@ -22,6 +25,14 @@ export default function AppHeader({ title, meta, onBack, children }) {
       {meta && <span className="page-meta">{meta}</span>}
       <div className="header-actions">
         {children}
+        <button
+          className="theme-toggle"
+          onClick={() => setSettingsOpen(true)}
+          title={t("settings.title")}
+          aria-label={t("settings.title")}
+        >
+          ⚙️
+        </button>
         <button
           className="theme-toggle"
           onClick={toggleTheme}
@@ -42,6 +53,7 @@ export default function AppHeader({ title, meta, onBack, children }) {
           ))}
         </select>
       </div>
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </header>
   );
 }

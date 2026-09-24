@@ -278,6 +278,54 @@ pub async fn preprocess_file(
     }))
 }
 
+/// Redraw a local image file with the Qwen-Image edit model using a prompt.
+/// Returns the path of the redrawn image plus timing info. Each call is a
+/// fresh generation (no caching).
+#[tauri::command]
+pub async fn redraw_file(
+    file_path: String,
+    prompt: String,
+    seed: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    let out = tauri::async_runtime::spawn_blocking(move || {
+        patternstudio_tracer::redraw_image(std::path::Path::new(&file_path), &prompt, seed)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(serde_json::json!({
+        "path": out.path,
+        "width": out.width,
+        "height": out.height,
+        "elapsedMs": out.elapsed_ms,
+        "prompt": out.prompt,
+        "seed": out.seed,
+    }))
+}
+
+/// Current Qwen-Image (redraw) settings, with the API key masked.
+#[tauri::command]
+pub fn get_settings() -> serde_json::Value {
+    let s = patternstudio_tracer::load_qwen_settings();
+    serde_json::json!({
+        "qwen": patternstudio_tracer::QwenSettingsView::from_settings(&s),
+    })
+}
+
+/// Update the Qwen-Image (redraw) settings. Blank `provider`/`apiBase`/
+/// `model` clear the field (per-provider default applies); a blank
+/// `apiKey` keeps the current key.
+#[tauri::command]
+pub fn save_settings(
+    qwen: patternstudio_tracer::QwenSettings,
+) -> Result<serde_json::Value, String> {
+    let mut s = patternstudio_tracer::load_qwen_settings();
+    patternstudio_tracer::apply_qwen_edit(&mut s, &qwen);
+    patternstudio_tracer::save_qwen_settings(&s)?;
+    Ok(serde_json::json!({
+        "qwen": patternstudio_tracer::QwenSettingsView::from_settings(&s),
+    }))
+}
+
 /// Save a processed file (e.g. an enhanced iteration from the preprocess
 /// modal) into the project folder as a new image. On desktop the project id
 /// is the folder path and the image list is read from disk on demand, so no

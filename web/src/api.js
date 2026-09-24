@@ -182,6 +182,77 @@ export async function preprocessSource(source) {
 }
 
 /**
+ * Redraw the source image with the Qwen-Image edit model using a prompt.
+ * Returns the same shape as preprocessSource:
+ * - `source`: a traceable source for the redrawn image (feed to traceSource)
+ * - `previewUrl`: displayable URL of the redrawn image
+ * - `width` / `height` / `elapsedMs` / `prompt` / `seed`
+ * Each call is a fresh generation (no caching).
+ */
+export async function redrawSource(source, prompt, seed) {
+  if (isTauri()) {
+    const out = await tauriInvoke("redraw_file", {
+      filePath: source.path, prompt, seed: seed ?? null,
+    });
+    const bytes = await tauriInvoke("read_image", { filePath: out.path });
+    const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
+    return {
+      source: { kind: "file", path: out.path },
+      previewUrl: URL.createObjectURL(blob),
+      width: out.width,
+      height: out.height,
+      elapsedMs: out.elapsedMs,
+      prompt: out.prompt,
+      seed: out.seed,
+    };
+  }
+  const res = await fetch(`${BASE}/redraw`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      asset_id: source.assetId ?? null,
+      project_id: source.projectId ?? null, filename: source.filename ?? null,
+      prompt, seed: seed ?? null,
+    }),
+  });
+  const out = await handle(res);
+  return {
+    source: { kind: "asset", assetId: out.assetId },
+    previewUrl: out.url,
+    width: out.width,
+    height: out.height,
+    elapsedMs: out.elapsedMs,
+    prompt: out.prompt,
+    seed: out.seed,
+  };
+}
+
+/**
+ * Get the Qwen-Image (redraw) settings. The API key is never returned in
+ * full — only `hasApiKey` and a masked form (`apiKeyMasked`) for display.
+ */
+export async function getSettings() {
+  if (isTauri()) return tauriInvoke("get_settings");
+  const res = await fetch(`${BASE}/settings`);
+  return handle(res);
+}
+
+/**
+ * Save the Qwen-Image (redraw) settings. Blank `apiBase`/`model` clear the
+ * field (per-provider default applies); a blank `apiKey` keeps the current
+ * key. Returns the updated settings view (key masked).
+ */
+export async function saveSettings(qwen) {
+  if (isTauri()) return tauriInvoke("save_settings", { qwen });
+  const res = await fetch(`${BASE}/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ qwen }),
+  });
+  return handle(res);
+}
+
+/**
  * Save a processed image (an enhanced iteration) into the project folder as
  * a new image. `source` is the selected iteration's traceable source
  * ({ kind: "asset", assetId } on web, { kind: "file", path } on Tauri).

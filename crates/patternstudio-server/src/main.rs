@@ -364,6 +364,96 @@ async fn preprocess(
     })))
 }
 
+/// Redraw request: reuses the trace source-identifier fields (asset_id /
+/// project_id+filename / file_path) plus the Qwen-Image prompt.
+#[derive(Deserialize)]
+struct RedrawRequest {
+    #[serde(default)]
+    asset_id: Option<String>,
+    #[serde(default)]
+    file_path: Option<String>,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    filename: Option<String>,
+    prompt: String,
+    #[serde(default)]
+    seed: Option<u64>,
+}
+
+/// Redraw: restyle the source image with the Qwen-Image edit model using a
+/// prompt. The result is registered as an asset so the client can display it
+/// and save it via /projects/{id}/save-image. Each call is a fresh
+/// generation (no caching).
+async fn redraw(
+    State(state): State<AppState>,
+    Json(req): Json<RedrawRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let source = TraceRequest {
+        asset_id: req.asset_id,
+        file_path: req.file_path,
+        project_id: req.project_id,
+        filename: req.filename,
+        params: None,
+        family: None,
+        request_id: None,
+        priority: None,
+    };
+    let img_path = resolve_source_path(&state, &source)?;
+    let prompt = req.prompt;
+    let seed = req.seed;
+    let out = tokio::task::spawn_blocking(move || {
+        patternstudio_tracer::redraw_image(&img_path, &prompt, seed)
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let id = uuid::Uuid::new_v4().to_string();
+    state
+        .assets
+        .lock()
+        .unwrap()
+        .insert(id.clone(), out.path.clone());
+    Ok(Json(serde_json::json!({
+        "assetId": id,
+        "url": format!("/api/v1/assets/{id}"),
+        "width": out.width,
+        "height": out.height,
+        "elapsedMs": out.elapsed_ms,
+        "prompt": out.prompt,
+        "seed": out.seed,
+    })))
+}
+
+/// Current Qwen-Image (redraw) settings, with the API key masked.
+async fn get_settings() -> Json<serde_json::Value> {
+    let s = patternstudio_tracer::load_qwen_settings();
+    Json(serde_json::json!({
+        "qwen": patternstudio_tracer::QwenSettingsView::from_settings(&s),
+    }))
+}
+
+/// Update the Qwen-Image (redraw) settings. Blank `provider`/`apiBase`/
+/// `model` clear the field (per-provider default applies); a blank
+/// `apiKey` keeps the current key.
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct SettingsRequest {
+    qwen: patternstudio_tracer::QwenSettings,
+}
+
+async fn save_settings(
+    Json(req): Json<SettingsRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let mut s = patternstudio_tracer::load_qwen_settings();
+    patternstudio_tracer::apply_qwen_edit(&mut s, &req.qwen);
+    patternstudio_tracer::save_qwen_settings(&s)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(serde_json::json!({
+        "qwen": patternstudio_tracer::QwenSettingsView::from_settings(&s),
+    })))
+}
+
 /// Serve a registered asset (preprocessed images).
 async fn serve_asset(
     State(state): State<AppState>,
@@ -908,6 +998,8 @@ async fn main() {
         .route("/api/v1/trace/cancel", post(cancel_trace))
         .route("/api/v1/smart", post(smart))
         .route("/api/v1/preprocess", post(preprocess))
+        .route("/api/v1/redraw", post(redraw))
+        .route("/api/v1/settings", get(get_settings).put(save_settings))
         .route("/api/v1/assets/{asset_id}", get(serve_asset))
         .route("/api/v1/pattern", post(generate_pattern))
         .route("/api/v1/patterns", get(list_patterns))

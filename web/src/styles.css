@@ -1008,3 +1008,140 @@ button.danger { color: var(--error); }
   min-width: 6em; text-align: right;
   white-space: nowrap;
 }
+/* Stage tabs (enhance / redraw) in the optimization modal header. */
+.preprocess-tabs {
+  display: flex; gap: 0.25rem;
+  padding: 0.15rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.preprocess-tabs button {
+  padding: 0.3rem 0.9rem;
+  font-size: 0.85rem;
+  color: var(--text2);
+  background: transparent;
+  border: none; border-radius: 6px;
+  cursor: pointer;
+}
+.preprocess-tabs button:hover { color: var(--text); }
+.preprocess-tabs button.active {
+  color: var(--text);
+  background: var(--surface);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+/* Stage badge: bottom-right corner of the iteration thumbnail
+   (enhance vs redraw). */
+.preprocess-thumb-kind {
+  position: absolute; bottom: 0.2rem; right: 0.2rem;
+  font-size: 0.6rem; line-height: 1;
+  padding: 0.1rem 0.15rem;
+  border-radius: 4px;
+  pointer-events: none;
+}
+.preprocess-thumb-kind.enhance {
+  color: #fff;
+  background: rgba(0, 122, 255, 0.75);
+}
+.preprocess-thumb-kind.redraw {
+  color: #fff;
+  background: rgba(175, 82, 222, 0.8);
+}
+/* Redraw controls: preset + seed row above the prompt textarea. */
+.redraw-controls {
+  display: flex; flex-direction: column; gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface2);
+}
+.redraw-controls-row { display: flex; gap: 0.5rem; }
+.redraw-preset {
+  flex: 0 0 auto;
+  max-width: 240px;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+}
+.redraw-preset:focus { border-color: var(--accent); }
+.redraw-preset:disabled { opacity: 0.5; }
+.redraw-seed {
+  width: 130px;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.redraw-seed:focus { border-color: var(--accent); }
+.redraw-seed:disabled { opacity: 0.5; }
+.redraw-prompt {
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  line-height: 1.4;
+  resize: vertical;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.redraw-prompt:focus { border-color: var(--accent); }
+.redraw-prompt:disabled { opacity: 0.5; }
+
+/* ── Settings modal ────────────────────────────────────────────────────────
+   Small dialog for the Qwen-Image (redraw) API configuration, opened from
+   the ⚙️ button in the app header. */
+.settings-modal { width: min(480px, calc(100vw - 2rem)); }
+.settings-body {
+  padding: 0.9rem 1rem;
+  display: flex; flex-direction: column; gap: 0.7rem;
+  overflow-y: auto;
+}
+.settings-section-title {
+  margin: 0; font-size: 0.9rem; font-weight: 600;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4rem;
+}
+.settings-row {
+  display: flex; flex-direction: column; gap: 0.25rem;
+}
+.settings-label {
+  font-size: 0.78rem; color: var(--text2);
+}
+.settings-input {
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.settings-input:focus { border-color: var(--accent); }
+.settings-input:disabled { opacity: 0.5; }
+.settings-hint {
+  margin: 0; font-size: 0.75rem; color: var(--text2);
+}
+.settings-error {
+  margin: 0; font-size: 0.8rem; color: var(--error);
+  word-break: break-word;
+}
+.settings-modal-footer { align-items: center; }
+.settings-saved {
+  margin-right: auto;
+  font-size: 0.8rem; color: var(--accent);
+}
+
