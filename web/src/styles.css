@@ -990,8 +990,8 @@ button.danger { color: var(--error); }
   background: var(--accent);
   border-color: var(--accent);
 }
-/* Iteration scrubber: drag to jump between the original and every
-   enhancement result in the strip (0 = original, N = last iteration). */
+/* Iteration scrubber: drag to jump between enhancement results in the
+   strip (1 = first enhancement, N = last; the original is thumbnail-only). */
 .preprocess-slider-row {
   display: flex; align-items: center; gap: 0.6rem;
   padding: 0.4rem 1rem 0.6rem;

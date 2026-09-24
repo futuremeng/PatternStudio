@@ -243,26 +243,27 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
               );
             })}
           </div>
-          {/* Iteration scrubber: 0 = original, N = last enhancement. Dragging
-              it swaps the compare preview instantly, so fast scrubbing lets
-              the user flick through results to pick the best one. */}
+          {/* Iteration scrubber: 1 = first enhancement, N = last. The
+              original is only reachable via its thumbnail (selecting it
+              leaves the right compare panel empty), so the slider starts
+              at the first enhancement. Dragging it swaps the compare
+              preview instantly, so fast scrubbing lets the user flick
+              through results to pick the best one. */}
           <div className="preprocess-slider-row">
             <input
               className="preprocess-slider"
               type="range"
-              min={0}
-              max={iterations.length}
+              min={1}
+              max={Math.max(1, iterations.length)}
               step={1}
-              value={selectedIdx + 1}
+              value={selectedIdx >= 0 ? selectedIdx + 1 : 1}
               onChange={(e) => setSelectedIdx(parseInt(e.target.value, 10) - 1)}
               disabled={iterations.length === 0}
               title={t("preprocess.slider")}
               aria-label={t("preprocess.slider")}
             />
             <span className="preprocess-slider-val">
-              {selectedIdx >= 0
-                ? t("preprocess.iteration", { n: selectedIdx + 1 })
-                : t("preprocess.original")}
+              {t("preprocess.iteration", { n: selectedIdx >= 0 ? selectedIdx + 1 : 1 })}
             </span>
           </div>
         </div>
