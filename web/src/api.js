@@ -188,8 +188,9 @@ export async function saveEnhancedImage(projectId, source, filename) {
 /** One-shot trace of an in-memory file (upload on web, bytes on Tauri). */
 export async function traceImage(file, params) {
   if (isTauri()) {
+    // Tauri 2 serializes Uint8Array directly into Vec<u8> (no number-array copy).
     const bytes = new Uint8Array(await file.arrayBuffer());
-    return tauriInvoke("trace_bytes", { data: Array.from(bytes), params });
+    return tauriInvoke("trace_bytes", { data: bytes, params });
   }
   const form = new FormData();
   form.append("file", file);
@@ -411,8 +412,9 @@ export async function downloadSvg(svg, name) {
  */
 export async function downloadBlob(blob, name) {
   if (isTauri()) {
+    // Tauri 2 serializes Uint8Array directly into Vec<u8> (no number-array copy).
     const bytes = new Uint8Array(await blob.arrayBuffer());
-    await tauriInvoke("save_bytes", { data: Array.from(bytes), suggestedName: name });
+    await tauriInvoke("save_bytes", { data: bytes, suggestedName: name });
     return;
   }
   const a = document.createElement("a");

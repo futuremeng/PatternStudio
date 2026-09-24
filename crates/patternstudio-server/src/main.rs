@@ -12,19 +12,16 @@ use axum::response::sse::{Event, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::stream::{Stream, StreamExt};
-use patternstudio_core::ir::LayeredDoc;
-use patternstudio_core::profiles::{apply_profiles, AutoDecision, IdealParams};
 use patternstudio_core::smart::SmartDecision;
-use patternstudio_core::{key_for_source, LayerAssignment, SessionCache};
-use patternstudio_svg::LayeredWriter;
+use patternstudio_core::{key_for_source, SessionCache};
+use patternstudio_engine::{
+    build_vtracer_config, trace_with_session, ActiveTraces, TraceParams, TraceResult,
+};
 use patternstudio_tracer::load_image;
 use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
-use vtracer::config::{Clustering, FitMode, Hierarchical, Preset};
-use vtracer::progress::CancelToken;
-use vtracer::Session;
 
 /// How many (source, segmentation) sessions to keep around for instant
 /// re-tracing. Each entry holds one RGBA image plus its segmentation, so this
@@ -46,14 +43,11 @@ struct AppState {
     /// In-flight traces keyed by image path, for preemption: a newer
     /// interactive request trips the older one's token so it aborts between
     /// pipeline batches.
-    active_traces: Arc<Mutex<HashMap<String, ActiveTrace>>>,
-}
-
-/// One in-flight trace: the request id that owns it and the token a newer
-/// interactive request trips to abort it.
-struct ActiveTrace {
-    request_id: String,
-    cancel: CancelToken,
+    active_traces: Arc<ActiveTraces>,
+    /// True when bound to a loopback address. Non-loopback binds disable the
+    /// `file_path` source (arbitrary file read) and restrict project folders
+    /// to the user's home directory.
+    local_only: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -69,9 +63,16 @@ struct ProjectsFile {
     projects: Vec<Project>,
 }
 
+/// The user's home directory (HOME on Unix, USERPROFILE on Windows).
+fn home_dir() -> PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+}
+
 fn projects_file_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    let dir = PathBuf::from(&home).join(".patternstudio");
+    let dir = home_dir().join(".patternstudio");
     std::fs::create_dir_all(&dir).ok();
     dir.join("projects.json")
 }
@@ -96,314 +97,13 @@ fn save_projects(file: &Path, projects: &HashMap<String, Project>) {
         projects: projects.values().cloned().collect(),
     };
     if let Ok(json) = serde_json::to_string_pretty(&pf) {
-        let _ = std::fs::write(file, json);
+        // Atomic write: tmp file + rename, so a crash mid-write cannot leave
+        // a truncated projects.json behind.
+        let tmp = file.with_extension("json.tmp");
+        if std::fs::write(&tmp, json).is_ok() {
+            let _ = std::fs::rename(&tmp, file);
+        }
     }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct TraceParams {
-    #[serde(default)]
-    clustering: Option<String>,
-    #[serde(default)]
-    hierarchical: Option<String>,
-    #[serde(default)]
-    color_precision: Option<u8>,
-    #[serde(default)]
-    layer_difference: Option<u8>,
-    #[serde(default)]
-    filter_speckle: Option<u32>,
-    #[serde(default)]
-    mode: Option<String>,
-    #[serde(default)]
-    simplify: Option<f64>,
-    #[serde(default)]
-    path_precision: Option<u8>,
-    #[serde(default)]
-    max_colors: Option<usize>,
-    #[serde(default = "default_preset")]
-    preset: String,
-    #[serde(default)]
-    line_art: bool,
-    #[serde(default)]
-    binary_adaptive: bool,
-    #[serde(default)]
-    binary_threshold: Option<u8>,
-    #[serde(default)]
-    watershed_detail: Option<u32>,
-    #[serde(default)]
-    palette: Option<String>,
-    #[serde(default)]
-    layers: usize,
-    #[serde(default)]
-    corner_threshold: Option<i32>,
-    #[serde(default)]
-    length_threshold: Option<f64>,
-    #[serde(default)]
-    optimize: Option<u8>,
-    #[serde(default)]
-    binary_adaptive_t: Option<f64>,
-    #[serde(default)]
-    binary_adaptive_window: Option<u32>,
-    #[serde(default)]
-    layer_strategy: Option<String>,
-    #[serde(default)]
-    complexity_threshold: Option<u8>,
-}
-
-fn default_preset() -> String {
-    "poster".into()
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LayerInfo {
-    name: String,
-    role: String,
-    shape_count: usize,
-    dominant_color: String,
-    preview_svg: String,
-    /// Multi-level parameter profile ("L0" coarse / "L1" standard / "L2" fine).
-    profile: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TraceResult {
-    svg: String,
-    width: u32,
-    height: u32,
-    shape_count: usize,
-    layer_count: usize,
-    layers: Vec<LayerInfo>,
-    /// Present when `layerStrategy: "auto"`: the chosen strategy and why.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    strategy_info: Option<AutoDecision>,
-    /// Elapsed time for the profile re-fitting step (ms), when auto layering is active.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    profile_ms: Option<u64>,
-}
-
-fn build_vtracer_config(params: &TraceParams) -> Result<vtracer::Config, String> {
-    let preset = match params.preset.as_str() {
-        "bw" => Preset::Bw,
-        "photo" => Preset::Photo,
-        _ => Preset::Poster,
-    };
-    let mut config = vtracer::Config::from_preset(preset);
-    if let Some(ref c) = params.clustering {
-        config.clustering = match c.as_str() {
-            "binary" => Clustering::Binary,
-            "watershed" => Clustering::Watershed,
-            _ => Clustering::ColorCluster,
-        };
-    }
-    if let Some(ref h) = params.hierarchical {
-        config.hierarchical = match h.as_str() {
-            "cutout" => Hierarchical::Cutout,
-            _ => Hierarchical::Stacked,
-        };
-    }
-    if let Some(v) = params.color_precision {
-        config.color_precision = v as i32;
-    }
-    if let Some(v) = params.layer_difference {
-        config.layer_difference = v as i32;
-    }
-    if let Some(v) = params.filter_speckle {
-        config.filter_speckle = v as usize;
-    }
-    if let Some(ref m) = params.mode {
-        config.mode = match m.as_str() {
-            "pixel" => FitMode::Pixel,
-            "polygon" => FitMode::Polygon,
-            _ => FitMode::Spline,
-        };
-    }
-    if let Some(v) = params.simplify {
-        config.simplify = Some(v);
-    }
-    if let Some(v) = params.path_precision {
-        config.path_precision = Some(v as u32);
-    }
-    if let Some(v) = params.max_colors {
-        config.max_colors = Some(v);
-    }
-    config.binary_adaptive = params.binary_adaptive;
-    if let Some(v) = params.binary_threshold {
-        config.binary_threshold = v;
-    }
-    if let Some(v) = params.watershed_detail {
-        config.watershed_detail = v;
-    }
-    if let Some(ref p) = params.palette {
-        config.palette = patternstudio_tracer::parse_palette(p)?;
-    }
-    if let Some(v) = params.corner_threshold {
-        config.corner_threshold = v;
-    }
-    if let Some(v) = params.length_threshold {
-        config.length_threshold = v;
-    }
-    if let Some(v) = params.optimize {
-        config.optimize = v;
-    }
-    if let Some(v) = params.binary_adaptive_t {
-        config.binary_adaptive_t = v;
-    }
-    if let Some(v) = params.binary_adaptive_window {
-        config.binary_adaptive_window = v;
-    }
-    Ok(config)
-}
-
-/// One-shot trace: decode the image and run it through a fresh session. Used by
-/// batch tracing, where each file is traced exactly once (no reuse benefit).
-fn do_trace(img_path: &Path, params: &TraceParams) -> Result<TraceResult, String> {
-    let img = load_image(img_path).map_err(|e| format!("failed to load image: {e}"))?;
-    let config = build_vtracer_config(params)?;
-    let mut session = Session::new(img);
-    do_trace_with_session(&mut session, &config, params, &CancelToken::new())
-}
-
-/// Convert a smart-recommended parameter set into the API's `TraceParams`.
-/// Both structs use camelCase with identical field names, so a JSON round-trip
-/// is a safe, field-agnostic mapping.
-fn smart_to_trace_params(
-    p: &patternstudio_core::smart::SmartParams,
-) -> Result<TraceParams, String> {
-    let v = serde_json::to_value(p).map_err(|e| e.to_string())?;
-    serde_json::from_value(v).map_err(|e| e.to_string())
-}
-
-/// Smart one-shot trace: decode the image once, analyze it, trial-trace
-/// candidate parameter sets, then trace at full resolution with the winner.
-/// `family` restricts the search to one preset family (absent = auto).
-/// Returns the trace result plus the decision (family, reason, params).
-fn do_trace_smart(
-    img_path: &Path,
-    family: Option<&str>,
-) -> Result<(TraceResult, patternstudio_core::smart::SmartDecision), String> {
-    let img = load_image(img_path).map_err(|e| format!("failed to load image: {e}"))?;
-    let decision = match family {
-        Some(f) => patternstudio_core::smart::recommend_for(&img, f),
-        None => patternstudio_core::smart::recommend(&img),
-    }
-    .map_err(|e| format!("smart analysis failed: {e}"))?;
-    let params = smart_to_trace_params(&decision.params)?;
-    let config = build_vtracer_config(&params)?;
-    let mut session = Session::new(img);
-    let tr = do_trace_with_session(&mut session, &config, &params, &CancelToken::new())?;
-    Ok((tr, decision))
-}
-
-/// Layering + SVG over a document produced by a [`Session`].
-///
-/// `session.render` reuses the cached segmentation when the clustering
-/// parameters are unchanged and only re-runs the cheap downstream stages — the
-/// core of the interactive tuning loop. Split out from the one-shot path so the
-/// `/trace` handler can drive a cached session.
-fn do_trace_with_session(
-    session: &mut Session,
-    config: &vtracer::Config,
-    params: &TraceParams,
-    cancel: &CancelToken,
-) -> Result<TraceResult, String> {
-    let mut on_progress = |_p: vtracer::progress::Progress| {};
-    let doc = session
-        .render_with_progress(config, cancel, &mut on_progress)
-        .map_err(|e| {
-            if matches!(e, vtracer::Error::Cancelled) {
-                "cancelled".into()
-            } else {
-                format!("trace failed: {e}")
-            }
-        })?;
-    if cancel.is_cancelled() {
-        return Err("cancelled".into());
-    }
-
-    // "auto": derive the strategy + multi-level profiles from the ideal params.
-    let is_auto = params.layer_strategy.as_deref() == Some("auto");
-    let ideal = IdealParams::from_options(
-        params.clustering.as_deref(),
-        params.line_art,
-        params.color_precision,
-        params.layer_difference,
-        params.max_colors,
-        params.simplify,
-        params.path_precision,
-        params.corner_threshold,
-        params.length_threshold,
-        params.filter_speckle,
-        params.optimize,
-    );
-    let (assignment, decision) = if is_auto {
-        let (a, d) = AutoDecision::assign(&doc, &ideal);
-        (a, Some(d))
-    } else {
-        let assignment = match params.layer_strategy.as_deref().unwrap_or("none") {
-            "color" => {
-                let n = params.layers.max(2);
-                LayerAssignment::by_color(&doc, n)
-            }
-            "complexity" => {
-                let n = params.layers.max(2);
-                let t = params.complexity_threshold.unwrap_or(70);
-                LayerAssignment::by_complexity(&doc, t, n)
-            }
-            "hybrid" => {
-                let n = params.layers.max(2);
-                let t = params.complexity_threshold.unwrap_or(70);
-                LayerAssignment::hybrid(&doc, n, t)
-            }
-            "spatial" => {
-                let n = params.layers.max(2);
-                let gap = (doc.width.min(doc.height) as f64 * 0.02).max(5.0);
-                LayerAssignment::by_spatial(&doc, n, gap)
-            }
-            _ => LayerAssignment::single_layer(),
-        };
-        (assignment, None)
-    };
-    if cancel.is_cancelled() {
-        return Err("cancelled".into());
-    }
-    let mut layered = LayeredDoc::from_vector_doc(&doc, &assignment);
-    let mut profile_ms: Option<u64> = None;
-    if is_auto {
-        let t = std::time::Instant::now();
-        apply_profiles(&mut layered, &ideal);
-        profile_ms = Some(t.elapsed().as_millis() as u64);
-    }
-    let svg = if params.line_art {
-        LayeredWriter::write_line_art(&layered)
-    } else {
-        LayeredWriter::write(&layered)
-    };
-    let layers: Vec<LayerInfo> = layered
-        .layers
-        .iter()
-        .enumerate()
-        .map(|(i, layer)| LayerInfo {
-            name: layer.name.clone(),
-            role: layer.role.to_string(),
-            shape_count: layer.shapes.len(),
-            dominant_color: LayeredWriter::layer_dominant_color(layer),
-            preview_svg: LayeredWriter::layer_preview_svg(&layered, i),
-            profile: layer.profile.as_str().into(),
-        })
-        .collect();
-    Ok(TraceResult {
-        svg,
-        width: layered.width,
-        height: layered.height,
-        shape_count: layered.total_shapes(),
-        layer_count: layered.layers.len(),
-        layers,
-        strategy_info: decision,
-        profile_ms,
-    })
 }
 
 #[derive(Serialize)]
@@ -507,7 +207,16 @@ fn resolve_source_path(
         }
         Ok(p)
     } else if let Some(ref fp) = req.file_path {
-        Ok(PathBuf::from(fp))
+        // Arbitrary file read: only allowed when the server is bound to
+        // loopback (the default). Remote clients must use uploads or projects.
+        if state.local_only {
+            Ok(PathBuf::from(fp))
+        } else {
+            Err((
+                StatusCode::FORBIDDEN,
+                "file_path is only allowed when the server is bound to loopback".into(),
+            ))
+        }
     } else {
         Err((
             StatusCode::BAD_REQUEST,
@@ -534,27 +243,15 @@ async fn trace(
     // Preemption: an interactive request cancels whatever is in flight for
     // this image (it aborts between pipeline batches); a background request
     // (pre-warm) yields instead and is rejected with 409 busy.
-    let cancel = CancelToken::new();
-    {
-        let mut active = state.active_traces.lock().unwrap();
-        match active.get(&image_key) {
-            Some(old) if is_background => {
-                return Err((
-                    StatusCode::CONFLICT,
-                    Json(serde_json::json!({ "busy": true })),
-                ));
-            }
-            Some(old) => old.cancel.cancel(),
-            None => {}
-        }
-        active.insert(
-            image_key.clone(),
-            ActiveTrace {
-                request_id: request_id.clone(),
-                cancel: cancel.clone(),
-            },
-        );
-    }
+    let cancel = state
+        .active_traces
+        .register(&image_key, &request_id, is_background)
+        .map_err(|_| {
+            (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({ "busy": true })),
+            )
+        })?;
 
     let result = tokio::task::spawn_blocking(move || {
         // Build the config up front so the session cache can be keyed by the
@@ -577,7 +274,7 @@ async fn trace(
                 Err(_) => std::thread::sleep(Duration::from_millis(20)),
             }
         };
-        do_trace_with_session(&mut guard, &config, &params, &cancel)
+        trace_with_session(&mut guard, &config, &params, &cancel)
     })
     .await
     .map_err(|e| {
@@ -588,15 +285,7 @@ async fn trace(
     })?;
 
     // Drop our registration only if we are still the current trace for this image.
-    {
-        let mut active = state.active_traces.lock().unwrap();
-        if active
-            .get(&image_key)
-            .is_some_and(|a| a.request_id == request_id)
-        {
-            active.remove(&image_key);
-        }
-    }
+    state.active_traces.finish(&image_key, &request_id);
 
     match result {
         Ok(r) => Ok(Json(r)),
@@ -791,6 +480,17 @@ async fn create_project(
             StatusCode::BAD_REQUEST,
             format!("not a directory: {}", req.path),
         ));
+    }
+    // Non-loopback binds restrict project folders to the home directory so a
+    // remote client cannot register (and read images from) arbitrary paths.
+    if !state.local_only {
+        let home = home_dir();
+        if !path.is_absolute() || !path.starts_with(&home) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "project paths outside the home directory are only allowed in loopback mode".into(),
+            ));
+        }
     }
     let images = list_image_files(&path);
     if images.is_empty() {
@@ -1058,9 +758,11 @@ async fn start_batch_trace(
             let family_clone = family.clone();
             let result = tokio::task::spawn_blocking(move || {
                 if smart {
-                    do_trace_smart(&img_path, family_clone.as_deref()).map(|(tr, d)| (tr, Some(d)))
+                    patternstudio_engine::trace_file_smart(&img_path, family_clone.as_deref())
+                        .map(|(tr, d)| (tr, Some(d)))
                 } else {
-                    do_trace(&img_path, &params_clone).map(|tr| (tr, None))
+                    patternstudio_engine::trace_file_once(&img_path, &params_clone)
+                        .map(|tr| (tr, None))
                 }
             })
             .await
@@ -1172,6 +874,10 @@ async fn main() {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8000);
+    // Loopback by default: the API can read local files, so it must not be
+    // reachable from the network unless explicitly asked for (HOST=0.0.0.0).
+    let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".into());
+    let local_only = matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1");
     let upload_dir = PathBuf::from("/tmp/patternstudio-uploads");
     std::fs::create_dir_all(&upload_dir).ok();
     let projects_file = projects_file_path();
@@ -1182,7 +888,8 @@ async fn main() {
         projects: Arc::new(Mutex::new(projects)),
         jobs: Arc::new(Mutex::new(HashMap::new())),
         cancels: Arc::new(Mutex::new(HashMap::new())),
-        active_traces: Arc::new(Mutex::new(HashMap::new())),
+        active_traces: Arc::new(ActiveTraces::new()),
+        local_only,
         projects_file,
         sessions: Arc::new(Mutex::new(SessionCache::new(MAX_SESSIONS))),
     };
@@ -1214,8 +921,14 @@ async fn main() {
         .fallback_service(ServeDir::new("web/dist").append_index_html_on_directories(true))
         .layer(CorsLayer::permissive())
         .with_state(state);
-    let addr = format!("0.0.0.0:{port}");
-    println!("PatternStudio API server listening on {addr}");
+    let addr = format!("{host}:{port}");
+    println!("PatternStudio API server listening on http://{addr}");
+    if !local_only {
+        println!(
+            "WARNING: bound to a non-loopback address — file_path sources are disabled \
+             and project folders are restricted to the home directory"
+        );
+    }
     if !PathBuf::from("web/dist/index.html").exists() {
         println!(
             "Note: web/dist not found - build the UI first: cd web && npm install && npm run build"

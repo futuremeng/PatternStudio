@@ -24,6 +24,7 @@ use vtracer::optimize::{CleanupPass, OptimizerPass, QuantizePass};
 use vtracer::simplify::{CurvePass, SimplifyCurves};
 
 use crate::ir::{LayerAssignment, LayerRole, LayeredDoc};
+use crate::smart::SmartParams;
 
 /// The user's ideal parameter combination — the quality anchor for auto
 /// layering. Defaults mirror the web editor's `DEFAULT_PARAMS`.
@@ -51,21 +52,33 @@ pub struct IdealParams {
     pub optimize: i32,
 }
 
-impl Default for IdealParams {
-    fn default() -> Self {
+impl From<&SmartParams> for IdealParams {
+    fn from(s: &SmartParams) -> Self {
         Self {
-            clustering: "color",
-            line_art: false,
-            color_precision: 6,
-            layer_difference: 16,
-            max_colors: None,
-            simplify: 0.1,
-            path_precision: 2,
-            corner_threshold: 60,
-            length_threshold: 4.0,
-            filter_speckle: 4,
-            optimize: 1,
+            clustering: match s.clustering.as_str() {
+                "binary" => "binary",
+                "watershed" => "watershed",
+                _ => "color",
+            },
+            line_art: s.line_art,
+            color_precision: s.color_precision as i32,
+            layer_difference: s.layer_difference as i32,
+            max_colors: s.max_colors,
+            simplify: s.simplify,
+            path_precision: s.path_precision as i32,
+            corner_threshold: s.corner_threshold,
+            length_threshold: s.length_threshold,
+            filter_speckle: s.filter_speckle as i32,
+            optimize: s.optimize as i32,
         }
+    }
+}
+
+impl Default for IdealParams {
+    /// Single source of truth: derived from [`SmartParams::default()`], which
+    /// mirrors the web editor's `DEFAULT_PARAMS`.
+    fn default() -> Self {
+        Self::from(&SmartParams::default())
     }
 }
 
@@ -375,9 +388,7 @@ impl AutoDecision {
 /// layers are left untouched. Topology is never changed, so stacking all
 /// layers still reproduces the ideal result.
 pub fn apply_profiles(layered: &mut LayeredDoc, ideal: &IdealParams) {
-    let t0 = std::time::Instant::now();
     let profiles = LayerProfile::derive(ideal);
-    let mut total_shapes = 0usize;
     for layer in &mut layered.layers {
         // Derive the level from the role so this also works for layers built
         // outside the auto strategy (which leave the spec profile at L1).
@@ -387,18 +398,10 @@ pub fn apply_profiles(layered: &mut LayeredDoc, ideal: &IdealParams) {
         for shape in &mut layer.shapes {
             refine_shape(shape, &profile);
         }
-        total_shapes += layer.shapes.len();
         layer
             .metadata
             .insert("profile".into(), serde_json::json!(level.as_str()));
     }
-    let elapsed = t0.elapsed();
-    eprintln!(
-        "[apply_profiles] {} layers, {} shapes in {:.1} ms",
-        layered.layers.len(),
-        total_shapes,
-        elapsed.as_secs_f64() * 1000.0
-    );
 }
 
 fn refine_shape(shape: &mut vtracer::ir::Shape, profile: &LayerProfile) {
@@ -417,7 +420,9 @@ fn refine_shape(shape: &mut vtracer::ir::Shape, profile: &LayerProfile) {
     if profile.level == ProfileLevel::L2 {
         CleanupPass.run(&mut doc);
     }
-    *shape = doc.shapes.pop().expect("shape survives optimizer passes");
+    // If an optimizer pass drops the shape (e.g. it quantizes to zero area),
+    // fall back to the re-fitted pre-optimization geometry instead of panicking.
+    *shape = doc.shapes.pop().unwrap_or_else(|| shape.clone());
 }
 
 /// Re-fit one subpath through the level's curve pass.

@@ -1,333 +1,18 @@
 //! Tauri commands: in-process access to the tracing engine.
 
-use patternstudio_core::ir::LayeredDoc;
-use patternstudio_core::profiles::{apply_profiles, AutoDecision, IdealParams};
-use patternstudio_core::{key_for_source, LayerAssignment, SessionCache};
+use patternstudio_core::{key_for_source, SessionCache};
+use patternstudio_engine::{
+    build_vtracer_config, trace_bytes_once, trace_bytes_smart, trace_with_session, ActiveTraces,
+    TraceParams, TraceResult,
+};
 use patternstudio_patterns::{generate_sized, list_kinds};
-use patternstudio_svg::LayeredWriter;
-use patternstudio_tracer::{load_image, load_image_from_memory};
+use patternstudio_tracer::load_image;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{Emitter, Manager};
-use vtracer::config::{Clustering, FitMode, Hierarchical, Preset};
-use vtracer::progress::CancelToken;
-use vtracer::Session;
-
-// ── Trace params ──────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct TraceParams {
-    #[serde(default)]
-    pub clustering: Option<String>,
-    #[serde(default)]
-    pub hierarchical: Option<String>,
-    #[serde(default)]
-    pub color_precision: Option<u8>,
-    #[serde(default)]
-    pub layer_difference: Option<u8>,
-    #[serde(default)]
-    pub filter_speckle: Option<u32>,
-    #[serde(default)]
-    pub mode: Option<String>,
-    #[serde(default)]
-    pub simplify: Option<f64>,
-    #[serde(default)]
-    pub path_precision: Option<u8>,
-    #[serde(default)]
-    pub max_colors: Option<usize>,
-    #[serde(default = "default_preset")]
-    pub preset: String,
-    #[serde(default)]
-    pub line_art: bool,
-    #[serde(default)]
-    pub binary_adaptive: bool,
-    #[serde(default)]
-    pub binary_threshold: Option<u8>,
-    #[serde(default)]
-    pub watershed_detail: Option<u32>,
-    #[serde(default)]
-    pub palette: Option<String>,
-    #[serde(default)]
-    pub layers: usize,
-    #[serde(default)]
-    pub corner_threshold: Option<i32>,
-    #[serde(default)]
-    pub length_threshold: Option<f64>,
-    #[serde(default)]
-    pub optimize: Option<u8>,
-    #[serde(default)]
-    pub binary_adaptive_t: Option<f64>,
-    #[serde(default)]
-    pub binary_adaptive_window: Option<u32>,
-    #[serde(default)]
-    pub layer_strategy: Option<String>,
-    #[serde(default)]
-    pub complexity_threshold: Option<u8>,
-}
-
-fn default_preset() -> String {
-    "poster".into()
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LayerInfo {
-    pub name: String,
-    pub role: String,
-    pub shape_count: usize,
-    pub dominant_color: String,
-    pub preview_svg: String,
-    /// Multi-level parameter profile ("L0" coarse / "L1" standard / "L2" fine).
-    pub profile: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TraceOut {
-    pub svg: String,
-    pub width: u32,
-    pub height: u32,
-    pub shape_count: usize,
-    pub layer_count: usize,
-    pub layers: Vec<LayerInfo>,
-    /// Present when `layerStrategy: "auto"`: the chosen strategy and why.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub strategy_info: Option<AutoDecision>,
-    /// Elapsed time for the profile re-fitting step (ms), when auto layering is active.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub profile_ms: Option<u64>,
-}
-
-// ── Core trace logic ──────────────────────────────────────────────────────
-
-fn build_vtracer_config(params: &TraceParams) -> Result<vtracer::Config, String> {
-    let preset = match params.preset.to_ascii_lowercase().as_str() {
-        "bw" => Preset::Bw,
-        "photo" => Preset::Photo,
-        _ => Preset::Poster,
-    };
-    let mut config = vtracer::Config::from_preset(preset);
-
-    if let Some(ref c) = params.clustering {
-        config.clustering = match c.as_str() {
-            "binary" => Clustering::Binary,
-            "watershed" => Clustering::Watershed,
-            _ => Clustering::ColorCluster,
-        };
-    }
-    if let Some(ref h) = params.hierarchical {
-        config.hierarchical = match h.as_str() {
-            "cutout" => Hierarchical::Cutout,
-            _ => Hierarchical::Stacked,
-        };
-    }
-    if let Some(v) = params.color_precision {
-        config.color_precision = v as i32;
-    }
-    if let Some(v) = params.layer_difference {
-        config.layer_difference = v as i32;
-    }
-    if let Some(v) = params.filter_speckle {
-        config.filter_speckle = v as usize;
-    }
-    if let Some(ref m) = params.mode {
-        config.mode = match m.as_str() {
-            "pixel" => FitMode::Pixel,
-            "polygon" => FitMode::Polygon,
-            _ => FitMode::Spline,
-        };
-    }
-    if let Some(v) = params.simplify {
-        config.simplify = Some(v);
-    }
-    if let Some(v) = params.path_precision {
-        config.path_precision = Some(v as u32);
-    }
-    if let Some(v) = params.max_colors {
-        config.max_colors = Some(v);
-    }
-    config.binary_adaptive = params.binary_adaptive;
-    if let Some(v) = params.binary_threshold {
-        config.binary_threshold = v;
-    }
-    if let Some(v) = params.watershed_detail {
-        config.watershed_detail = v;
-    }
-    if let Some(ref p) = params.palette {
-        config.palette = patternstudio_tracer::parse_palette(p)?;
-    }
-    if let Some(v) = params.corner_threshold {
-        config.corner_threshold = v;
-    }
-    if let Some(v) = params.length_threshold {
-        config.length_threshold = v;
-    }
-    if let Some(v) = params.optimize {
-        config.optimize = v;
-    }
-    if let Some(v) = params.binary_adaptive_t {
-        config.binary_adaptive_t = v;
-    }
-    if let Some(v) = params.binary_adaptive_window {
-        config.binary_adaptive_window = v;
-    }
-    Ok(config)
-}
-
-/// One-shot trace from in-memory bytes: decode and run through a fresh session.
-/// Used by batch tracing, where each file is traced exactly once (no reuse).
-fn trace_bytes_internal(data: &[u8], params: &TraceParams) -> Result<TraceOut, String> {
-    let img = load_image_from_memory(data).map_err(|e| format!("failed to decode image: {e}"))?;
-    let config = build_vtracer_config(params)?;
-    let mut session = Session::new(img);
-    trace_with_session(&mut session, &config, params, &CancelToken::new())
-}
-
-/// Convert a smart-recommended parameter set into the command's `TraceParams`.
-/// Both structs use camelCase with identical field names, so a JSON round-trip
-/// is a safe, field-agnostic mapping.
-fn smart_to_trace_params(
-    p: &patternstudio_core::smart::SmartParams,
-) -> Result<TraceParams, String> {
-    let v = serde_json::to_value(p).map_err(|e| e.to_string())?;
-    serde_json::from_value(v).map_err(|e| e.to_string())
-}
-
-/// Smart trace of in-memory image bytes: analyze, trial-trace candidate
-/// parameter sets, then trace with the winner. `family` restricts the search
-/// to one preset family (absent = auto). Returns the result plus the decision.
-fn trace_bytes_smart(
-    data: &[u8],
-    family: Option<&str>,
-) -> Result<(TraceOut, patternstudio_core::smart::SmartDecision), String> {
-    let img = load_image_from_memory(data).map_err(|e| format!("failed to decode image: {e}"))?;
-    let decision = match family {
-        Some(f) => patternstudio_core::smart::recommend_for(&img, f),
-        None => patternstudio_core::smart::recommend(&img),
-    }
-    .map_err(|e| format!("smart analysis failed: {e}"))?;
-    let params = smart_to_trace_params(&decision.params)?;
-    let config = build_vtracer_config(&params)?;
-    let mut session = Session::new(img);
-    let out = trace_with_session(&mut session, &config, &params, &CancelToken::new())?;
-    Ok((out, decision))
-}
-
-/// Layering + SVG over a document produced by a [`Session`].
-///
-/// `session.render` reuses the cached segmentation when the clustering
-/// parameters are unchanged and only re-runs the cheap downstream stages — the
-/// core of the interactive tuning loop. Split out from the one-shot path so the
-/// `trace_file` command can drive a cached session.
-fn trace_with_session(
-    session: &mut Session,
-    config: &vtracer::Config,
-    params: &TraceParams,
-    cancel: &CancelToken,
-) -> Result<TraceOut, String> {
-    let mut on_progress = |_p: vtracer::progress::Progress| {};
-    let doc = session
-        .render_with_progress(config, cancel, &mut on_progress)
-        .map_err(|e| {
-            if matches!(e, vtracer::Error::Cancelled) {
-                "cancelled".into()
-            } else {
-                e.to_string()
-            }
-        })?;
-    if cancel.is_cancelled() {
-        return Err("cancelled".into());
-    }
-
-    // "auto": derive the strategy + multi-level profiles from the ideal params.
-    let is_auto = params.layer_strategy.as_deref() == Some("auto");
-    let ideal = IdealParams::from_options(
-        params.clustering.as_deref(),
-        params.line_art,
-        params.color_precision,
-        params.layer_difference,
-        params.max_colors,
-        params.simplify,
-        params.path_precision,
-        params.corner_threshold,
-        params.length_threshold,
-        params.filter_speckle,
-        params.optimize,
-    );
-    let (assignment, decision) = if is_auto {
-        let (a, d) = AutoDecision::assign(&doc, &ideal);
-        (a, Some(d))
-    } else {
-        let assignment = match params.layer_strategy.as_deref().unwrap_or("none") {
-            "color" => {
-                let n = params.layers.max(2);
-                LayerAssignment::by_color(&doc, n)
-            }
-            "complexity" => {
-                let n = params.layers.max(2);
-                let t = params.complexity_threshold.unwrap_or(70);
-                LayerAssignment::by_complexity(&doc, t, n)
-            }
-            "hybrid" => {
-                let n = params.layers.max(2);
-                let t = params.complexity_threshold.unwrap_or(70);
-                LayerAssignment::hybrid(&doc, n, t)
-            }
-            "spatial" => {
-                let n = params.layers.max(2);
-                let gap = (doc.width.min(doc.height) as f64 * 0.02).max(5.0);
-                LayerAssignment::by_spatial(&doc, n, gap)
-            }
-            _ => LayerAssignment::single_layer(),
-        };
-        (assignment, None)
-    };
-    if cancel.is_cancelled() {
-        return Err("cancelled".into());
-    }
-    let mut layered = LayeredDoc::from_vector_doc(&doc, &assignment);
-    let mut profile_ms: Option<u64> = None;
-    if is_auto {
-        let t = std::time::Instant::now();
-        apply_profiles(&mut layered, &ideal);
-        profile_ms = Some(t.elapsed().as_millis() as u64);
-    }
-
-    let svg = if params.line_art {
-        LayeredWriter::write_line_art(&layered)
-    } else {
-        LayeredWriter::write(&layered)
-    };
-
-    let layers: Vec<LayerInfo> = layered
-        .layers
-        .iter()
-        .enumerate()
-        .map(|(i, layer)| LayerInfo {
-            name: layer.name.clone(),
-            role: layer.role.to_string(),
-            shape_count: layer.shapes.len(),
-            dominant_color: LayeredWriter::layer_dominant_color(layer),
-            preview_svg: LayeredWriter::layer_preview_svg(&layered, i),
-            profile: layer.profile.as_str().into(),
-        })
-        .collect();
-
-    Ok(TraceOut {
-        svg,
-        width: layered.width,
-        height: layered.height,
-        shape_count: layered.total_shapes(),
-        layer_count: layered.layers.len(),
-        layers,
-        strategy_info: decision,
-        profile_ms,
-    })
-}
 
 /// Smart Preset: analyze the image and trial-trace candidate parameter sets,
 /// returning the best one plus the full candidate report.
@@ -361,8 +46,8 @@ pub struct PatternInfo {
 }
 
 #[tauri::command]
-pub async fn trace_bytes(data: Vec<u8>, params: TraceParams) -> Result<TraceOut, String> {
-    tauri::async_runtime::spawn_blocking(move || trace_bytes_internal(&data, &params))
+pub async fn trace_bytes(data: Vec<u8>, params: TraceParams) -> Result<TraceResult, String> {
+    tauri::async_runtime::spawn_blocking(move || trace_bytes_once(&data, &params))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -380,16 +65,10 @@ fn session_cache() -> &'static Mutex<SessionCache> {
     CACHE.get_or_init(|| Mutex::new(SessionCache::new(MAX_SESSIONS)))
 }
 
-/// One in-flight trace per image: the request id that owns it and the token a
-/// newer interactive request trips to abort it between pipeline batches.
-struct ActiveTrace {
-    request_id: String,
-    cancel: CancelToken,
-}
-
-fn active_traces() -> &'static Mutex<HashMap<String, ActiveTrace>> {
-    static ACTIVE: OnceLock<Mutex<HashMap<String, ActiveTrace>>> = OnceLock::new();
-    ACTIVE.get_or_init(|| Mutex::new(HashMap::new()))
+/// Process-wide in-flight trace registry (preemption + busy detection).
+fn active_traces() -> &'static ActiveTraces {
+    static ACTIVE: OnceLock<ActiveTraces> = OnceLock::new();
+    ACTIVE.get_or_init(ActiveTraces::new)
 }
 
 /// Trace an image file by path, reusing a cached session (and thus a cached
@@ -402,7 +81,7 @@ pub async fn trace_file(
     params: TraceParams,
     request_id: Option<String>,
     priority: Option<String>,
-) -> Result<TraceOut, String> {
+) -> Result<TraceResult, String> {
     let request_id = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let is_background = priority.as_deref() == Some("background");
     let image_key = file_path.clone();
@@ -410,22 +89,7 @@ pub async fn trace_file(
     // Preemption: an interactive request cancels whatever is in flight for
     // this image (it aborts between pipeline batches); a background request
     // (pre-warm) yields instead and is rejected as busy.
-    let cancel = CancelToken::new();
-    {
-        let mut active = active_traces().lock().unwrap();
-        match active.get(&image_key) {
-            Some(old) if is_background => return Err("busy".into()),
-            Some(old) => old.cancel.cancel(),
-            None => {}
-        }
-        active.insert(
-            image_key.clone(),
-            ActiveTrace {
-                request_id: request_id.clone(),
-                cancel: cancel.clone(),
-            },
-        );
-    }
+    let cancel = active_traces().register(&image_key, &request_id, is_background)?;
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         let path = Path::new(&file_path);
@@ -458,15 +122,7 @@ pub async fn trace_file(
     .map_err(|e| e.to_string())?;
 
     // Drop our registration only if we are still the current trace for this image.
-    {
-        let mut active = active_traces().lock().unwrap();
-        if active
-            .get(&image_key)
-            .is_some_and(|a| a.request_id == request_id)
-        {
-            active.remove(&image_key);
-        }
-    }
+    active_traces().finish(&image_key, &request_id);
     result
 }
 
@@ -771,7 +427,7 @@ pub async fn batch_trace(
                 if smart_clone {
                     trace_bytes_smart(&data, family_clone.as_deref()).map(|(out, d)| (out, Some(d)))
                 } else {
-                    trace_bytes_internal(&data, &params_clone).map(|out| (out, None))
+                    trace_bytes_once(&data, &params_clone).map(|out| (out, None))
                 }
             })
             .await

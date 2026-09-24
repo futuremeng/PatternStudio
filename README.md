@@ -47,10 +47,10 @@ The v0.1.0 refactor (28 commits) delivered:
 
 | Phase | Status | Highlights |
 |-------|--------|------------|
-| **v0.1.0** — Core Engine | ✅ Done | VTracer pipeline, 8 patterns, CLI, REST API, 19 tests |
-| **v0.2.0** — Distribution | 🔜 Next | crates.io publication, Homebrew tap, cross-platform release (macOS/Linux/Windows) |
-| **v0.3.0** — Web UI | ✅ Done | React frontend + API integration, drag-and-drop tracing, layer editor |
-| **v0.4.0** — Semantic Layers | 📋 Planned | VTracer segmentation for semantic layer separation (not just color-based) |
+| **v0.1.0** — Core Engine | ✅ Done | VTracer pipeline, 8 patterns, CLI, REST API |
+| **v0.2.0** — Web UI | ✅ Done | React frontend, drag-and-drop tracing, layer editor, pattern gallery |
+| **v0.3.0** — Smart Tracing | ✅ Done | Smart preset (analyze + trial-trace), Real-ESRGAN preprocess, 5 layering strategies, L0/L1/L2 profiles, session caching + preemption, batch trace (SSE), Tauri desktop app, shared engine crate |
+| **v0.4.0** — Distribution | 🔜 Next | crates.io publication, Homebrew tap, cross-platform release (macOS/Linux/Windows) |
 | **v0.5.0** — Plugin System | 💡 Idea | WASM plugin API for custom pattern generators and post-processors |
 | **v1.0.0** — Stable | 💡 Idea | API stability guarantee, Python bindings (PyO3), WASM bindings |
 
@@ -209,25 +209,43 @@ Debug the Rust side from VS Code: pick **"Debug Desktop (Tauri)"** in the Run an
 
 ## API Endpoints
 
+The server binds to **`127.0.0.1` by default** (set `HOST=0.0.0.0` to expose it
+on the network; `PORT` defaults to `8000`). When bound to a non-loopback
+address, the `file_path` source is disabled and project folders are restricted
+to the home directory.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/health` | Health check |
 | GET | `/api/v1/patterns` | List available pattern types |
-| POST | `/api/v1/uploads` | Upload image (multipart) |
-| POST | `/api/v1/trace` | Trace image → SVG |
+| POST | `/api/v1/uploads` | Upload image (multipart) → `asset_id` |
+| POST | `/api/v1/trace` | Trace image → layered SVG (cached sessions, preemption) |
+| POST | `/api/v1/smart` | Smart preset: analyze + trial-trace → best params |
+| POST | `/api/v1/preprocess` | Real-ESRGAN enhancement → `asset_id` |
+| GET | `/api/v1/assets/{id}` | Serve a registered asset |
 | POST | `/api/v1/pattern` | Generate pattern SVG |
+| POST/GET | `/api/v1/projects` | Create / list project folders |
+| GET/DELETE | `/api/v1/projects/{id}` | Get / delete a project |
+| GET | `/api/v1/projects/{id}/images/{file}` | Serve a project image |
+| POST | `/api/v1/projects/{id}/save-image` | Save an asset into the project |
+| POST | `/api/v1/projects/{id}/batch-trace` | Start batch trace → `job_id` |
+| GET | `/api/v1/projects/{id}/batch-trace/{job}/events` | SSE progress stream |
+| POST | `/api/v1/projects/{id}/batch-trace/{job}/cancel` | Cancel a batch job |
 
 ### Trace Request
 
 ```json
 {
-  "file_path": "/path/to/image.png",
-  "resolution": "medium",
-  "simplify": "low",
-  "preset": "poster",
-  "layers": 5
+  "assetId": "…",
+  "params": { "preset": "poster", "layers": 5, "layerStrategy": "auto" },
+  "requestId": "client-generated",
+  "priority": "interactive"
 }
 ```
+
+`assetId` (upload), `projectId` + `filename` (project folder), or `filePath`
+(loopback only) identify the source. `priority: "background"` pre-warms a
+session and yields to in-flight interactive traces (409 when busy).
 
 ### Trace Response
 
@@ -236,8 +254,10 @@ Debug the Rust side from VS Code: pick **"Debug Desktop (Tauri)"** in the Run an
   "svg": "<svg ...>...</svg>",
   "width": 477,
   "height": 477,
-  "shape_count": 2985,
-  "layer_count": 5
+  "shapeCount": 2985,
+  "layerCount": 5,
+  "layers": [ { "name": "background", "role": "background", "profile": "L0" } ],
+  "strategyInfo": { "strategy": "color", "reason": "…" }
 }
 ```
 
@@ -269,15 +289,22 @@ Debug the Rust side from VS Code: pick **"Debug Desktop (Tauri)"** in the Run an
 
 ```
 crates/
-├── patternstudio-core/       # IR (LayeredDoc), Config, Pipeline
-├── patternstudio-tracer/     # VTracer integration, MaskFrontend, image I/O
+├── patternstudio-core/       # IR (LayeredDoc), smart presets, layering strategy, profiles
+├── patternstudio-tracer/     # VTracer integration, image I/O, Real-ESRGAN preprocess
 ├── patternstudio-svg/        # Layered SVG writer
 ├── patternstudio-patterns/   # Procedural pattern generators (8 types)
+├── patternstudio-engine/     # Shared trace engine (params → config → session → layered SVG)
 ├── patternstudio-cli/        # CLI binary (`patternstudio`)
 ├── patternstudio-server/     # REST API server (`patternstudio-server`)
 ├── patternstudio-py/         # Python bindings (PyO3)
-└── patternstudio-wasm/       # WASM bindings (wasm-bindgen) + web demo
+├── patternstudio-wasm/       # WASM bindings (wasm-bindgen)
+└── desktop/                  # Tauri desktop app (in-process engine, same React UI)
 ```
+
+The web server and the desktop app both drive the same `patternstudio-engine`
+crate, so the trace pipeline (parameter mapping, vtracer config, session
+caching, layering, profiles, SVG output, preemption) has a single
+implementation.
 
 ## VTracer Presets
 
@@ -309,7 +336,7 @@ All shapes are preserved — no data loss.
 
 ```bash
 make build      # cargo build --workspace
-make test       # cargo test --workspace (19 tests)
+make test       # cargo test --workspace
 make release    # cargo build --release
 make clippy     # cargo clippy --workspace
 make fmt        # cargo fmt --all
@@ -320,14 +347,16 @@ make fmt        # cargo fmt --all
 | Category | Features |
 |----------|----------|
 | **Tracing** | VTracer 1.0, 3 presets (bw/poster/photo), 3 fit modes, full config |
-| **Layers** | Auto color-based separation, `--no-background`, editability metadata |
+| **Smart Preset** | Image analysis → trial-trace candidate families → best params (line art / bw / color / gradient / low-poly) |
+| **Preprocess** | Real-ESRGAN anime 4x enhancement with iteration control and on-disk cache |
+| **Layers** | 5 strategies (color / complexity / hybrid / spatial / auto), L0/L1/L2 multi-level profiles, editability metadata |
 | **Transforms** | `--scale`, `--rotate`, `--flip` (h/v/both) |
 | **Patterns** | 8 types: rosette, meander, scroll, taotie, ice_crack, cloud, wave, greek_key |
-| **Output** | Layered SVG, `--json` stats, `--open` browser preview |
-| **Batch** | Directory input, `--quiet` mode |
-| **API** | axum REST: /trace, /pattern, /patterns, /uploads, /health |
-| **CLI** | trace, pattern, list, serve, convert commands |
-| **Binary** | 2.5MB release, single static binary |
+| **Output** | Layered SVG, `--json` stats, `--open` browser preview, `--optimize` size reduction |
+| **Batch** | Directory input, `--quiet` mode, project batch trace with SSE progress |
+| **API** | axum REST: trace, smart, preprocess, pattern(s), uploads, assets, projects, batch-trace |
+| **UI** | React web UI + Tauri desktop app (same frontend, in-process tracing) |
+| **CLI** | trace, pattern, list, convert commands |
 
 ## License
 

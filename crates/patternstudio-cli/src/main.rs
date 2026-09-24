@@ -115,13 +115,7 @@ enum Command {
     },
     /// List available pattern types
     List,
-    /// Start the API server
-    Serve {
-        /// Port to listen on
-        #[arg(short, long, default_value_t = 8000)]
-        port: u16,
-    },
-    /// Convert/re-trace an existing SVG with different settings
+    /// Re-trace a raster image with different settings
     Convert {
         /// Input SVG file
         input: PathBuf,
@@ -214,7 +208,6 @@ fn main() -> ExitCode {
             open,
         }),
         Command::List => cmd_list(),
-        Command::Serve { port } => cmd_serve(port),
         Command::Convert {
             input,
             output,
@@ -584,27 +577,22 @@ fn cmd_convert(
 ) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Converting: {}", input.display());
 
-    // Load SVG as image (render to bitmap then re-trace)
-    // For now, we read the SVG and use the image crate to rasterize it
-    // This is a simplified approach - in production you'd use a proper SVG renderer
-    let svg_content = std::fs::read_to_string(input)?;
-    let _ = svg_content; // SVG content available for future use
-
-    // Use the tracer to re-process: load as image if possible, otherwise just copy
-    // For SVG input, we need to rasterize first. Use a simple approach:
-    // If the file is actually an image (misnamed), trace it normally.
-    // Otherwise, report that SVG re-tracing requires a rasterizer.
+    // Re-tracing needs a raster source; SVG input cannot be re-traced without
+    // a rasterizer, so fail with a clear message instead of a silent copy.
     let ext = input
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
         .unwrap_or_default();
     if ext == "svg" {
-        eprintln!("Note: SVG re-tracing requires rasterization. Using passthrough mode.");
-        eprintln!("For best results, convert SVG to PNG first, then use `trace`.");
-        std::fs::copy(input, output)?;
-        eprintln!("Copied: {}", output.display());
-    } else {
-        // It's actually an image file - trace it
+        return Err(format!(
+            "convert expects a raster image (png/jpg/...), got SVG: {input:?}. \
+             Rasterize it to PNG first (e.g. with a browser or `rsvg-convert`), \
+             then re-trace with `patternstudio trace`."
+        )
+        .into());
+    }
+    {
+        // It's an image file - trace it
         trace_single(
             input,
             output,
@@ -633,47 +621,68 @@ fn cmd_convert(
     Ok(())
 }
 
-fn cmd_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("Starting PatternStudio API server on port {port}...");
-    std::env::set_var("PORT", port.to_string());
-    // Delegate to the server binary's main logic
-    // For now, just print instructions since we can't easily call another binary's main
-    eprintln!("Use: cargo run --bin patternstudio-server");
-    eprintln!("Or: PORT={port} ./target/release/patternstudio-server");
-    Ok(())
+/// Optimize SVG by rounding the numbers inside path `d="..."` attributes to
+/// integers. Only `d` values are touched, so other attributes (stroke-width,
+/// viewBox, ...) keep their original precision, and non-ASCII content (e.g.
+/// comments) is passed through byte-for-byte.
+fn optimize_svg(svg: &str) -> String {
+    let mut out = String::with_capacity(svg.len());
+    for line in svg.lines() {
+        let mut rest = line;
+        // Match the path data attribute specifically (`<path d="..."`), so
+        // other attributes keep their original precision.
+        while let Some(pos) = rest.find(" d=\"") {
+            let before = &rest[..pos];
+            let after_open = &rest[pos + 4..];
+            match after_open.find('"') {
+                Some(end) => {
+                    out.push_str(before);
+                    out.push_str(" d=\"");
+                    out.push_str(&round_path_numbers(&after_open[..end]));
+                    out.push('"');
+                    rest = &after_open[end + 1..];
+                }
+                None => {
+                    out.push_str(rest);
+                    rest = "";
+                    break;
+                }
+            }
+        }
+        out.push_str(rest);
+        out.push('\n');
+    }
+    // The writer emits a trailing newline; `lines()` drops it.
+    if !svg.ends_with('\n') && !svg.is_empty() {
+        out.pop();
+    }
+    out
 }
 
-/// Optimize SVG by rounding coordinates to integers.
-fn optimize_svg(svg: &str) -> String {
+/// Round every number in a path `d` value to the nearest integer.
+fn round_path_numbers(d: &str) -> String {
     use std::fmt::Write;
-    let mut out = String::with_capacity(svg.len());
+    let mut out = String::with_capacity(d.len());
+    let chars: Vec<char> = d.chars().collect();
     let mut i = 0;
-    let bytes = svg.as_bytes();
-    while i < bytes.len() {
-        // Look for number patterns (digits, dots, minus)
-        if bytes[i].is_ascii_digit()
-            || (bytes[i] == b'.' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit())
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_ascii_digit() || (c == '.' && i + 1 < chars.len() && chars[i + 1].is_ascii_digit())
         {
-            // Find the start of the number
             let start = i;
-            while i < bytes.len()
-                && (bytes[i].is_ascii_digit() || bytes[i] == b'.' || bytes[i] == b'-')
+            while i < chars.len()
+                && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == '-')
             {
                 i += 1;
             }
-            let num_str = std::str::from_utf8(&bytes[start..i]).unwrap_or("0");
-            if let Ok(val) = num_str.parse::<f64>() {
-                let rounded = val.round();
-                if rounded.fract() == 0.0 {
-                    let _ = write!(out, "{}", rounded as i64);
-                } else {
-                    let _ = write!(out, "{:.1}", rounded);
-                }
+            let num: String = chars[start..i].iter().collect();
+            if let Ok(val) = num.parse::<f64>() {
+                let _ = write!(out, "{:.0}", val.round());
             } else {
-                out.push_str(num_str);
+                out.push_str(&num);
             }
         } else {
-            out.push(bytes[i] as char);
+            out.push(c);
             i += 1;
         }
     }
@@ -695,5 +704,35 @@ fn open_in_browser(path: &PathBuf) {
             .args(["/C", "start"])
             .arg(path)
             .spawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optimize_rounds_path_data_only() {
+        let svg = "<svg viewBox=\"0 0 100 100\">\n\
+                   <path d=\"M10.4 20.6 L30.1 40.9\" stroke-width=\"1.5\"/>\n\
+                   </svg>\n";
+        let out = optimize_svg(svg);
+        assert!(out.contains("d=\"M10 21 L30 41\""), "got: {out}");
+        // Non-path attributes keep their precision.
+        assert!(out.contains("viewBox=\"0 0 100 100\""));
+        assert!(out.contains("stroke-width=\"1.5\""));
+    }
+
+    #[test]
+    fn optimize_preserves_non_ascii() {
+        let svg = "<svg><!-- 中文注释 --><path d=\"M1.2 2.8\"/></svg>\n";
+        let out = optimize_svg(svg);
+        assert!(out.contains("中文注释"), "got: {out}");
+        assert!(out.contains("d=\"M1 3\""));
+    }
+
+    #[test]
+    fn round_path_numbers_handles_negative_and_exponents() {
+        assert_eq!(round_path_numbers("M-5.4 10.2 L0 1e-5"), "M-5 10 L0 1e-5");
     }
 }

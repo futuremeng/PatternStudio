@@ -15,6 +15,7 @@ patternstudio-core = { workspace = true }
 patternstudio-tracer = { workspace = true }
 patternstudio-svg = { workspace = true }
 patternstudio-patterns = { workspace = true }
+patternstudio-engine = { workspace = true }
 vtracer = { workspace = true }
 axum = { version = "0.8", features = ["multipart"] }
 tokio = { version = "1", features = ["full"] }

@@ -3009,8 +3009,8 @@ name = "patternstudio-desktop"
 version = "0.1.0"
 dependencies = [
  "patternstudio-core",
+ "patternstudio-engine",
  "patternstudio-patterns",
- "patternstudio-svg",
  "patternstudio-tracer",
  "rfd",
  "serde",
@@ -3019,6 +3019,17 @@ dependencies = [
  "tauri-build",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "patternstudio-engine"
+version = "0.1.0"
+dependencies = [
+ "patternstudio-core",
+ "patternstudio-svg",
+ "patternstudio-tracer",
+ "serde",
+ "serde_json",
  "vtracer",
 ]
 
@@ -3049,6 +3060,7 @@ dependencies = [
  "axum",
  "futures",
  "patternstudio-core",
+ "patternstudio-engine",
  "patternstudio-patterns",
  "patternstudio-svg",
  "patternstudio-tracer",
