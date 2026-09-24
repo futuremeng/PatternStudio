@@ -568,6 +568,28 @@ pub async fn preprocess_file(
     }))
 }
 
+/// Save a processed file (e.g. an enhanced iteration from the preprocess
+/// modal) into the project folder as a new image. On desktop the project id
+/// is the folder path and the image list is read from disk on demand, so no
+/// registry update is needed. Overwrites an existing file with the same name.
+#[tauri::command]
+pub async fn save_enhanced_image(
+    project_id: String,
+    file_path: String,
+    filename: String,
+) -> Result<String, String> {
+    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+        return Err("invalid filename".into());
+    }
+    let src = std::path::Path::new(&file_path);
+    if !src.exists() {
+        return Err("source file not found".into());
+    }
+    let dst = std::path::Path::new(&project_id).join(&filename);
+    std::fs::copy(src, &dst).map_err(|e| e.to_string())?;
+    Ok(filename)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PatternParams {

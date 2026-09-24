@@ -869,3 +869,124 @@ button.danger { color: var(--error); }
   stroke: #fff !important;
 }
 .back-btn:hover { color: var(--text); }
+
+/* ── Preprocess modal ─────────────────────────────────────────────────────
+   Full-screen-capable dialog for iterative digital-art enhancement. The
+   body reuses the editor's CompareViewer (preview-viewport / preview-stage),
+   so the viewer just needs a flex column to grow into. */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal {
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.modal-header h2 { margin: 0; font-size: 1rem; }
+.modal-footer {
+  display: flex; justify-content: flex-end; gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  border-top: 1px solid var(--border);
+}
+.preprocess-modal-overlay { padding: 0; }
+.preprocess-modal {
+  width: min(1100px, 100vw);
+  height: min(82vh, 100vh);
+}
+.preprocess-modal.fullscreen {
+  width: 100vw; height: 100vh;
+  border: none; border-radius: 0;
+}
+.preprocess-modal-actions { display: flex; gap: 0.4rem; }
+.preprocess-modal-body {
+  flex: 1;
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+.preprocess-modal-body .preview-viewport { flex: 1; min-height: 0; }
+.preprocess-modal-error {
+  padding: 0.4rem 1rem;
+  border-top: 1px solid var(--border);
+}
+/* Rounds input: how many chained enhancements one "enhance" click runs.
+   Matches the footer buttons' height (same padding / font-size). */
+.preprocess-steps {
+  width: 56px;
+  padding: 0.45rem 0.4rem;
+  font-size: 0.85rem;
+  text-align: center;
+  color: var(--text);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.preprocess-steps:focus { border-color: var(--accent); }
+.preprocess-steps:disabled { opacity: 0.5; }
+/* Iteration thumbnail strip: original first, then one tile per enhance run. */
+.preprocess-thumbs {
+  display: flex; align-items: stretch; gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+  background: var(--surface2);
+}
+.preprocess-thumb {
+  flex: 0 0 auto;
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
+  width: 72px; padding: 0.25rem;
+  border: 2px solid transparent; border-radius: 6px;
+  background: var(--surface); cursor: pointer;
+}
+.preprocess-thumb:hover { border-color: var(--border); }
+.preprocess-thumb.active { border-color: var(--accent); }
+.preprocess-thumb img {
+  width: 64px; height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+.preprocess-thumb-label {
+  font-size: 0.65rem; color: var(--text2);
+  max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.preprocess-thumb.active .preprocess-thumb-label { color: var(--accent); font-weight: 600; }
+/* "Served from cache" badge: top-right corner of the thumbnail image. */
+.preprocess-thumb-cached {
+  position: absolute; top: 0.2rem; right: 0.2rem;
+  font-size: 0.6rem; line-height: 1;
+  padding: 0.1rem 0.15rem;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 4px;
+  pointer-events: none;
+}
+/* Save checkbox: top-left corner of the thumbnail image. Clicking it only
+   toggles the save selection (stopPropagation keeps the button's
+   compare-select handler from firing). */
+.preprocess-thumb-check {
+  position: absolute; top: 0.2rem; left: 0.2rem;
+  width: 14px; height: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.6rem; line-height: 1; color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.preprocess-thumb-check:hover { border-color: var(--accent); }
+.preprocess-thumb-check.checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}

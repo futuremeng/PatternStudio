@@ -758,6 +758,51 @@ async fn serve_image(
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveImageRequest {
+    /// Source asset to copy (the selected enhanced iteration).
+    asset_id: String,
+    /// Destination filename inside the project folder.
+    filename: String,
+}
+
+/// Save a processed asset (e.g. an enhanced iteration from the preprocess
+/// modal) into the project folder as a new image and add it to the project's
+/// image list. Overwrites an existing file with the same name.
+async fn save_image(
+    State(state): State<AppState>,
+    UrlPath(id): UrlPath<String>,
+    Json(req): Json<SaveImageRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    if req.filename.contains("..") || req.filename.contains('/') || req.filename.contains('\\') {
+        return Err((StatusCode::BAD_REQUEST, "invalid filename".into()));
+    }
+    let src = state.assets.lock().unwrap().get(&req.asset_id).cloned()
+        .ok_or((StatusCode::NOT_FOUND, format!("asset {} not found", req.asset_id)))?;
+    if !src.exists() {
+        return Err((StatusCode::NOT_FOUND, "asset file missing".into()));
+    }
+    let project = state.projects.lock().unwrap().get(&id).cloned()
+        .ok_or((StatusCode::NOT_FOUND, "project not found".into()))?;
+    let dst = project.path.join(&req.filename);
+    let src_path = src.clone();
+    tokio::task::spawn_blocking(move || std::fs::copy(&src_path, &dst))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    // Add to the project's image list (deduped, sorted like list_image_files).
+    let mut projects = state.projects.lock().unwrap();
+    if let Some(p) = projects.get_mut(&id) {
+        if !p.images.contains(&req.filename) {
+            p.images.push(req.filename.clone());
+            p.images.sort();
+        }
+    }
+    save_projects(&state.projects_file, &projects);
+    Ok(Json(serde_json::json!({ "filename": req.filename })))
+}
+
+#[derive(Deserialize)]
 struct BatchTraceRequest {
     #[serde(default)]
     params: Option<TraceParams>,
@@ -934,6 +979,7 @@ async fn main() {
         .route("/api/v1/projects", post(create_project).get(list_projects))
         .route("/api/v1/projects/{id}", get(get_project).delete(delete_project))
         .route("/api/v1/projects/{id}/images/{filename}", get(serve_image))
+        .route("/api/v1/projects/{id}/save-image", post(save_image))
         .route("/api/v1/projects/{id}/batch-trace", post(start_batch_trace))
         .route("/api/v1/projects/{id}/batch-trace/{job_id}/events", get(batch_trace_events))
         .route("/api/v1/projects/{id}/batch-trace/{job_id}/cancel", post(cancel_batch_trace))

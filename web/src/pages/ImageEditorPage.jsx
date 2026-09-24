@@ -1,6 +1,6 @@
-import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getImageUrl, prepareSource, traceSource, smartSource, preprocessSource, newTraceRequestId, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams } from "../api.js";
+import { getImageUrl, prepareSource, traceSource, smartSource, newTraceRequestId, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams } from "../api.js";
 import { getCachedTrace, setCachedTrace, stableStringify } from "../traceCache.js";
 import { createTraceQueue } from "../traceQueue.js";
 import { loadSavedConfigs, saveConfig, deleteSavedConfig } from "../configStore.js";
@@ -9,6 +9,9 @@ import LayerPanel from "../components/LayerPanel.jsx";
 import ConfigStrip from "../components/ConfigStrip.jsx";
 import AppHeader from "../components/AppHeader.jsx";
 import AdvancedSvgEditor from "../components/AdvancedSvgEditor.jsx";
+import CompareViewer, { useViewportControls } from "../components/CompareViewer.jsx";
+import PreprocessModal from "../components/PreprocessModal.jsx";
+import { IconMaximize, IconRestore, IconSelect, IconZoomIn, IconZoomOut, IconFit, IconAdvanced } from "../components/icons.jsx";
 import { useI18n } from "../i18n/index.jsx";
 
 // Wait this long after a trace settles before snapshotting a user config (ms)
@@ -99,55 +102,6 @@ function buildDefaultConfigs(presetLabel) {
   }));
 }
 
-// --- Preview view-control icons (inline SVG, 16px) ---
-const IconMaximize = () => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" />
-  </svg>
-);
-const IconRestore = () => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" />
-  </svg>
-);
-const IconSelect = () => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-    <path d="M4 4l0 14 4.5-4.5 3 6.5 2.5-1.2-3-6.3 6 0z" />
-  </svg>
-);
-const IconFitWidth = () => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M10 8l-4 4 4 4M14 8l4 4-4 4" />
-  </svg>
-);
-const IconCompare = () => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-    <rect x="11" y="4" width="2" height="16" rx="1" />
-    <path d="M8 12L3 7v10z" />
-    <path d="M16 12l5-5v10z" />
-  </svg>
-);
-const IconZoomIn = () => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <path d="M12 5v14M5 12h14" />
-  </svg>
-);
-const IconZoomOut = () => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <path d="M5 12h14" />
-  </svg>
-);
-const IconFit = () => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="4" y="4" width="16" height="16" rx="2" />
-  </svg>
-);
-const IconAdvanced = () => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
-  </svg>
-);
-
 export default function ImageEditorPage() {
   const { t, presetLabel, locale } = useI18n();
   const { projectId, filename } = useParams();
@@ -164,7 +118,7 @@ export default function ImageEditorPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   // What the error banner is about, so its retry button re-runs the right thing.
-  const [errorKind, setErrorKind] = useState(null); // "trace" | "smart" | "preprocess" | "load"
+  const [errorKind, setErrorKind] = useState(null); // "trace" | "smart" | "load"
   // Bumped to re-run the image-load effect (retry after a load failure).
   const [reloadTick, setReloadTick] = useState(0);
   const [configs, setConfigs] = useState(() => buildDefaultConfigs(presetLabel));
@@ -173,39 +127,27 @@ export default function ImageEditorPage() {
     return key ? `default-${key}` : "default-color";
   });
   const [compareMode, setCompareMode] = useState("side"); // "side" | "overlay"
-  const [overlayPos, setOverlayPos] = useState(50); // divider position, percent
   const [smartInfo, setSmartInfo] = useState(null); // last Smart Preset decision
   const [smartBusy, setSmartBusy] = useState(false);
-  // Digital-art preprocessing (Real-ESRGAN anime): when set, traces run on the
-  // enhanced image instead of the original. `source` is traceable,
-  // `previewUrl` is displayable.
-  const [preprocessed, setPreprocessed] = useState(null);
-  const [preprocessBusy, setPreprocessBusy] = useState(false);
+  // Digital-art enhancement modal (Real-ESRGAN anime): iterative enhancement
+  // with per-iteration thumbnails; saving writes a new image into the project
+  // folder and switches the editor to it.
+  const [preprocessOpen, setPreprocessOpen] = useState(false);
   const configTimerRef = useRef(null);
   const userConfigSeq = useRef(0);
   const configsRef = useRef(configs);
-  const overlayRef = useRef(null);
-  const overlayDragging = useRef(false);
   const imageId = `${projectId}/${filename}`;
   const imageIdRef = useRef(imageId);
   useEffect(() => { imageIdRef.current = imageId; }, [imageId]);
-  // Trace-cache key: when preprocessing is on, results are cached under a
-  // "#pre" suffix so they never collide with the original image's results.
-  const traceCacheId = preprocessed ? `${imageId}#pre` : imageId;
 
-  // --- Preview view controls: maximize, zoom, fit ---
+  // --- Preview view controls: maximize ---
   const [maximized, setMaximized] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [actualSize, setActualSize] = useState(false);
   const [tool, setTool] = useState("none");
   const [advancedMode, setAdvancedMode] = useState(false);
-  const viewportRef = useRef(null);
-  const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 });
+  // Viewport of the advanced-mode branch (CompareViewer owns its own viewport).
+  const advViewportRef = useRef(null);
   // Imperative handle of the advanced editor (zoomIn/zoomOut/zoomFit).
   const advEditorRef = useRef(null);
-  // Mirror of advancedMode for the (mount-once) wheel listener below.
-  const advancedModeRef = useRef(false);
-  useEffect(() => { advancedModeRef.current = advancedMode; }, [advancedMode]);
   // Set before a non-retrace result update (advanced editor "done") so the
   // saved-layers reset effect below skips that one change.
   const skipLayerResetRef = useRef(false);
@@ -220,114 +162,23 @@ export default function ImageEditorPage() {
   const dragRef = useRef(null); // { idx, startClientX, startClientY, origDx, origDy }
   const selectedPathIdxsRef = useRef(new Set()); // Set of selected path indices
 
-  // Track the visible preview size so we can fit the image at zoom = 1 and
-  // scale it precisely for the zoom / fit-width / fit controls. Measured in a
-  // layout effect so the first paint already has a correct size.
-  useLayoutEffect(() => {
-    const el = viewportRef.current;
-    if (!el) return;
-    const measure = () => {
-      const r = el.getBoundingClientRect();
-      setViewportSize({ w: r.width, h: r.height });
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  // In advanced mode the preview stage is replaced by the advanced editor's
+  // own canvas; the page keeps the viewport chrome for that branch (wheel
+  // zoom routed to the editor, drag-to-pan).
+  useViewportControls({
+    viewportRef: advViewportRef,
+    enabled: advancedMode && !!result?.svg,
+    onWheelZoom: (dir) => {
+      if (dir) advEditorRef.current?.zoomIn();
+      else advEditorRef.current?.zoomOut();
+    },
+  });
 
-  // Reset the view when switching to a different image.
-  useEffect(() => { setZoom(1); setActualSize(false); setAdvancedMode(false); }, [imageId]);
+  // Reset the view when switching to a different image. The CompareViewer is
+  // keyed by imageId so its zoom / overlay-divider state resets with it.
+  useEffect(() => { setAdvancedMode(false); }, [imageId]);
 
   const toggleMaximize = useCallback(() => setMaximized(m => !m), []);
-  const zoomIn = useCallback(() => { setActualSize(false); setZoom(z => Math.min(8, z * 1.25)); }, []);
-  const zoomOut = useCallback(() => { setActualSize(false); setZoom(z => Math.max(0.1, z / 1.25)); }, []);
-  const fitScreen = useCallback(() => { setActualSize(false); setZoom(1); }, []);
-
-  // Ctrl/Cmd + wheel zoom on the preview viewport; plain wheel scrolls natively.
-  const panDragRef = useRef(null); // { startX, startY, scrollLeft, scrollTop }
-  useEffect(() => {
-    const el = viewportRef.current;
-    if (!el) return;
-    const onWheel = (e) => {
-      if (!e.ctrlKey && !e.metaKey) return; // let plain wheel scroll
-      e.preventDefault();
-      // In advanced mode the wheel zooms the SvgCanvas instead of the preview.
-      if (advancedModeRef.current) {
-        if (e.deltaY < 0) advEditorRef.current?.zoomIn();
-        else advEditorRef.current?.zoomOut();
-        return;
-      }
-      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-      setZoom(z => Math.min(8, Math.max(0.1, z * factor)));
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-
-    // Drag-to-pan when zoomed in
-    const onPointerDown = (e) => {
-      if (e.button !== 0) return;
-      if (el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight) return;
-      panDragRef.current = {
-        startX: e.clientX, startY: e.clientY,
-        scrollLeft: el.scrollLeft, scrollTop: el.scrollTop,
-      };
-      el.style.cursor = "grabbing";
-      el.setPointerCapture(e.pointerId);
-    };
-    const onPointerMove = (e) => {
-      const d = panDragRef.current;
-      if (!d) return;
-      el.scrollLeft = d.scrollLeft - (e.clientX - d.startX);
-      el.scrollTop = d.scrollTop - (e.clientY - d.startY);
-    };
-    const onPointerUp = (e) => {
-      if (!panDragRef.current) return;
-      panDragRef.current = null;
-      el.style.cursor = "";
-      el.releasePointerCapture(e.pointerId);
-    };
-    el.addEventListener("pointerdown", onPointerDown);
-    el.addEventListener("pointermove", onPointerMove);
-    el.addEventListener("pointerup", onPointerUp);
-    el.addEventListener("pointercancel", onPointerUp);
-
-    return () => {
-      el.removeEventListener("wheel", onWheel);
-      el.removeEventListener("pointerdown", onPointerDown);
-      el.removeEventListener("pointermove", onPointerMove);
-      el.removeEventListener("pointerup", onPointerUp);
-      el.removeEventListener("pointercancel", onPointerUp);
-    };
-  }, []);
-
-  // Fit metrics derived from the image's natural size and the viewport.
-  // Fall back to the source image's natural size so the layout (and the
-  // vector placeholder) is stable before the first trace result arrives.
-  const imgW = result?.width || srcSize.w || 0;
-  const imgH = result?.height || srcSize.h || 0;
-  const isSide = compareMode === "side";
-  const PAD = 16; // matches .preview-stage padding
-  const GAP = 16; // matches .before-after gap (fixed, does not scale)
-  const availW = Math.max(0, viewportSize.w - PAD * 2);
-  const availH = Math.max(0, viewportSize.h - PAD * 2);
-  // Scale at which the content exactly fills the viewport (zoom = 1).
-  const fitScale = imgW > 0 && imgH > 0 && availW > 0 && availH > 0
-    ? (isSide
-        ? Math.min(Math.max(0, availW - GAP) / (imgW * 2), availH / imgH)
-        : Math.min(availW / imgW, availH / imgH))
-    : 0;
-  // Scale at which the content exactly fills the viewport width (for 全宽).
-  const widthScale = imgW > 0 && availW > 0
-    ? (isSide ? Math.max(0, availW - GAP) / (imgW * 2) : availW / imgW)
-    : 0;
-  const hasDims = fitScale > 0;
-  const ds = hasDims ? fitScale * zoom : 0;
-  const boxStyle = hasDims ? { width: imgW * ds, height: imgH * ds } : undefined;
-  const imgStyle = hasDims ? boxStyle : { maxHeight: "70vh" };
-
-  const fitWidth = useCallback(() => {
-    if (fitScale > 0 && widthScale > 0) setZoom(widthScale / fitScale);
-  }, [fitScale, widthScale]);
 
   useEffect(() => { configsRef.current = configs; }, [configs]);
 
@@ -376,27 +227,6 @@ export default function ImageEditorPage() {
     })();
     return () => { cancelled = true; };
   }, [projectId, filename, reloadTick]);
-
-  // Overlay compare: move the divider to a pointer x position (percent).
-  const updateOverlayPos = useCallback((clientX) => {
-    const el = overlayRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0) return;
-    const pos = ((clientX - rect.left) / rect.width) * 100;
-    setOverlayPos(Math.min(100, Math.max(0, pos)));
-  }, []);
-
-  useEffect(() => {
-    const onMove = (e) => { if (overlayDragging.current) updateOverlayPos(e.clientX); };
-    const onUp = () => { overlayDragging.current = false; };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [updateOverlayPos]);
 
   // --- Patch selection & dragging helpers ---
 
@@ -720,39 +550,6 @@ export default function ImageEditorPage() {
     };
   }, [tool, result?.svg, compareMode, getSvgAndPaths, highlightPaths, renderControlPoints, clearPatchSelection]);
 
-  // --- Align the vector canvas with the original image (overlay mode) ---
-  // A fresh trace's SVG uses viewBox 0 0 imgW imgH, so stretching it to 100%
-  // of the compare box lines it up with the image. After the advanced
-  // editor's "shrink canvas" the viewBox carries an offset (x y w h) that
-  // crops the same image space; the svg element must then be placed at
-  // (x*ds, y*ds) with size (w*ds, h*ds). Stretching it to 100% instead would
-  // make the browser letterbox the content, and the vectors drift from the
-  // image by an amount that grows with the window size / zoom.
-  useEffect(() => {
-    if (compareMode === "side") return;
-    const container = svgContainerRef.current;
-    if (!container || !result?.svg) return;
-    const svg = container.querySelector("svg");
-    if (!svg) return;
-    const vb = svg.viewBox.baseVal;
-    if (!vb || vb.width === 0 || vb.height === 0) return;
-    const native = vb.x === 0 && vb.y === 0 && vb.width === imgW && vb.height === imgH;
-    if (native || !hasDims) {
-      // Default CSS sizing (100% of the compare box).
-      svg.style.position = "";
-      svg.style.left = "";
-      svg.style.top = "";
-      svg.style.width = "";
-      svg.style.height = "";
-      return;
-    }
-    svg.style.position = "absolute";
-    svg.style.left = `${vb.x * ds}px`;
-    svg.style.top = `${vb.y * ds}px`;
-    svg.style.width = `${vb.width * ds}px`;
-    svg.style.height = `${vb.height * ds}px`;
-  }, [result?.svg, compareMode, ds, hasDims, imgW, imgH]);
-
   /**
    * Write a trace result back to any config whose params match, so the
    * strip thumbnails (presets / saved configs) update without a reload.
@@ -808,10 +605,8 @@ export default function ImageEditorPage() {
    */
   const executeTask = useCallback(async (task) => {
     const imageIdNow = imageId;
-    // Preprocessing on → trace the enhanced image, cached under its own key.
-    const source = preprocessed?.source ?? prepareSource(projectId, filename);
-    const cacheId = preprocessed ? `${imageIdNow}#pre` : imageIdNow;
-    const cached = await getCachedTrace(cacheId, task.params).catch(() => null);
+    const source = prepareSource(projectId, filename);
+    const cached = await getCachedTrace(imageIdNow, task.params).catch(() => null);
     if (imageIdRef.current !== imageIdNow) return; // image switched mid-flight
     if (cached) {
       applyResultToConfigs(task.params, cached);
@@ -829,7 +624,7 @@ export default function ImageEditorPage() {
         priority: task.kind === "interactive" ? "interactive" : "background",
       });
       if (imageIdRef.current !== imageIdNow) return;
-      setCachedTrace(cacheId, task.params, res).catch(() => {});
+      setCachedTrace(imageIdNow, task.params, res).catch(() => {});
       applyResultToConfigs(task.params, res);
       if (task.kind === "interactive") {
         setResult(res);
@@ -842,7 +637,7 @@ export default function ImageEditorPage() {
       if (e?.code === "cancelled" || e?.code === "busy") return; // superseded
       if (task.kind === "interactive") { setError(t("editor.traceFailed", { msg: errMsg(e) })); setErrorKind("trace"); }
     }
-  }, [projectId, filename, imageId, preprocessed, applyResultToConfigs, scheduleUserConfig, t]);
+  }, [projectId, filename, imageId, applyResultToConfigs, scheduleUserConfig, t]);
 
   // One queue per image: interactive traces preempt background pre-warm.
   const queueRef = useRef(null);
@@ -860,8 +655,7 @@ export default function ImageEditorPage() {
     if (configTimerRef.current) clearTimeout(configTimerRef.current);
   }, []);
 
-  // Any param change (preset select, slider, smart tuning) — or a
-  // preprocess toggle, which swaps the traced source — enqueues an
+  // Any param change (preset select, slider, smart tuning) enqueues an
   // interactive trace. The queue debounces (merges slider drags), drops queued
   // background work, and the engine cancels whatever is in flight for this
   // image when the request lands — interactive traces always win the CPU.
@@ -869,7 +663,7 @@ export default function ImageEditorPage() {
   useEffect(() => {
     if (!imageUrl) return;
     queueRef.current?.enqueueInteractive(params);
-  }, [params, imageUrl, imageId, preprocessed]);
+  }, [params, imageUrl, imageId]);
 
   // Pre-warm in the background after each interactive trace settles: the
   // system presets plus any user-saved configs whose trace is not cached yet
@@ -930,9 +724,7 @@ export default function ImageEditorPage() {
     setError(null);
     setErrorKind(null);
     try {
-      // Smart-tune the image that is actually being traced (preprocessed
-      // when that toggle is on).
-      const source = preprocessed?.source ?? prepareSource(projectId, filename);
+      const source = prepareSource(projectId, filename);
       const family = familyFromParams(params);
       const decision = await smartSource(source, family);
       setSmartInfo(decision);
@@ -949,47 +741,7 @@ export default function ImageEditorPage() {
     } finally {
       setSmartBusy(false);
     }
-  }, [imageUrl, smartBusy, projectId, filename, params, preprocessed, t]);
-
-  /**
-   * Digital-art preprocessing: enhance the source image (Real-ESRGAN anime)
-   * and switch tracing to the enhanced result. Toggling off restores the
-   * original. The param effect re-traces automatically on the source swap.
-   */
-  const runPreprocess = useCallback(async () => {
-    if (!imageUrl || preprocessBusy) return;
-    setPreprocessBusy(true);
-    setError(null);
-    setErrorKind(null);
-    try {
-      const source = prepareSource(projectId, filename);
-      const out = await preprocessSource(source);
-      setPreprocessed(prev => {
-        if (prev?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(prev.previewUrl);
-        return out;
-      });
-    } catch (e) {
-      setError(t("editor.preprocessFailed", { msg: errMsg(e) }));
-      setErrorKind("preprocess");
-    } finally {
-      setPreprocessBusy(false);
-    }
-  }, [imageUrl, preprocessBusy, projectId, filename, t]);
-
-  const clearPreprocess = useCallback(() => {
-    setPreprocessed(prev => {
-      if (prev?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(prev.previewUrl);
-      return null;
-    });
-  }, []);
-
-  // Switching images drops the preprocessing state (and its blob URL).
-  useEffect(() => {
-    setPreprocessed(prev => {
-      if (prev?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(prev.previewUrl);
-      return null;
-    });
-  }, [imageId]);
+  }, [imageUrl, smartBusy, projectId, filename, params, t]);
 
   /**
    * Apply the preset-default result (from the smart comparison) instead of the
@@ -1019,13 +771,13 @@ export default function ImageEditorPage() {
     let cancelled = false;
     (async () => {
       for (const c of pending) {
-        const res = await getCachedTrace(traceCacheId, c.params).catch(() => null);
+        const res = await getCachedTrace(imageId, c.params).catch(() => null);
         if (cancelled || !res) continue;
         applyResultToConfigs(c.params, res);
       }
     })();
     return () => { cancelled = true; };
-  }, [result, busy, applyResultToConfigs, traceCacheId]);
+  }, [result, busy, applyResultToConfigs, imageId]);
 
   const onConfigDelete = useCallback((id) => {
     const target = configsRef.current.find(c => c.id === id);
@@ -1091,10 +843,6 @@ export default function ImageEditorPage() {
       })
     : smartInfo?.reason;
 
-  // The "original" panel shows the image that is actually being traced:
-  // the enhanced one when preprocessing is on, the source otherwise.
-  const activeSourceUrl = preprocessed?.previewUrl ?? imageUrl;
-
   return (
     <div className={`editor-page${maximized ? " maximized" : ""}${advancedMode ? " advanced" : ""}`}>
       <AppHeader
@@ -1122,17 +870,14 @@ export default function ImageEditorPage() {
             onChange={onParamsChange}
             onSmart={runSmart}
             smartBusy={smartBusy}
-            onPreprocess={runPreprocess}
-            onClearPreprocess={clearPreprocess}
-            preprocessBusy={preprocessBusy}
-            preprocessed={!!preprocessed}
+            onOpenPreprocess={() => setPreprocessOpen(true)}
             activeFamilyLabel={presetLabel(familyFromParams(params))}
           />
         </aside>
 
         <div className="editor-content">
-          <div className="preview-viewport" ref={viewportRef}>
-            {advancedMode && result?.svg ? (
+          {advancedMode && result?.svg ? (
+            <div className="preview-viewport" ref={advViewportRef}>
               <AdvancedSvgEditor
                 ref={advEditorRef}
                 svgString={result.svg}
@@ -1146,68 +891,7 @@ export default function ImageEditorPage() {
                 onCancel={() => setAdvancedMode(false)}
                 onSaveAsLayer={saveAdvancedAsLayer}
               />
-            ) : (
-            <div className="preview-stage">
-              {compareMode === "side" ? (
-                <div className="before-after">
-                  <div className="ba-panel">
-                    <span className="label">{t("editor.original")}</span>
-                    {activeSourceUrl ? (
-                      <img
-                        src={activeSourceUrl}
-                        alt="original"
-                        style={imgStyle}
-                        onLoad={(e) => setSrcSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-                      />
-                    ) : <div className="placeholder">{t("editor.loading")}</div>}
-                  </div>
-                  <div className="ba-panel">
-                    <span className="label">{t("editor.vector")}</span>
-                    {busy && result?.svg && <span className="busy-badge">{t("processing")}</span>}
-                    {result?.svg ? (
-                      <div className={`svg-frame${tool === "select" ? " select-mode" : ""}`} ref={svgContainerRef} style={boxStyle} dangerouslySetInnerHTML={{ __html: result.svg }} />
-                    ) : (
-                      <div className="placeholder" style={boxStyle}>{busy ? t("processing") : t("editor.clickToStart")}</div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="overlay-wrap">
-                  {busy && result?.svg && <span className="busy-badge">{t("processing")}</span>}
-                  {activeSourceUrl && result?.svg ? (
-                    <div
-                      className="overlay-compare"
-                      ref={overlayRef}
-                      style={boxStyle}
-                      onPointerDown={(e) => {
-                        e.preventDefault();
-                        overlayDragging.current = true;
-                        updateOverlayPos(e.clientX);
-                      }}
-                    >
-                      <img src={activeSourceUrl} alt="original" />
-                      <div className="overlay-top" style={{ clipPath: `inset(0 0 0 ${overlayPos}%)` }}>
-                        <div className={`overlay-svg${tool === "select" ? " select-mode" : ""}`} ref={svgContainerRef} dangerouslySetInnerHTML={{ __html: result.svg }} />
-                      </div>
-                      <span className="overlay-tag overlay-tag-left">{t("editor.original")}</span>
-                      <span className="overlay-tag overlay-tag-right">{t("editor.vector")}</span>
-                      <div className="overlay-divider" style={{ left: `${overlayPos}%` }}>
-                        <div className="overlay-handle">‹›</div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="placeholder" style={boxStyle}>{busy ? t("processing") : t("editor.clickToStart")}</div>
-                  )}
-                </div>
-              )}
-            </div>
-            )}
-          </div>
-
-          <div className="preview-controls">
-            {advancedMode ? (
-              // Same floating column, now driving the advanced editor's canvas.
-              <>
+              <div className="preview-controls">
                 <button onClick={() => advEditorRef.current?.zoomIn()} title={t("editor.zoomIn")} aria-label={t("editor.zoomIn")}>
                   <IconZoomIn />
                 </button>
@@ -1217,49 +901,42 @@ export default function ImageEditorPage() {
                 <button onClick={() => advEditorRef.current?.zoomFit()} title={t("editor.fit")} aria-label={t("editor.fit")}>
                   <IconFit />
                 </button>
-              </>
-            ) : (
-              <>
+              </div>
+            </div>
+          ) : (
+            <CompareViewer
+              key={imageId}
+              leftUrl={imageUrl}
+              right={result?.svg ? { svg: result.svg } : null}
+              contentSize={{ w: result?.width || srcSize.w || 0, h: result?.height || srcSize.h || 0 }}
+              onImageLoad={(w, h) => setSrcSize({ w, h })}
+              compareMode={compareMode}
+              onCompareModeChange={setCompareMode}
+              busy={busy}
+              leftLabel={t("editor.original")}
+              rightLabel={t("editor.vector")}
+              busyLabel={t("processing")}
+              placeholder={t("editor.clickToStart")}
+              leftPlaceholder={t("editor.loading")}
+              selectMode={tool === "select"}
+              svgContainerRef={svgContainerRef}
+              extraControls={<>
                 <button className={tool === "select" ? "active" : ""} onClick={() => setTool(tool === "select" ? "none" : "select")} title={tool === "select" ? t("editor.disableSelection") : t("editor.selectPatches")} aria-label={tool === "select" ? t("editor.disableSelection") : t("editor.selectPatches")}>
                   <IconSelect />
                 </button>
                 <button className={advancedMode ? "active" : ""} onClick={() => { if (!advancedMode && result?.svg) { setAdvancedMode(true); setTool("none"); } }} title={t("adv.enter")} aria-label={t("adv.enter")} disabled={!result?.svg || advancedMode}>
                   <IconAdvanced />
                 </button>
-                <button onClick={() => setCompareMode(compareMode === "side" ? "overlay" : "side")} title={compareMode === "side" ? t("editor.switchToOverlay") : t("editor.switchToSide")} aria-label={t("editor.toggleCompare")}>
-                  <IconCompare />
-                </button>
-                <button onClick={zoomIn} title={t("editor.zoomIn")} aria-label={t("editor.zoomIn")}>
-                  <IconZoomIn />
-                </button>
-                <button onClick={zoomOut} title={t("editor.zoomOut")} aria-label={t("editor.zoomOut")}>
-                  <IconZoomOut />
-                </button>
-                <button
-                  onClick={() => {
-                    if (actualSize) {
-                      setActualSize(false);
-                      setZoom(1);
-                    } else if (fitScale > 0) {
-                      setActualSize(true);
-                      setZoom(1 / fitScale);
-                    }
-                  }}
-                  title={actualSize ? t("editor.fit") : "1:1"}
-                  aria-label={actualSize ? t("editor.fit") : "1:1"}
-                >
-                  {actualSize ? <IconFit /> : <span style={{ fontSize: "0.65rem", fontWeight: 700 }}>1:1</span>}
-                </button>
-              </>
-            )}
-          </div>
+              </>}
+            />
+          )}
+
 
           {error && (
             <div className="error preview-error">
               {error}
               <button className="error-retry" onClick={() => {
-                if (errorKind === "preprocess") runPreprocess();
-                else if (errorKind === "smart") runSmart();
+                if (errorKind === "smart") runSmart();
                 else if (errorKind === "load") setReloadTick(x => x + 1);
                 else queueRef.current?.enqueueInteractive(params);
               }}>{t("retry")}</button>
@@ -1316,6 +993,15 @@ export default function ImageEditorPage() {
           onConfigRename={onConfigRename}
         />
       )}
+
+      <PreprocessModal
+        open={preprocessOpen}
+        onClose={() => setPreprocessOpen(false)}
+        projectId={projectId}
+        filename={filename}
+        imageUrl={imageUrl}
+        onSaved={(newFilename) => navigate(`/project/${encodeURIComponent(projectId)}/image/${encodeURIComponent(newFilename)}`)}
+      />
     </div>
   );
 }

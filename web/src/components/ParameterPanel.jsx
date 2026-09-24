@@ -56,7 +56,7 @@ function Group({ title, defaultOpen = true, children }) {
 
 export default function ParameterPanel({
   params, onChange, onSmart, smartBusy,
-  onPreprocess, onClearPreprocess, preprocessBusy, preprocessed,
+  onOpenPreprocess,
   activeFamilyLabel,
 }) {
   const { t } = useI18n();
@@ -69,20 +69,11 @@ export default function ParameterPanel({
     <div className="param-group">
       <button
         type="button"
-        className={`preprocess-btn${preprocessed ? " on" : ""}${preprocessBusy ? " busy" : ""}`}
-        onClick={() => {
-          if (preprocessBusy) return;
-          if (preprocessed) onClearPreprocess?.();
-          else onPreprocess?.();
-        }}
-        disabled={preprocessBusy}
+        className="preprocess-btn"
+        onClick={() => onOpenPreprocess?.()}
         title={t("param.preprocessTitle")}
       >
-        {preprocessBusy
-          ? t("param.preprocessBusy")
-          : preprocessed
-            ? `✓ ${t("param.preprocessOn")}`
-            : t("param.preprocess")}
+        {t("param.preprocess")}
       </button>
       <button
         type="button"

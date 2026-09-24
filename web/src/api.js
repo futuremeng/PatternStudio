@@ -145,7 +145,10 @@ export async function preprocessSource(source) {
   const res = await fetch(`${BASE}/preprocess`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ project_id: source.projectId, filename: source.filename }),
+    body: JSON.stringify({
+      asset_id: source.assetId ?? null,
+      project_id: source.projectId ?? null, filename: source.filename ?? null,
+    }),
   });
   const out = await handle(res);
   return {
@@ -156,6 +159,30 @@ export async function preprocessSource(source) {
     elapsedMs: out.elapsedMs,
     cached: out.cached,
   };
+}
+
+/**
+ * Save a processed image (an enhanced iteration) into the project folder as
+ * a new image. `source` is the selected iteration's traceable source
+ * ({ kind: "asset", assetId } on web, { kind: "file", path } on Tauri).
+ * Returns the saved filename. Invalidates the image-list cache so the
+ * project page picks the new file up.
+ */
+export async function saveEnhancedImage(projectId, source, filename) {
+  if (isTauri()) {
+    const name = await tauriInvoke("save_enhanced_image", {
+      projectId, filePath: source.path, filename,
+    });
+    invalidateImageListCache(projectId);
+    return name;
+  }
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectId)}/save-image`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ assetId: source.assetId, filename }),
+  });
+  const out = await handle(res);
+  return out.filename;
 }
 
 /** One-shot trace of an in-memory file (upload on web, bytes on Tauri). */
@@ -241,6 +268,10 @@ export async function deleteProject(projectId) {
 // directory on every load (a 100-image project would otherwise issue 100
 // redundant IPC calls before a single byte of image data is read).
 const imageListCache = new Map();
+/** Drop a folder's cached image list (call after the folder's contents change). */
+export function invalidateImageListCache(folderPath) {
+  imageListCache.delete(folderPath);
+}
 async function listImagesCached(folderPath) {
   if (imageListCache.has(folderPath)) return imageListCache.get(folderPath);
   const images = await tauriInvoke("list_images", { folderPath });

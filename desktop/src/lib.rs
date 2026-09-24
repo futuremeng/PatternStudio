@@ -10,7 +10,7 @@ pub fn run() {
     use commands::{
         add_recent_project, batch_trace, cancel_batch_trace, generate_pattern, list_images,
         list_patterns, open_folder, preprocess_file, read_image, recent_projects,
-        remove_recent_project, save_bytes,
+        remove_recent_project, save_bytes, save_enhanced_image,
         save_svg, smart_file, trace_bytes, trace_file,
     };
 
@@ -23,6 +23,7 @@ pub fn run() {
             list_images,
             read_image,
             preprocess_file,
+            save_enhanced_image,
             batch_trace,
             cancel_batch_trace,
             generate_pattern,
