@@ -38,6 +38,14 @@ export default {
   "detail.colorArt": "Farben",
   "detail.split": "Aufteilung",
   "detail.splitTitle": "Original / Linienzeichnung / Farben anzeigen",
+  "detail.treeConfirmed": "Bestätigt",
+  "detail.treeAll": "Alle",
+  "detail.treeFilterTitle": "Nur bestätigte Bilder anzeigen oder alle, inkl. automatisch generierter Vorschauen",
+  "detail.missingOriginal": "Original fehlt",
+  "detail.derivedCount": "{n} abgeleitet",
+  "lineage.enhance": "Verstärken",
+  "lineage.redraw": "Neuzeichnen",
+  "lineage.auto": "Auto",
 
   // Presets (MODE_PRESETS)
   "preset.lineArt": "Linienzeichnung",

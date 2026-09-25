@@ -38,6 +38,14 @@ export default {
   "detail.colorArt": "色稿",
   "detail.split": "三圖分割",
   "detail.splitTitle": "顯示原圖 / 線稿 / 色稿 的三圖分割視圖",
+  "detail.treeConfirmed": "僅確認",
+  "detail.treeAll": "全部",
+  "detail.treeFilterTitle": "只顯示人工確認的圖，或顯示全部（含自動生成的預覽圖）",
+  "detail.missingOriginal": "原始圖缺失",
+  "detail.derivedCount": "{n} 張衍生",
+  "lineage.enhance": "增強",
+  "lineage.redraw": "重繪",
+  "lineage.auto": "自動",
 
   // Presets (MODE_PRESETS)
   "preset.lineArt": "線稿",

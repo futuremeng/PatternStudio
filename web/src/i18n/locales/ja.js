@@ -38,6 +38,14 @@ export default {
   "detail.colorArt": "カラー",
   "detail.split": "分割表示",
   "detail.splitTitle": "元画像 / ライン画 / カラーの分割ビューを表示",
+  "detail.treeConfirmed": "確認済み",
+  "detail.treeAll": "すべて",
+  "detail.treeFilterTitle": "手動確認済みの画像のみ表示、または自動生成プレビューを含むすべてを表示",
+  "detail.missingOriginal": "元画像なし",
+  "detail.derivedCount": "派生 {n} 枚",
+  "lineage.enhance": "強化",
+  "lineage.redraw": "描き直し",
+  "lineage.auto": "自動",
 
   // Presets (MODE_PRESETS)
   "preset.lineArt": "ライン画",

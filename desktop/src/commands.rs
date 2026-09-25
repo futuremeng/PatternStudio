@@ -1,6 +1,6 @@
 //! Tauri commands: in-process access to the tracing engine.
 
-use patternstudio_core::{key_for_source, SessionCache};
+use patternstudio_core::{key_for_source, LineageEntry, LineageFile, SessionCache};
 use patternstudio_engine::{
     build_vtracer_config, layer_doc, lock_session, trace_bytes_once, trace_bytes_smart,
     trace_with_session, vectorize_preview, vectorize_signature, vectorize_with_session,
@@ -349,6 +349,61 @@ pub async fn list_images(folder_path: String) -> Result<Vec<ImageFile>, String> 
     .map_err(|e| e.to_string())?
 }
 
+/// One lineage entry as returned to the frontend: `file` is the map key
+/// (the generated filename, or the top-level filename for legacy inferred
+/// entries) plus the entry fields.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineageView {
+    pub file: String,
+    #[serde(flatten)]
+    pub entry: LineageEntry,
+}
+
+/// List the project's lineage entries (auto-generated and/or confirmed
+/// derived images). Reads the sidecar file, falling back to the legacy
+/// naming-convention inference for pre-existing projects. Entries whose
+/// files no longer exist on disk are dropped.
+#[tauri::command]
+pub async fn list_lineage(folder_path: String) -> Result<Vec<LineageView>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let folder = Path::new(&folder_path);
+        if !folder.is_dir() {
+            return Err(format!("not a directory: {folder_path}"));
+        }
+        // Top-level image names, for the inference fallback and existence checks.
+        let mut top_level = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(folder) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+                if IMAGE_EXTS.contains(&ext.as_str()) {
+                    top_level.push(name);
+                }
+            }
+        }
+        let file = LineageFile::load(folder, &top_level);
+        let gen_dir = patternstudio_core::generated_dir(folder);
+        let views: Vec<LineageView> = file
+            .entries
+            .into_iter()
+            .filter(|(key, entry)| {
+                // Keep the entry if either of its files still exists.
+                gen_dir.join(key).exists()
+                    || entry
+                        .confirmed_file
+                        .as_deref()
+                        .map(|f| folder.join(f).exists())
+                        .unwrap_or(false)
+            })
+            .map(|(file, entry)| LineageView { file, entry })
+            .collect();
+        Ok(views)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn read_image(file_path: String) -> Result<Vec<u8>, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -432,15 +487,24 @@ pub fn save_settings(
     }))
 }
 
-/// Save a processed file (e.g. an enhanced iteration from the preprocess
-/// modal) into the project folder as a new image. On desktop the project id
-/// is the folder path and the image list is read from disk on demand, so no
-/// registry update is needed. Overwrites an existing file with the same name.
+/// Save a processed image into the project. Two destinations:
+/// - `generated = false` (default): the project root — the user's "save as
+///   new image" confirmation; the file joins the top-level image list.
+/// - `generated = true`: `.patternstudio/generated/` — auto-persisted
+///   iterations (enhance/redraw previews) kept out of the image list.
+///
+/// When `lineage` is provided it is recorded in the project's sidecar
+/// lineage file under `lineage_key` (default: `filename`), so the derived
+/// tree survives re-opening the folder. Overwrites an existing file with
+/// the same name.
 #[tauri::command]
-pub async fn save_enhanced_image(
+pub async fn save_project_image(
     project_id: String,
     file_path: String,
     filename: String,
+    lineage: Option<LineageEntry>,
+    lineage_key: Option<String>,
+    generated: Option<bool>,
 ) -> Result<String, String> {
     if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
         return Err("invalid filename".into());
@@ -449,8 +513,34 @@ pub async fn save_enhanced_image(
     if !src.exists() {
         return Err("source file not found".into());
     }
-    let dst = std::path::Path::new(&project_id).join(&filename);
+    let folder = std::path::Path::new(&project_id);
+    if !folder.is_dir() {
+        return Err(format!("not a directory: {project_id}"));
+    }
+    let dst = if generated.unwrap_or(false) {
+        let dir = patternstudio_core::generated_dir(folder);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        dir.join(&filename)
+    } else {
+        folder.join(&filename)
+    };
     std::fs::copy(src, &dst).map_err(|e| e.to_string())?;
+    if let Some(entry) = lineage {
+        let key = lineage_key.unwrap_or_else(|| filename.clone());
+        let mut top_level = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(folder) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+                if IMAGE_EXTS.contains(&ext.as_str()) {
+                    top_level.push(name);
+                }
+            }
+        }
+        let mut file = LineageFile::load(folder, &top_level);
+        file.upsert(&key, entry);
+        file.save(folder).map_err(|e| e.to_string())?;
+    }
     Ok(filename)
 }
 

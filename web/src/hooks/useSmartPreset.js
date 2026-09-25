@@ -9,7 +9,7 @@ import { errMsg } from "../editorUtils.js";
  * preview updates for free.
  */
 export function useSmartPreset({
-  imageUrl, params, projectId, filename, imageId,
+  imageUrl, params, projectId, filename, imageId, isGenerated,
   t, applyParams, setError, setErrorKind,
 }) {
   const [smartInfo, setSmartInfo] = useState(null); // last Smart Preset decision
@@ -22,7 +22,7 @@ export function useSmartPreset({
     setError(null);
     setErrorKind(null);
     try {
-      const source = prepareSource(projectId, filename);
+      const source = prepareSource(projectId, filename, { generated: isGenerated });
       const family = familyFromParams(params);
       const decision = await smartSource(source, family);
       setSmartInfo(decision);
@@ -33,7 +33,7 @@ export function useSmartPreset({
     } finally {
       setSmartBusy(false);
     }
-  }, [imageUrl, smartBusy, projectId, filename, params, t, applyParams, setError, setErrorKind]);
+  }, [imageUrl, smartBusy, projectId, filename, isGenerated, params, t, applyParams, setError, setErrorKind]);
 
   /**
    * Apply the preset-default result (from the smart comparison) instead of

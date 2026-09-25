@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { prepareSource, preprocessSource, redrawSource, saveEnhancedImage } from "../api.js";
+import { prepareSource, preprocessSource, redrawSource, saveProjectImage } from "../api.js";
 import CompareViewer from "./CompareViewer.jsx";
 import { IconMaximize, IconRestore } from "./icons.jsx";
 import { useI18n } from "../i18n/index.jsx";
@@ -25,13 +25,24 @@ function errMsg(e) {
  *   prompt; each click restyles the *original* image (never an iteration)
  *   and appends the result to the strip.
  *
- * Both stages share the thumbnail strip of every iteration. Iteration
- * thumbnails carry a checkbox; "save as new image" writes every checked
- * iteration into the project folder (one file each, `_enhanced_n` /
- * `_redrawn_n`) and the editor switches to the last saved one.
+ * Both stages share the thumbnail strip of every iteration. Every iteration
+ * is auto-persisted into the project (`.patternstudio/generated/`) with a
+ * lineage record, so the project's list view can show the full derived tree
+ * (and trace each image back to its original). Iteration thumbnails carry a
+ * checkbox; "save as new image" confirms every checked iteration into the
+ * project folder (one file each, `_enhanced_n` / `_redrawn_n`, marked
+ * `confirmed` in the lineage) and the editor switches to the last saved one.
  */
-export default function PreprocessModal({ open, onClose, projectId, filename, imageUrl, onSaved }) {
+export default function PreprocessModal({ open, onClose, projectId, filename, imageUrl, currentLineage, isGenerated, onSaved }) {
   const { t } = useI18n();
+  // Root original of this image: when the modal is about a derived image
+  // (itself confirmed from an earlier original), trace back to its root so
+  // new iterations hang off the same tree.
+  const rootName = currentLineage?.root || filename;
+  // Stable base name derived from the current filename; confirmed iterations
+  // are saved as `{base}_{enhanced|redrawn}_{n}.png` (n = 1-based strip
+  // position), so re-saving the same set replaces the same files.
+  const baseName = filename.replace(/\.[^.]+$/, "");
   // Each entry: { id, source, previewUrl, width, height, elapsedMs, cached }
   const [iterations, setIterations] = useState([]);
   // Index into `iterations`, or -1 for the original image.
@@ -113,6 +124,34 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
   }, [open, busy, saving, onClose]);
 
   /**
+   * Auto-persist a generated iteration into the project (`.patternstudio/
+   * generated/`) with its lineage record, so the project's list view can show
+   * the full derived tree. Returns { genName, entry } on success, or null
+   * when persistence failed — the iteration stays usable in the strip, just
+   * untracked in the lineage tree.
+   */
+  const persistIteration = useCallback(async (source, kind, parent, meta, pos) => {
+    const suffix = kind === "redraw" ? "redrawn" : "enhanced";
+    const genName = `${baseName}_${suffix}_${pos}_${Date.now()}.png`;
+    const entry = {
+      root: rootName,
+      parent,
+      kind,
+      confirmed: false,
+      confirmedFile: null,
+      createdAt: new Date().toISOString(),
+      meta,
+    };
+    try {
+      await saveProjectImage(projectId, source, genName, { generated: true, lineage: entry });
+      return { genName, entry };
+    } catch (e) {
+      console.warn("Failed to auto-save iteration:", e);
+      return null;
+    }
+  }, [baseName, rootName, projectId]);
+
+  /**
    * Run `steps` enhancement rounds: round 1 takes the currently selected
    * iteration (or the original), each following round chains from the
    * previous round's result. Every round lands in the thumbnail strip and
@@ -128,7 +167,12 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
     setError(null);
     let input = selectedIdx >= 0
       ? iterations[selectedIdx].source
-      : prepareSource(projectId, filename);
+      : prepareSource(projectId, filename, { generated: isGenerated });
+    // Lineage parent of round 1: the selected iteration's persisted file
+    // (when auto-saved), else the image this modal is about.
+    let parent = selectedIdx >= 0
+      ? (iterations[selectedIdx].genName || filename)
+      : filename;
     try {
       for (let i = 0; i < total; i++) {
         setProgress({ current: i + 1, total });
@@ -138,16 +182,21 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
           if (out.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(out.previewUrl);
           return;
         }
-        setIterations(prev => [...prev, { ...out, kind: "enhance", id: `it-${seq}-${i}-${Date.now()}` }]);
+        const persisted = await persistIteration(out.source, "enhance", parent, {}, startLen + i + 1);
+        setIterations(prev => [...prev, {
+          ...out, kind: "enhance", id: `it-${seq}-${i}-${Date.now()}`,
+          genName: persisted?.genName || null, entry: persisted?.entry || null,
+        }]);
         setSelectedIdx(startLen + i); // select the new latest iteration
         input = out.source; // next round chains from this result
+        if (persisted) parent = persisted.genName; // chain lineage from the persisted file
       }
     } catch (e) {
       if (seq === runSeq.current) setError(t("preprocess.failed", { msg: errMsg(e) }));
     } finally {
       if (seq === runSeq.current) { setBusy(false); setProgress(null); }
     }
-  }, [busy, steps, selectedIdx, iterations, projectId, filename, t]);
+  }, [busy, steps, selectedIdx, iterations, projectId, filename, isGenerated, t, persistIteration]);
 
   // Selecting a preset fills the prompt textarea ("custom" keeps the text).
   const applyPreset = useCallback((key) => {
@@ -174,7 +223,7 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
     setProgress({ current: 1, total: 1 });
     setError(null);
     // Redraw always starts from the original image, never from an iteration.
-    const input = prepareSource(projectId, filename);
+    const input = prepareSource(projectId, filename, { generated: isGenerated });
     const seed = seedText.trim() === "" ? null : Number(seedText);
     try {
       const out = await redrawSource(input, p, Number.isFinite(seed) ? seed : null);
@@ -183,19 +232,26 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
         if (out.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(out.previewUrl);
         return;
       }
-      setIterations(prev => [...prev, { ...out, kind: "redraw", id: `it-${seq}-${startLen}-${Date.now()}` }]);
+      const persisted = await persistIteration(
+        out.source, "redraw", filename,
+        { prompt: p, seed: Number.isFinite(seed) ? seed : null },
+        startLen + 1,
+      );
+      setIterations(prev => [...prev, {
+        ...out, kind: "redraw", id: `it-${seq}-${startLen}-${Date.now()}`,
+        genName: persisted?.genName || null, entry: persisted?.entry || null,
+      }]);
       setSelectedIdx(startLen); // select the new latest iteration
     } catch (e) {
       if (seq === runSeq.current) setError(t("redraw.failed", { msg: errMsg(e) }));
     } finally {
       if (seq === runSeq.current) { setBusy(false); setProgress(null); }
     }
-  }, [busy, prompt, seedText, iterations, projectId, filename, t]);
+  }, [busy, prompt, seedText, iterations, projectId, filename, isGenerated, t, persistIteration]);
 
   // Stable base name derived from the original filename; each checked
   // iteration is saved as `{base}_enhanced_{n}.png` (n = its 1-based position
   // in the strip), so re-saving the same set replaces the same files.
-  const baseName = filename.replace(/\.[^.]+$/, "");
 
   const toggleChecked = useCallback((i) => {
     setCheckedIdxs(prev => {
@@ -206,8 +262,9 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
     });
   }, []);
 
-  // Save every checked iteration as its own new image (sequentially, in strip
-  // order), then switch the editor to the last saved one.
+  // Confirm every checked iteration into the project folder (sequentially, in
+  // strip order), marking its lineage entry `confirmed`, then switch the
+  // editor to the last saved one.
   const runSave = useCallback(async () => {
     if (checkedIdxs.size === 0 || saving) return;
     setSaving(true);
@@ -217,7 +274,18 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
       let last = null;
       for (const i of idxs) {
         const suffix = iterations[i].kind === "redraw" ? "redrawn" : "enhanced";
-        last = await saveEnhancedImage(projectId, iterations[i].source, `${baseName}_${suffix}_${i + 1}.png`);
+        const confirmedName = `${baseName}_${suffix}_${i + 1}.png`;
+        // Reuse the entry recorded at auto-persist time (root/parent/kind/
+        // meta), now marked confirmed; fall back to no lineage when the
+        // iteration was never persisted.
+        const entry = iterations[i].entry
+          ? { ...iterations[i].entry, confirmed: true, confirmedFile: confirmedName }
+          : null;
+        last = await saveProjectImage(projectId, iterations[i].source, confirmedName, {
+          generated: false,
+          lineage: entry,
+          lineageKey: iterations[i].genName || null,
+        });
       }
       onSaved?.(last);
       onClose();

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getImageUrl, prepareSource, vectorizeSource, layerSource, cancelTrace, newTraceRequestId, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams, splitTraceParams, mergeTraceParams } from "../api.js";
+import { getImageUrl, getProjectLineage, prepareSource, vectorizeSource, layerSource, cancelTrace, newTraceRequestId, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams, splitTraceParams, mergeTraceParams } from "../api.js";
 import { getCachedTrace, setCachedTrace, getCachedVectorize, setCachedVectorize, stableStringify } from "../traceCache.js";
 import { createTraceQueue } from "../traceQueue.js";
 import { loadSavedConfigs, saveConfig, deleteSavedConfig } from "../configStore.js";
@@ -68,6 +68,39 @@ export default function ImageEditorPage() {
   // with per-iteration thumbnails; saving writes a new image into the project
   // folder and switches the editor to it.
   const [preprocessOpen, setPreprocessOpen] = useState(false);
+  // Lineage entry of the current image (null when it is an original): lets
+  // the preprocess modal trace new iterations back to the root original.
+  const [currentLineage, setCurrentLineage] = useState(null);
+  // True once the lineage lookup for the current image has settled (success
+  // or failure). The auto-trace waits for it: whether the current file lives
+  // in the generated subfolder is derived from the lineage, so tracing
+  // before the lookup settles could read the wrong path.
+  const [lineageLoaded, setLineageLoaded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setCurrentLineage(null);
+    setLineageLoaded(false);
+    getProjectLineage(projectId)
+      .then((entries) => {
+        if (cancelled) return;
+        const match = entries.find(e => e.confirmedFile === filename || e.file === filename);
+        setCurrentLineage(match || null);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLineageLoaded(true); });
+    return () => { cancelled = true; };
+  }, [projectId, filename]);
+  // The current file is an auto-generated iteration (stored under
+  // .patternstudio/generated/) when the lineage entry's `file` (the map key)
+  // is this filename and it was not confirmed *as this same filename*
+  // (legacy inferred entries key by the top-level name, so file ===
+  // confirmedFile there).
+  const isGenerated = !!(
+    lineageLoaded &&
+    currentLineage &&
+    currentLineage.file === filename &&
+    currentLineage.confirmedFile !== filename
+  );
   const configTimerRef = useRef(null);
   const userConfigSeq = useRef(0);
   const configsRef = useRef(configs);
@@ -86,6 +119,10 @@ export default function ImageEditorPage() {
   // The previous { projectId, filename }, so a switch can cancel the old
   // image's in-flight engine work (interactive trace or orphaned pre-warm).
   const prevSourceRef = useRef(null);
+  // imageId -> the source token that image actually traced with (its path may
+  // point at the generated subfolder), so switching away can cancel the
+  // in-flight engine work with the exact same key.
+  const sourceByImageRef = useRef(new Map());
 
   // --- Preview view controls: maximize ---
   const [maximized, setMaximized] = useState(false);
@@ -207,7 +244,11 @@ export default function ImageEditorPage() {
     const prev = prevSourceRef.current;
     prevSourceRef.current = { projectId, filename };
     if (prev && (prev.projectId !== projectId || prev.filename !== filename)) {
-      cancelTrace(prepareSource(prev.projectId, prev.filename));
+      // Cancel with the source the previous image actually traced with; fall
+      // back to the default top-level source when it never traced.
+      const prevSource = sourceByImageRef.current.get(`${prev.projectId}/${prev.filename}`)
+        || prepareSource(prev.projectId, prev.filename);
+      cancelTrace(prevSource);
     }
   }, [projectId, filename]);
 
@@ -258,7 +299,7 @@ export default function ImageEditorPage() {
   }, []);
   const mergedParams = mergeTraceParams(params, layerParams);
   const { smartInfo, setSmartInfo, smartBusy, runSmart, applyPresetResult } = useSmartPreset({
-    imageUrl, params: mergedParams, projectId, filename, imageId,
+    imageUrl, params: mergedParams, projectId, filename, imageId, isGenerated,
     t, applyParams, setError, setErrorKind,
   });
 
@@ -322,7 +363,8 @@ export default function ImageEditorPage() {
    */
   const executeTask = useCallback(async (task) => {
     const imageIdNow = imageId;
-    const source = prepareSource(projectId, filename);
+    const source = prepareSource(projectId, filename, { generated: isGenerated });
+    sourceByImageRef.current.set(imageIdNow, source);
     const isInteractive = task.kind === "interactive";
     const priority = isInteractive ? "interactive" : "background";
     const { trace: tracePart } = splitTraceParams(task.params);
@@ -400,7 +442,7 @@ export default function ImageEditorPage() {
       setErrorKind(null);
       scheduleUserConfig(task.params, { ...lres, processed: true });
     }
-  }, [projectId, filename, imageId, applyResultToConfigs, scheduleUserConfig, t]);
+  }, [projectId, filename, isGenerated, imageId, applyResultToConfigs, scheduleUserConfig, t]);
 
   // The queue reports which stage (if any) an interactive task is running.
   // `busy` (main preview badge + pre-warm/backfill gating) covers any
@@ -436,10 +478,12 @@ export default function ImageEditorPage() {
   useEffect(() => {
     // Only vectorize once the URL actually belongs to the current image (see
     // urlImageIdRef): on a switch, the stale URL from the previous image is
-    // still around for a frame and must not start a throwaway trace.
-    if (!imageUrl || urlImageIdRef.current !== imageId) return;
+    // still around for a frame and must not start a throwaway trace. Also
+    // wait for the lineage lookup (lineageLoaded): the trace source path
+    // depends on whether this file lives in the generated subfolder.
+    if (!imageUrl || urlImageIdRef.current !== imageId || !lineageLoaded) return;
     queueRef.current?.enqueueInteractive("vectorize", mergeTraceParams(params, layerParamsRef.current));
-  }, [params, imageUrl, imageId]);
+  }, [params, imageUrl, imageId, lineageLoaded]);
 
   // Layering param changes: no automatic processing — the user applies them
   // via the "Process" button. Deselect the active config (the full param
@@ -563,7 +607,10 @@ export default function ImageEditorPage() {
     <div className={`editor-page${maximized ? " maximized" : ""}${advancedMode ? " advanced" : ""}`}>
       <AppHeader
         title={filename}
-        onBack={() => navigate(`/project/${encodeURIComponent(projectId)}`)}
+        // Back to the lineage tree page of this image's root original (the
+        // page the editor is reached from); for an original image that is
+        // its own tree page.
+        onBack={() => navigate(`/project/${encodeURIComponent(projectId)}/tree/${encodeURIComponent(currentLineage?.root || filename)}`)}
       >
         <button onClick={onDownload} disabled={!result?.svg}>{t("editor.downloadSvg")}</button>
         {result?.width > 0 && (
@@ -704,6 +751,8 @@ export default function ImageEditorPage() {
         projectId={projectId}
         filename={filename}
         imageUrl={imageUrl}
+        currentLineage={currentLineage}
+        isGenerated={isGenerated}
         onSaved={(newFilename) => navigate(`/project/${encodeURIComponent(projectId)}/image/${encodeURIComponent(newFilename)}`)}
       />
     </div>

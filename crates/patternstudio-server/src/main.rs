@@ -13,7 +13,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::stream::{Stream, StreamExt};
 use patternstudio_core::smart::SmartDecision;
-use patternstudio_core::{key_for_source, SessionCache};
+use patternstudio_core::{
+    generated_dir, key_for_source, LineageEntry, LineageFile, SessionCache,
+};
 use patternstudio_engine::{
     build_vtracer_config, layer_doc, lock_session, trace_with_session, vectorize_preview,
     vectorize_signature, vectorize_with_session, ActiveTraces, DocCache, TraceParams, TraceResult,
@@ -212,9 +214,19 @@ fn resolve_source_path(
             return Err((StatusCode::BAD_REQUEST, "invalid filename".into()));
         }
         let p = project.path.join(name);
-        if !p.exists() {
-            return Err((StatusCode::NOT_FOUND, "image not found".into()));
-        }
+        // Fall back to the auto-generated iterations subfolder (tracing an
+        // unconfirmed derived image opened from the lineage tree), mirroring
+        // the serve_image handler.
+        let p = if p.exists() {
+            p
+        } else {
+            let gen = generated_dir(&project.path).join(name);
+            if gen.exists() {
+                gen
+            } else {
+                return Err((StatusCode::NOT_FOUND, "image not found".into()));
+            }
+        };
         Ok(p)
     } else if let Some(ref fp) = req.file_path {
         // Arbitrary file read: only allowed when the server is bound to
@@ -716,6 +728,39 @@ struct ProjectInfo {
     path: String,
     image_count: usize,
     images: Vec<String>,
+    /// Lineage entries (derived images) for the project's list/tree view.
+    lineage: Vec<LineageView>,
+}
+
+/// One lineage entry as returned to the frontend: `file` is the map key
+/// (the generated filename, or the top-level filename for legacy inferred
+/// entries) plus the entry fields.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LineageView {
+    file: String,
+    #[serde(flatten)]
+    entry: LineageEntry,
+}
+
+/// Load the project's lineage entries (sidecar file, with legacy naming
+/// inference fallback), dropping entries whose files no longer exist.
+fn project_lineage(p: &Project) -> Vec<LineageView> {
+    let top_level = list_image_files(&p.path);
+    let file = LineageFile::load(&p.path, &top_level);
+    let gen_dir = generated_dir(&p.path);
+    file.entries
+        .into_iter()
+        .filter(|(key, entry)| {
+            gen_dir.join(key).exists()
+                || entry
+                    .confirmed_file
+                    .as_deref()
+                    .map(|f| p.path.join(f).exists())
+                    .unwrap_or(false)
+        })
+        .map(|(file, entry)| LineageView { file, entry })
+        .collect()
 }
 
 fn project_to_info(p: &Project) -> ProjectInfo {
@@ -725,6 +770,7 @@ fn project_to_info(p: &Project) -> ProjectInfo {
         path: p.path.to_string_lossy().to_string(),
         image_count: p.images.len(),
         images: p.images.clone(),
+        lineage: project_lineage(p),
     }
 }
 
@@ -833,9 +879,18 @@ async fn serve_image(
         return Err((StatusCode::BAD_REQUEST, "invalid filename".into()));
     }
     let img_path = project.path.join(&filename);
-    if !img_path.exists() {
-        return Err((StatusCode::NOT_FOUND, "image not found".into()));
-    }
+    // Fall back to the auto-generated iterations subfolder (list-view
+    // thumbnails of unconfirmed derived images).
+    let img_path = if img_path.exists() {
+        img_path
+    } else {
+        let gen = generated_dir(&project.path).join(&filename);
+        if gen.exists() {
+            gen
+        } else {
+            return Err((StatusCode::NOT_FOUND, "image not found".into()));
+        }
+    };
     let data = tokio::task::spawn_blocking(move || std::fs::read(&img_path))
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
@@ -868,11 +923,25 @@ struct SaveImageRequest {
     asset_id: String,
     /// Destination filename inside the project folder.
     filename: String,
+    /// Lineage record to persist (provenance of the derived image).
+    #[serde(default)]
+    lineage: Option<LineageEntry>,
+    /// Map key for the lineage entry (the generated filename when confirming
+    /// a previously auto-persisted iteration). Defaults to `filename`.
+    #[serde(default)]
+    lineage_key: Option<String>,
+    /// True: store under `.patternstudio/generated/` (auto-persisted
+    /// iteration, kept out of the project image list).
+    #[serde(default)]
+    generated: bool,
 }
 
-/// Save a processed asset (e.g. an enhanced iteration from the preprocess
-/// modal) into the project folder as a new image and add it to the project's
-/// image list. Overwrites an existing file with the same name.
+/// Save a processed asset into the project folder. `generated = false`
+/// (default) copies into the project root and adds the file to the project's
+/// image list (the user's "save as new image" confirmation); `generated =
+/// true` copies into `.patternstudio/generated/` (auto-persisted iteration).
+/// A provided `lineage` entry is recorded in the project's sidecar lineage
+/// file. Overwrites an existing file with the same name.
 async fn save_image(
     State(state): State<AppState>,
     UrlPath(id): UrlPath<String>,
@@ -901,21 +970,44 @@ async fn save_image(
         .get(&id)
         .cloned()
         .ok_or((StatusCode::NOT_FOUND, "project not found".into()))?;
-    let dst = project.path.join(&req.filename);
+    let dst = if req.generated {
+        let dir = generated_dir(&project.path);
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        dir.join(&req.filename)
+    } else {
+        project.path.join(&req.filename)
+    };
     let src_path = src.clone();
     tokio::task::spawn_blocking(move || std::fs::copy(&src_path, &dst))
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    // Add to the project's image list (deduped, sorted like list_image_files).
-    let mut projects = state.projects.lock().unwrap();
-    if let Some(p) = projects.get_mut(&id) {
-        if !p.images.contains(&req.filename) {
-            p.images.push(req.filename.clone());
-            p.images.sort();
-        }
+    if let Some(entry) = req.lineage {
+        let key = req.lineage_key.unwrap_or_else(|| req.filename.clone());
+        let folder = project.path.clone();
+        tokio::task::spawn_blocking(move || {
+            let top_level = list_image_files(&folder);
+            let mut file = LineageFile::load(&folder, &top_level);
+            file.upsert(&key, entry);
+            file.save(&folder)
+        })
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
-    save_projects(&state.projects_file, &projects);
+    if !req.generated {
+        // Add to the project's image list (deduped, sorted like list_image_files).
+        let mut projects = state.projects.lock().unwrap();
+        if let Some(p) = projects.get_mut(&id) {
+            if !p.images.contains(&req.filename) {
+                p.images.push(req.filename.clone());
+                p.images.sort();
+            }
+        }
+        save_projects(&state.projects_file, &projects);
+    }
     Ok(Json(serde_json::json!({ "filename": req.filename })))
 }
 

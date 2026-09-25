@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getImageUrl, startBatchTrace, presetFullParams, MODE_PRESETS } from "../api.js";
 import { getCachedTrace, setCachedTrace } from "../traceCache.js";
 import AppHeader from "../components/AppHeader.jsx";
+import { useProject } from "../hooks/useProject.js";
 import { useI18n } from "../i18n/index.jsx";
 
 /**
@@ -136,7 +137,7 @@ export default function ProjectDetailPage() {
   const { t, presetLabel } = useI18n();
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const [project, setProject] = useState(null);
+  const { project, error } = useProject(projectId);
   // Batch: the user picks a preset family (what output they want), then
   // chooses fixed params or smart tuning (best params within that family).
   const [batchPreset, setBatchPreset] = useState("lineArt");
@@ -146,42 +147,28 @@ export default function ProjectDetailPage() {
   const [batchStatus, setBatchStatus] = useState(null);
   const [batchProgress, setBatchProgress] = useState(null);
   const [batchFailed, setBatchFailed] = useState(0);
-  const [error, setError] = useState(null);
   // Cached line/color SVGs per image, for the split preview on processed cards
   const [previews, setPreviews] = useState({});
   const batchHandleRef = useRef(null);
   const cancelRef = useRef(false);
 
-  useEffect(() => {
-    // Load project info (image thumbnails are lazy-loaded per card below).
-    (async () => {
-      try {
-        const { listProjects } = await import("../api.js");
-        const data = await listProjects();
-        const proj = (data.projects || []).find(p => p.id === projectId);
-        if (proj) {
-          setProject(proj);
-        } else {
-          // Tauri mode: project id is the folder path
-          setProject({ id: projectId, name: projectId.split("/").pop(), path: projectId, images: [] });
-          const { invoke } = await import("@tauri-apps/api/core");
-          const images = await invoke("list_images", { folderPath: projectId });
-          setProject(p => ({ ...p, images: images.map(i => i.name), imageCount: images.length }));
-        }
-      } catch (e) {
-        setError(e.message);
-      }
-    })();
-  }, [projectId]);
+  // Originals only: top-level images that are not a confirmed derived image
+  // (those live in the lineage tree page). The grid and batch processing
+  // both target this set.
+  const originals = useMemo(() => {
+    if (!project?.images?.length) return [];
+    const confirmedFiles = new Set((project.lineage || []).map(e => e.confirmedFile).filter(Boolean));
+    return project.images.filter(n => !confirmedFiles.has(n));
+  }, [project]);
 
   // Load cached line/color results (fixed preset params or smart results)
   // for the split preview
   useEffect(() => {
-    if (!project?.images?.length) return;
+    if (!originals.length) return;
     let cancelled = false;
     (async () => {
       const found = {};
-      for (const name of project.images) {
+      for (const name of originals) {
         const imageId = `${projectId}/${name}`;
         const [lineFixed, lineSmart, colorFixed, colorSmart] = await Promise.all([
           getCachedTrace(imageId, presetFullParams("lineArt")).catch(() => null),
@@ -196,7 +183,7 @@ export default function ProjectDetailPage() {
       if (!cancelled) setPreviews(found);
     })();
     return () => { cancelled = true; };
-  }, [project, projectId]);
+  }, [originals, projectId]);
 
   const onBatchTrace = useCallback(async () => {
     if (!project) return;
@@ -210,11 +197,13 @@ export default function ProjectDetailPage() {
       smart: batchSmart,
       params: presetFullParams(family),
     }];
-    // Cache-first: only send images without a same-params result to the backend
+    // Cache-first: only send images without a same-params result to the backend.
+    // Originals only — confirmed derived images live in the lineage tree page
+    // and are never batch-processed here.
     const plan = [];
     for (const job of jobs) {
       const missing = [];
-      for (const name of project.images) {
+      for (const name of originals) {
         const key = job.smart ? smartCacheKey(job.family) : job.params;
         const cached = await getCachedTrace(`${projectId}/${name}`, key).catch(() => null);
         if (!cached) missing.push(name);
@@ -225,7 +214,7 @@ export default function ProjectDetailPage() {
     if (total === 0) {
       setBatchStatus("done");
       setBatchFailed(0);
-      setBatchProgress({ current: project.images.length, total: project.images.length, file: "" });
+      setBatchProgress({ current: originals.length, total: originals.length, file: "" });
       return;
     }
     cancelRef.current = false;
@@ -291,7 +280,7 @@ export default function ProjectDetailPage() {
       setBatchFailed(failedCount);
       setBatchProgress({ current: total, total, file: "" });
     }
-  }, [project, projectId, batchPreset, batchSmart]);
+  }, [project, originals, projectId, batchPreset, batchSmart]);
 
   const onCancelBatch = useCallback(() => {
     cancelRef.current = true;
@@ -322,7 +311,7 @@ export default function ProjectDetailPage() {
     <div className="project-detail-page">
       <AppHeader
         title={project.name}
-        meta={t("imageCount", { n: project.images?.length || 0 })}
+        meta={t("imageCount", { n: originals.length })}
         onBack={() => navigate("/")}
       >
         <label className="split-toggle" title={t("detail.splitTitle")}>
@@ -363,14 +352,14 @@ export default function ProjectDetailPage() {
 
       <div className="image-grid-scroll">
         <div className="image-grid">
-          {(project.images || []).map(filename => (
+          {originals.map(filename => (
             <ImageCard
               key={filename}
               projectId={projectId}
               filename={filename}
               preview={previews[filename]}
               showSplit={showSplit}
-              onClick={() => navigate(`/project/${encodeURIComponent(projectId)}/image/${encodeURIComponent(filename)}`)}
+              onClick={() => navigate(`/project/${encodeURIComponent(projectId)}/tree/${encodeURIComponent(filename)}`)}
             />
           ))}
         </div>

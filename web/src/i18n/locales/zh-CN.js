@@ -38,6 +38,14 @@ export default {
   "detail.colorArt": "色稿",
   "detail.split": "三图分割",
   "detail.splitTitle": "显示原图 / 线稿 / 色稿 的三图分割视图",
+  "detail.treeConfirmed": "仅确认",
+  "detail.treeAll": "全部",
+  "detail.treeFilterTitle": "只显示人工确认的图，或显示全部（含自动生成的预览图）",
+  "detail.missingOriginal": "原始图缺失",
+  "detail.derivedCount": "{n} 张衍生",
+  "lineage.enhance": "增强",
+  "lineage.redraw": "重绘",
+  "lineage.auto": "自动",
 
   // Presets (MODE_PRESETS)
   "preset.lineArt": "线稿",

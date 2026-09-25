@@ -36,10 +36,18 @@ export async function health() {
  *   decoded session, so no bytes cross the IPC bridge on every tweak).
  * - Web: the project id + filename (the server reads it from the project
  *   folder, so no re-upload on every parameter change).
+ *
+ * `opts.generated`: the image lives in the auto-generated iterations
+ * subfolder (`.patternstudio/generated/`) instead of the project root.
+ * Tauri: the path is adjusted here. Web: the server falls back to the
+ * generated subfolder automatically when the file is not at the top level.
  */
-export function prepareSource(projectId, filename) {
+export function prepareSource(projectId, filename, opts = {}) {
   if (isTauri()) {
-    return { kind: "file", path: `${projectId}/${filename}` };
+    const path = opts.generated
+      ? `${projectId}/.patternstudio/generated/${filename}`
+      : `${projectId}/${filename}`;
+    return { kind: "file", path };
   }
   return { kind: "project", projectId, filename };
 }
@@ -329,16 +337,24 @@ export async function saveSettings(qwen) {
 }
 
 /**
- * Save a processed image (an enhanced iteration) into the project folder as
- * a new image. `source` is the selected iteration's traceable source
- * ({ kind: "asset", assetId } on web, { kind: "file", path } on Tauri).
+ * Save a processed image into the project. `opts`:
+ * - `generated`: true → auto-persisted iteration (stored under
+ *   `.patternstudio/generated/`, kept out of the project image list);
+ *   false → the user's "save as new image" confirmation (project root).
+ * - `lineage`: provenance record ({ root, parent, kind, confirmed,
+ *   confirmedFile, createdAt, meta }) persisted in the project's sidecar
+ *   lineage file so the derived tree survives re-opening the folder.
+ * - `lineageKey`: map key for the lineage entry (the generated filename when
+ *   confirming a previously auto-persisted iteration).
  * Returns the saved filename. Invalidates the image-list cache so the
  * project page picks the new file up.
  */
-export async function saveEnhancedImage(projectId, source, filename) {
+export async function saveProjectImage(projectId, source, filename, opts = {}) {
+  const { generated = false, lineage = null, lineageKey = null } = opts;
   if (isTauri()) {
-    const name = await tauriInvoke("save_enhanced_image", {
+    const name = await tauriInvoke("save_project_image", {
       projectId, filePath: source.path, filename,
+      lineage, lineageKey, generated,
     });
     invalidateImageListCache(projectId);
     return name;
@@ -346,10 +362,29 @@ export async function saveEnhancedImage(projectId, source, filename) {
   const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectId)}/save-image`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ assetId: source.assetId, filename }),
+    body: JSON.stringify({ assetId: source.assetId, filename, generated, lineage, lineageKey }),
   });
   const out = await handle(res);
   return out.filename;
+}
+
+/**
+ * The project's lineage entries (derived images with provenance). Each entry:
+ * { file, root, parent, kind, confirmed, confirmedFile, createdAt, meta } —
+ * `file` is the generated filename (or the top-level filename for legacy
+ * inferred entries).
+ */
+export async function getProjectLineage(projectId) {
+  if (isTauri()) {
+    try {
+      return await tauriInvoke("list_lineage", { folderPath: projectId });
+    } catch {
+      return [];
+    }
+  }
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectId)}`);
+  const out = await handle(res);
+  return out.lineage || [];
 }
 
 /** One-shot trace of an in-memory file (upload on web, bytes on Tauri). */
@@ -400,12 +435,19 @@ export async function listProjects() {
     for (const p of recents) {
       try {
         const images = await tauriInvoke("list_images", { folderPath: p.path });
+        let lineage = [];
+        try {
+          lineage = await tauriInvoke("list_lineage", { folderPath: p.path });
+        } catch {
+          /* lineage is optional; the list view degrades to flat rows */
+        }
         projects.push({
           id: p.path,
           name: p.name,
           path: p.path,
           imageCount: images.length,
           images: images.map(i => i.name),
+          lineage,
         });
       } catch {
         // Folder no longer exists (moved/deleted); skip it.
@@ -451,8 +493,10 @@ export async function getImageUrl(projectId, filename) {
   if (isTauri()) {
     const images = await listImagesCached(projectId);
     const img = images.find(i => i.name === filename);
-    if (!img) throw new Error(`Image not found: ${filename}`);
-    const bytes = await tauriInvoke("read_image", { filePath: img.path });
+    // Fall back to the auto-generated iterations subfolder (unconfirmed
+    // derived images shown in the list view's lineage tree).
+    const path = img ? img.path : `${projectId}/.patternstudio/generated/${filename}`;
+    const bytes = await tauriInvoke("read_image", { filePath: path });
     const blob = new Blob([new Uint8Array(bytes)]);
     return URL.createObjectURL(blob);
   }

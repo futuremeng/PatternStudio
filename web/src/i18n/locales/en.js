@@ -38,6 +38,14 @@ export default {
   "detail.colorArt": "Color",
   "detail.split": "Split view",
   "detail.splitTitle": "Show the original / line art / color split view",
+  "detail.treeConfirmed": "Confirmed",
+  "detail.treeAll": "All",
+  "detail.treeFilterTitle": "Show only confirmed images, or all including auto-generated previews",
+  "detail.missingOriginal": "Missing original",
+  "detail.derivedCount": "{n} derived",
+  "lineage.enhance": "Enhance",
+  "lineage.redraw": "Redraw",
+  "lineage.auto": "Auto",
 
   // Presets (MODE_PRESETS)
   "preset.lineArt": "Line art",

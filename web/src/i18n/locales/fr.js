@@ -38,6 +38,14 @@ export default {
   "detail.colorArt": "Couleurs",
   "detail.split": "Vue scindée",
   "detail.splitTitle": "Afficher l'original / les traits / les couleurs",
+  "detail.treeConfirmed": "Confirmées",
+  "detail.treeAll": "Toutes",
+  "detail.treeFilterTitle": "Afficher uniquement les images confirmées ou toutes, y compris les aperçus générés automatiquement",
+  "detail.missingOriginal": "Original manquant",
+  "detail.derivedCount": "{n} dérivées",
+  "lineage.enhance": "Renforcer",
+  "lineage.redraw": "Redessiner",
+  "lineage.auto": "Auto",
 
   // Presets (MODE_PRESETS)
   "preset.lineArt": "Traits",

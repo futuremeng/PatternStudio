@@ -305,6 +305,75 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   background: var(--surface);
 }
+/* ── List view: one row per original image + its derived lineage tree ── */
+.image-list-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+.image-list {
+  padding: 1rem 1.25rem 2rem;
+  display: flex; flex-direction: column; gap: 0.6rem;
+  max-width: 1100px; margin: 0 auto;
+}
+.lineage-row {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.lineage-row-head {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.5rem 0.75rem; cursor: pointer;
+}
+.lineage-row-head:hover { background: var(--surface2); }
+.lineage-toggle {
+  border: none; background: none; cursor: pointer;
+  color: var(--text2); font-size: 0.8rem; width: 1.2rem; padding: 0;
+  flex-shrink: 0;
+}
+.lineage-thumb {
+  position: relative; overflow: hidden; background: var(--surface2);
+  border-radius: 6px; flex-shrink: 0;
+}
+.lineage-thumb.row { width: 44px; height: 44px; }
+.lineage-thumb.node { width: 30px; height: 30px; }
+.lineage-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lineage-thumb-missing {
+  position: absolute; inset: 0; display: flex;
+  align-items: center; justify-content: center;
+  color: var(--text2); font-size: 0.8rem;
+}
+.lineage-name {
+  font-size: 0.78rem; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+.lineage-count {
+  margin-left: auto; font-size: 0.68rem; color: var(--text2);
+  background: var(--surface2); padding: 0.1rem 0.45rem;
+  border-radius: 8px; flex-shrink: 0;
+}
+.lineage-tree {
+  padding: 0.25rem 0.75rem 0.6rem 2.4rem;
+  display: flex; flex-direction: column; gap: 0.3rem;
+}
+.lineage-node {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.2rem 0.4rem; border-radius: 6px;
+}
+.lineage-node.clickable { cursor: pointer; }
+.lineage-node.clickable:hover { background: var(--surface2); }
+.lineage-badge {
+  font-size: 0.62rem; padding: 0.08rem 0.4rem;
+  border-radius: 8px; flex-shrink: 0; white-space: nowrap;
+}
+.lineage-badge.kind-enhance { background: var(--badge-processing-bg); color: var(--badge-processing-text); }
+.lineage-badge.kind-redraw { background: var(--badge-done-bg); color: var(--success); }
+.lineage-badge.auto {
+  background: var(--surface2); color: var(--text2);
+  border: 1px dashed var(--border);
+}
+/* Nested derived levels: connector line + indent. */
+.lineage-children {
+  margin-left: 0.45rem; padding-left: 0.6rem;
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 0.3rem;
+}
 .status-badge {
   display: inline-block; padding: 0.1rem 0.4rem;
   border-radius: 4px; font-size: 0.65rem; margin-left: 0.3rem;
