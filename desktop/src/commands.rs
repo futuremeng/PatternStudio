@@ -2,8 +2,9 @@
 
 use patternstudio_core::{key_for_source, SessionCache};
 use patternstudio_engine::{
-    build_vtracer_config, lock_session, trace_bytes_once, trace_bytes_smart, trace_with_session,
-    ActiveTraces, TraceParams, TraceResult,
+    build_vtracer_config, layer_doc, lock_session, trace_bytes_once, trace_bytes_smart,
+    trace_with_session, vectorize_preview, vectorize_signature, vectorize_with_session,
+    ActiveTraces, DocCache, TraceParams, TraceResult, VectorizeResult,
 };
 use patternstudio_patterns::{generate_sized, list_kinds};
 use patternstudio_tracer::load_image;
@@ -65,6 +66,17 @@ fn session_cache() -> &'static Mutex<SessionCache> {
     CACHE.get_or_init(|| Mutex::new(SessionCache::new(MAX_SESSIONS)))
 }
 
+/// How many vectorized documents to keep around for instant layering re-runs.
+const MAX_DOCS: usize = 8;
+
+/// Process-wide LRU cache of vectorized documents, keyed by
+/// `file_path::vectorize_signature`. The layering stage re-runs against a
+/// cached doc without re-vectorizing.
+fn doc_cache() -> &'static Mutex<DocCache> {
+    static DOCS: OnceLock<Mutex<DocCache>> = OnceLock::new();
+    DOCS.get_or_init(|| Mutex::new(DocCache::new(MAX_DOCS)))
+}
+
 /// Process-wide in-flight trace registry (preemption + busy detection).
 fn active_traces() -> &'static ActiveTraces {
     static ACTIVE: OnceLock<ActiveTraces> = OnceLock::new();
@@ -117,6 +129,100 @@ pub async fn trace_file(
     .map_err(|e| e.to_string())?;
 
     // Drop our registration only if we are still the current trace for this image.
+    active_traces().finish(&image_key, &request_id);
+    result
+}
+
+/// Vectorization stage only: image → VectorDoc, cached under
+/// `file_path::vectorize_signature` so layering can re-run without
+/// re-vectorizing. Returns the raw document as a single-layer SVG.
+#[tauri::command]
+pub async fn vectorize_file(
+    file_path: String,
+    params: TraceParams,
+    request_id: Option<String>,
+    priority: Option<String>,
+) -> Result<VectorizeResult, String> {
+    let request_id = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let is_background = priority.as_deref() == Some("background");
+    let image_key = file_path.clone();
+
+    let cancel = active_traces().register(&image_key, &request_id, is_background)?;
+
+    let doc_image_key = image_key.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let path = Path::new(&file_path);
+        if !path.exists() {
+            return Err(format!("image not found: {file_path}"));
+        }
+        let config = build_vtracer_config(&params)?;
+        let key = key_for_source(path, &config.segment_key());
+        let session = {
+            let mut cache = session_cache().lock().unwrap();
+            let p: PathBuf = path.to_path_buf();
+            cache.get_or_create(&key, || {
+                load_image(&p).map_err(|e| format!("failed to decode image: {e}"))
+            })?
+        };
+        let mut guard = lock_session(&session);
+        let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
+        let doc_key = format!("{}::{}", doc_image_key, vectorize_signature(&params.split().0));
+        doc_cache().lock().unwrap().insert(doc_key, doc.clone());
+        Ok::<VectorizeResult, String>(vectorize_preview(&doc, params.line_art))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    active_traces().finish(&image_key, &request_id);
+    result
+}
+
+/// Layering stage only: cached VectorDoc → layered SVG. Falls back to
+/// vectorizing (and caching the doc) when the doc cache has no entry.
+#[tauri::command]
+pub async fn layer_file(
+    file_path: String,
+    params: TraceParams,
+    request_id: Option<String>,
+    priority: Option<String>,
+) -> Result<TraceResult, String> {
+    let request_id = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let is_background = priority.as_deref() == Some("background");
+    let image_key = file_path.clone();
+
+    let cancel = active_traces().register(&image_key, &request_id, is_background)?;
+
+    let doc_image_key = image_key.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let (v, _l) = params.split();
+        let doc_key = format!("{}::{}", doc_image_key, vectorize_signature(&v));
+        let doc = match doc_cache().lock().unwrap().get(&doc_key) {
+            Some(doc) => doc,
+            None => {
+                let path = Path::new(&file_path);
+                if !path.exists() {
+                    return Err(format!("image not found: {file_path}"));
+                }
+                let config = build_vtracer_config(&params)?;
+                let key = key_for_source(path, &config.segment_key());
+                let session = {
+                    let mut cache = session_cache().lock().unwrap();
+                    let p: PathBuf = path.to_path_buf();
+                    cache.get_or_create(&key, || {
+                        load_image(&p).map_err(|e| format!("failed to decode image: {e}"))
+                    })?
+                };
+                let mut guard = lock_session(&session);
+                let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
+                doc_cache().lock().unwrap().insert(doc_key, doc.clone());
+                Arc::new(doc)
+            }
+        };
+        Ok::<TraceResult, String>(layer_doc(&doc, &params))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
     active_traces().finish(&image_key, &request_id);
     result
 }

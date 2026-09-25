@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getImageUrl, prepareSource, traceSource, cancelTrace, newTraceRequestId, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams } from "../api.js";
-import { getCachedTrace, setCachedTrace, stableStringify } from "../traceCache.js";
+import { getImageUrl, prepareSource, vectorizeSource, layerSource, cancelTrace, newTraceRequestId, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams, splitTraceParams, mergeTraceParams } from "../api.js";
+import { getCachedTrace, setCachedTrace, getCachedVectorize, setCachedVectorize, stableStringify } from "../traceCache.js";
 import { createTraceQueue } from "../traceQueue.js";
 import { loadSavedConfigs, saveConfig, deleteSavedConfig } from "../configStore.js";
 import { loadLastPreset, saveLastPreset, errMsg, buildDefaultConfigs, dominantFill } from "../editorUtils.js";
@@ -30,18 +30,32 @@ export default function ImageEditorPage() {
   const { projectId, filename } = useParams();
   const navigate = useNavigate();
   const [imageUrl, setImageUrl] = useState(null);
+  // Vectorization params (left panel): changing any of these re-vectorizes.
   const [params, setParams] = useState(() => {
     const key = loadLastPreset();
-    return key ? presetFullParams(key) : DEFAULT_PARAMS;
+    return splitTraceParams(key ? presetFullParams(key) : DEFAULT_PARAMS).trace;
+  });
+  // Layering/output params (layer panel): applied manually via "Process".
+  const [layerParams, setLayerParams] = useState(() => {
+    const key = loadLastPreset();
+    return splitTraceParams(key ? presetFullParams(key) : DEFAULT_PARAMS).layer;
   });
   const [result, setResult] = useState(null);
+  // Signature of the vectorize params that produced the current preview doc
+  // (null = nothing vectorized yet). Drives the layer panel's "pending" state.
+  const [lastVectorizeSig, setLastVectorizeSig] = useState(null);
+  // Signature of the full params of the current processed (layered) result.
+  const [lastProcessSig, setLastProcessSig] = useState(null);
   // Layers the user has snapshotted from the edited preview (see saveAsLayer).
   // Kept separate from result.layers so a re-trace can reset them cleanly.
   const [savedLayers, setSavedLayers] = useState([]);
   const [busy, setBusy] = useState(false);
+  // True only while a layering ("Process") task is in flight — drives the
+  // layer panel's button, decoupled from the vectorization busy flag.
+  const [processBusy, setProcessBusy] = useState(false);
   const [error, setError] = useState(null);
   // What the error banner is about, so its retry button re-runs the right thing.
-  const [errorKind, setErrorKind] = useState(null); // "trace" | "smart" | "load"
+  const [errorKind, setErrorKind] = useState(null); // "vectorize" | "layer" | "smart" | "load"
   // Bumped to re-run the image-load effect (retry after a load failure).
   const [reloadTick, setReloadTick] = useState(0);
   const [configs, setConfigs] = useState(() => buildDefaultConfigs(presetLabel));
@@ -60,6 +74,10 @@ export default function ImageEditorPage() {
   const imageId = `${projectId}/${filename}`;
   const imageIdRef = useRef(imageId);
   useEffect(() => { imageIdRef.current = imageId; }, [imageId]);
+  // Ref mirror so the auto-vectorize effect can read the latest layering
+  // params without depending on them (layering changes must NOT re-vectorize).
+  const layerParamsRef = useRef(layerParams);
+  useEffect(() => { layerParamsRef.current = layerParams; }, [layerParams]);
   // Which image the current `imageUrl` belongs to (set by the load effect).
   // The auto-trace effect waits for the *current* image's URL so the stale
   // URL from the previous image can't kick off a throwaway trace that the
@@ -124,6 +142,8 @@ export default function ImageEditorPage() {
   useEffect(() => {
     setAdvancedMode(false);
     setResult(null);
+    setLastVectorizeSig(null);
+    setLastProcessSig(null);
   }, [imageId]);
 
   const toggleMaximize = useCallback(() => setMaximized(m => !m), []);
@@ -225,13 +245,20 @@ export default function ImageEditorPage() {
   // --- Smart Preset tuning (see useSmartPreset) ---
   // Normalize + apply a full param set, deselecting the active config (the
   // smart winner / preset fallback produces params no existing config owns).
+  // Only vectorization runs automatically; layering stays manual.
   const applyParams = useCallback((nextParams) => {
     const next = { ...DEFAULT_PARAMS, ...nextParams };
-    setParams(prev => stableStringify(prev) === stableStringify(next) ? prev : next);
+    const { trace, layer } = splitTraceParams(next);
+    setParams(prev => stableStringify(prev) === stableStringify(trace) ? prev : trace);
+    setLayerParams(prev => stableStringify(prev) === stableStringify(layer) ? prev : layer);
     setActiveConfigId(null);
+    // Explicit enqueue: if the vectorize part is unchanged the auto effect
+    // below won't fire, but the preview should still refresh.
+    queueRef.current?.enqueueInteractive("vectorize", next);
   }, []);
+  const mergedParams = mergeTraceParams(params, layerParams);
   const { smartInfo, setSmartInfo, smartBusy, runSmart, applyPresetResult } = useSmartPreset({
-    imageUrl, params, projectId, filename, imageId,
+    imageUrl, params: mergedParams, projectId, filename, imageId,
     t, applyParams, setError, setErrorKind,
   });
 
@@ -285,7 +312,10 @@ export default function ImageEditorPage() {
   }, [t]);
 
   /**
-   * Run one queue task: cache-first trace, then apply the result.
+   * Run one queue task (cache-first) and apply the result.
+   * - stage "vectorize": image → vectorized document preview (unprocessed).
+   * - stage "layer": cached document → layered SVG (manual processing).
+   * - stage "chain": vectorize + layer in sequence (background pre-warm).
    * Interactive tasks update the main preview; background tasks only refresh
    * matching config thumbnails. Superseded tasks (cancelled / busy) are a
    * silent no-op — a newer task already owns the result.
@@ -293,67 +323,137 @@ export default function ImageEditorPage() {
   const executeTask = useCallback(async (task) => {
     const imageIdNow = imageId;
     const source = prepareSource(projectId, filename);
-    const cached = await getCachedTrace(imageIdNow, task.params).catch(() => null);
-    if (imageIdRef.current !== imageIdNow) return; // image switched mid-flight
-    if (cached) {
-      applyResultToConfigs(task.params, cached);
-      if (task.kind === "interactive") {
-        setResult(cached);
+    const isInteractive = task.kind === "interactive";
+    const priority = isInteractive ? "interactive" : "background";
+    const { trace: tracePart } = splitTraceParams(task.params);
+    const traceSig = stableStringify(tracePart);
+
+    // Vectorization stage: cache-first on the vectorize-params signature.
+    const runVectorize = async () => {
+      let res = await getCachedVectorize(imageIdNow, tracePart).catch(() => null);
+      if (imageIdRef.current !== imageIdNow) return null; // image switched
+      if (res) return res;
+      try {
+        res = await vectorizeSource(source, task.params, {
+          requestId: newTraceRequestId(),
+          priority,
+        });
+      } catch (e) {
+        if (imageIdRef.current !== imageIdNow) return null;
+        if (e?.code === "cancelled" || e?.code === "busy") return null; // superseded
+        if (isInteractive) { setError(t("editor.traceFailed", { msg: errMsg(e) })); setErrorKind("vectorize"); }
+        return "error";
+      }
+      if (imageIdRef.current !== imageIdNow) return null;
+      setCachedVectorize(imageIdNow, tracePart, res).catch(() => {});
+      return res;
+    };
+
+    // Layering stage: cache-first on the full params signature.
+    const runLayer = async () => {
+      let res = await getCachedTrace(imageIdNow, task.params).catch(() => null);
+      if (imageIdRef.current !== imageIdNow) return null; // image switched
+      if (res) return res;
+      try {
+        res = await layerSource(source, task.params, {
+          requestId: newTraceRequestId(),
+          priority,
+        });
+      } catch (e) {
+        if (imageIdRef.current !== imageIdNow) return null;
+        if (e?.code === "cancelled" || e?.code === "busy") return null; // superseded
+        if (isInteractive) { setError(t("editor.traceFailed", { msg: errMsg(e) })); setErrorKind("layer"); }
+        return "error";
+      }
+      if (imageIdRef.current !== imageIdNow) return null;
+      setCachedTrace(imageIdNow, task.params, res).catch(() => {});
+      return res;
+    };
+
+    if (task.stage === "vectorize") {
+      const res = await runVectorize();
+      if (!res || res === "error") return;
+      if (isInteractive) {
+        setResult({ ...res, processed: false });
+        setLastVectorizeSig(traceSig);
+        setLastProcessSig(null);
         setError(null);
         setErrorKind(null);
-        scheduleUserConfig(task.params, cached);
+        scheduleUserConfig(task.params, { ...res, processed: false });
       }
       return;
     }
-    try {
-      const res = await traceSource(source, task.params, {
-        requestId: newTraceRequestId(),
-        priority: task.kind === "interactive" ? "interactive" : "background",
-      });
-      if (imageIdRef.current !== imageIdNow) return;
-      setCachedTrace(imageIdNow, task.params, res).catch(() => {});
-      applyResultToConfigs(task.params, res);
-      if (task.kind === "interactive") {
-        setResult(res);
-        setError(null);
-        setErrorKind(null);
-        scheduleUserConfig(task.params, res);
-      }
-    } catch (e) {
-      if (imageIdRef.current !== imageIdNow) return;
-      if (e?.code === "cancelled" || e?.code === "busy") return; // superseded
-      if (task.kind === "interactive") { setError(t("editor.traceFailed", { msg: errMsg(e) })); setErrorKind("trace"); }
+
+    // "layer" (manual processing) or "chain" (background pre-warm).
+    if (task.stage === "chain") {
+      const vres = await runVectorize();
+      if (!vres || vres === "error") return;
+    }
+    const lres = await runLayer();
+    if (!lres || lres === "error") return;
+    applyResultToConfigs(task.params, lres);
+    if (isInteractive) {
+      setResult({ ...lres, processed: true });
+      setLastVectorizeSig(traceSig);
+      setLastProcessSig(stableStringify(task.params));
+      setError(null);
+      setErrorKind(null);
+      scheduleUserConfig(task.params, { ...lres, processed: true });
     }
   }, [projectId, filename, imageId, applyResultToConfigs, scheduleUserConfig, t]);
+
+  // The queue reports which stage (if any) an interactive task is running.
+  // `busy` (main preview badge + pre-warm/backfill gating) covers any
+  // interactive work; `processBusy` (layer panel button) covers layering only.
+  const handleBusyChange = useCallback((stage) => {
+    setBusy(stage != null);
+    setProcessBusy(stage === "layer");
+  }, []);
 
   // One queue per image: interactive traces preempt background pre-warm.
   const queueRef = useRef(null);
   useEffect(() => {
-    const q = createTraceQueue({ execute: executeTask, onBusyChange: setBusy });
+    const q = createTraceQueue({ execute: executeTask, onBusyChange: handleBusyChange });
     queueRef.current = q;
     return () => {
       q.dispose();
       queueRef.current = null;
     };
-  }, [executeTask]);
+  }, [executeTask, handleBusyChange]);
 
   // Clear any pending user-config snapshot on unmount.
   useEffect(() => () => {
     if (configTimerRef.current) clearTimeout(configTimerRef.current);
   }, []);
 
-  // Any param change (preset select, slider, smart tuning) enqueues an
-  // interactive trace. The queue debounces (merges slider drags), drops queued
-  // background work, and the engine cancels whatever is in flight for this
-  // image when the request lands — interactive traces always win the CPU.
+  // Any vectorization param change (preset select, slider, smart tuning)
+  // enqueues an interactive vectorize task. The queue debounces (merges
+  // slider drags), drops queued background work, and the engine cancels
+  // whatever is in flight for this image when the request lands — interactive
+  // work always wins the CPU. Layering param changes are deliberately NOT
+  // enqueued: layering is applied manually via the layer panel's "Process".
   // (Declared after the queue effect so the queue exists when it runs.)
   useEffect(() => {
-    // Only trace once the URL actually belongs to the current image (see
+    // Only vectorize once the URL actually belongs to the current image (see
     // urlImageIdRef): on a switch, the stale URL from the previous image is
     // still around for a frame and must not start a throwaway trace.
     if (!imageUrl || urlImageIdRef.current !== imageId) return;
-    queueRef.current?.enqueueInteractive(params);
+    queueRef.current?.enqueueInteractive("vectorize", mergeTraceParams(params, layerParamsRef.current));
   }, [params, imageUrl, imageId]);
+
+  // Layering param changes: no automatic processing — the user applies them
+  // via the "Process" button. Deselect the active config (the full param
+  // combination no longer matches it).
+  const onLayerParamsChange = useCallback((updater) => {
+    setLayerParams(updater);
+    setActiveConfigId(null);
+  }, []);
+
+  // Manual processing: apply the current layering strategy / output style to
+  // the vectorized document (cheap — the document is cached).
+  const runLayerProcessing = useCallback(() => {
+    queueRef.current?.enqueueInteractive("layer", mergeTraceParams(params, layerParams));
+  }, [params, layerParams]);
 
   // Pre-warm in the background after each interactive trace settles: the
   // system presets plus any user-saved configs whose trace is not cached yet
@@ -397,9 +497,17 @@ export default function ImageEditorPage() {
     }
     // Normalize: configs saved before newer params fields exist.
     const next = { ...DEFAULT_PARAMS, ...config.params };
+    const { trace, layer } = splitTraceParams(next);
     setParams(prev =>
-      stableStringify(prev) === stableStringify(next) ? prev : next
+      stableStringify(prev) === stableStringify(trace) ? prev : trace
     );
+    setLayerParams(prev =>
+      stableStringify(prev) === stableStringify(layer) ? prev : layer
+    );
+    // Preset/config selection auto-runs vectorization only; layering stays
+    // manual. Explicit enqueue: if the vectorize part is unchanged the auto
+    // effect won't fire, but the preview should still refresh.
+    queueRef.current?.enqueueInteractive("vectorize", next);
   }, []);
 
   // Backfill saved-config thumbnails once the initial trace has warmed the
@@ -479,7 +587,7 @@ export default function ImageEditorPage() {
             onSmart={runSmart}
             smartBusy={smartBusy}
             onOpenPreprocess={() => setPreprocessOpen(true)}
-            activeFamilyLabel={presetLabel(familyFromParams(params))}
+            activeFamilyLabel={presetLabel(familyFromParams(mergedParams))}
           />
         </aside>
 
@@ -546,7 +654,8 @@ export default function ImageEditorPage() {
               <button className="error-retry" onClick={() => {
                 if (errorKind === "smart") runSmart();
                 else if (errorKind === "load") setReloadTick(x => x + 1);
-                else queueRef.current?.enqueueInteractive(params);
+                else if (errorKind === "layer") queueRef.current?.enqueueInteractive("layer", mergeTraceParams(params, layerParams));
+                else queueRef.current?.enqueueInteractive("vectorize", mergeTraceParams(params, layerParams));
               }}>{t("retry")}</button>
             </div>
           )}
@@ -561,6 +670,12 @@ export default function ImageEditorPage() {
             // snapshot button delegates to the advanced editor's canvas.
             onSaveAsLayer={advancedMode ? () => advEditorRef.current?.saveAsLayer() : saveAsLayer}
             canSaveAsLayer={!!result?.svg}
+            layerParams={layerParams}
+            onLayerParamsChange={onLayerParamsChange}
+            onProcess={runLayerProcessing}
+            processBusy={processBusy}
+            processPending={lastVectorizeSig != null && stableStringify(mergedParams) !== lastProcessSig}
+            processed={!!result?.processed}
           />
         </aside>
       </div>

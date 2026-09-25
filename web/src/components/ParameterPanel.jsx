@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { useI18n } from "../i18n/index.jsx";
 
-function SegmentedControl({ label, value, options, onChange, title }) {
+// Exported for reuse by LayerPanel (the layering/output controls moved there).
+export function SegmentedControl({ label, value, options, onChange, title }) {
   return (
     <div className="param-row">
       <label title={title}>{label}</label>
@@ -21,7 +22,7 @@ function SegmentedControl({ label, value, options, onChange, title }) {
   );
 }
 
-function Slider({ label, value, min, max, step, onChange, title }) {
+export function Slider({ label, value, min, max, step, onChange, title }) {
   return (
     <div className="param-row">
       <label title={title}>{label}</label>
@@ -41,7 +42,7 @@ function Slider({ label, value, min, max, step, onChange, title }) {
 }
 
 /** Collapsible parameter group; body renders only when open. */
-function Group({ title, defaultOpen = true, children }) {
+export function Group({ title, defaultOpen = true, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="param-section">
@@ -248,6 +249,17 @@ export default function ParameterPanel({
             />
           </>
         )}
+        <SegmentedControl
+          label={t("param.optimize")}
+          title={t("param.optimizeTitle")}
+          value={String(params.optimize ?? 1)}
+          options={[
+            { value: "0", label: t("param.off"), title: t("param.offTitle") },
+            { value: "1", label: t("param.standard"), title: t("param.standardTitle") },
+            { value: "2", label: t("param.deep"), title: t("param.deepTitle") },
+          ]}
+          onChange={v => set("optimize")(Number(v))}
+        />
       </Group>
 
       <Group title={t("param.groupColorFitting")}>
@@ -283,57 +295,6 @@ export default function ParameterPanel({
         </div>
       </Group>
 
-      <Group title={t("param.groupLayerStrategy")} defaultOpen={false}>
-        <SegmentedControl
-          label={t("param.layerStrategy")}
-          title={t("param.layerStrategyTitle")}
-          value={params.layerStrategy ?? "none"}
-          options={[
-            { value: "none", label: t("param.singleLayer"), title: t("param.singleLayerTitle") },
-            { value: "auto", label: t("param.auto"), title: t("param.autoStrategyTitle") },
-            { value: "color", label: t("param.color"), title: t("param.colorStrategyTitle") },
-            { value: "spatial", label: t("param.spatial"), title: t("param.spatialStrategyTitle") },
-            { value: "complexity", label: t("param.complexity"), title: t("param.complexityStrategyTitle") },
-            { value: "hybrid", label: t("param.hybrid"), title: t("param.hybridStrategyTitle") },
-          ]}
-          onChange={set("layerStrategy")}
-        />
-        {params.layerStrategy !== "none" && (
-          <div className="param-row">
-            <label title={t("param.maxLayersTitle")}>{t("param.maxLayers")}</label>
-            <input
-              type="number"
-              min={2}
-              max={16}
-              value={params.layers || 4}
-              onChange={e => set("layers")(Number(e.target.value) || 4)}
-            />
-          </div>
-        )}
-        {(params.layerStrategy === "complexity" || params.layerStrategy === "hybrid") && (
-          <Slider
-            label={t("param.complexityThreshold")}
-            title={t("param.complexityThresholdTitle")}
-            value={params.complexityThreshold ?? 70}
-            min={10}
-            max={90}
-            step={5}
-            onChange={set("complexityThreshold")}
-          />
-        )}
-        <SegmentedControl
-          label={t("param.optimize")}
-          title={t("param.optimizeTitle")}
-          value={String(params.optimize ?? 1)}
-          options={[
-            { value: "0", label: t("param.off"), title: t("param.offTitle") },
-            { value: "1", label: t("param.standard"), title: t("param.standardTitle") },
-            { value: "2", label: t("param.deep"), title: t("param.deepTitle") },
-          ]}
-          onChange={v => set("optimize")(Number(v))}
-        />
-      </Group>
-
       <Group title={t("param.groupOutput")}>
         <SegmentedControl
           label={t("param.outputStyle")}
@@ -346,6 +307,7 @@ export default function ParameterPanel({
           onChange={v => set("lineArt")(v === "line")}
         />
       </Group>
+
     </div>
   );
 }

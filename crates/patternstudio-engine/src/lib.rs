@@ -6,9 +6,9 @@
 //! (`patternstudio-desktop`) so the trace pipeline has a single
 //! implementation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use patternstudio_core::ir::{LayerAssignment, LayeredDoc};
 use patternstudio_core::profiles::{apply_profiles, AutoDecision, IdealParams};
@@ -17,6 +17,7 @@ use patternstudio_svg::LayeredWriter;
 use serde::Serialize;
 use vtracer::config::{Clustering, FitMode, Hierarchical, Preset};
 use vtracer::progress::CancelToken;
+use vtracer::ir::VectorDoc;
 use vtracer::{ColorImage, Config, Error, Session};
 
 /// Trace parameters accepted by the API / desktop commands.
@@ -75,6 +76,140 @@ pub struct TraceParams {
 
 fn default_preset() -> String {
     "poster".into()
+}
+
+/// Parameters that affect the vectorized document (segmentation → compose →
+/// curve fit → path optimization). Changing any of these requires
+/// re-vectorizing the image.
+#[derive(Debug, Clone, Default, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VectorizeParams {
+    #[serde(default = "default_preset")]
+    pub preset: String,
+    #[serde(default)]
+    pub clustering: Option<String>,
+    #[serde(default)]
+    pub hierarchical: Option<String>,
+    #[serde(default)]
+    pub color_precision: Option<u8>,
+    #[serde(default)]
+    pub layer_difference: Option<u8>,
+    #[serde(default)]
+    pub filter_speckle: Option<u32>,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub simplify: Option<f64>,
+    #[serde(default)]
+    pub path_precision: Option<u8>,
+    #[serde(default)]
+    pub max_colors: Option<usize>,
+    #[serde(default)]
+    pub binary_adaptive: bool,
+    #[serde(default)]
+    pub binary_threshold: Option<u8>,
+    #[serde(default)]
+    pub watershed_detail: Option<u32>,
+    #[serde(default)]
+    pub palette: Option<String>,
+    #[serde(default)]
+    pub corner_threshold: Option<i32>,
+    #[serde(default)]
+    pub length_threshold: Option<f64>,
+    #[serde(default)]
+    pub optimize: Option<u8>,
+    #[serde(default)]
+    pub binary_adaptive_t: Option<f64>,
+    #[serde(default)]
+    pub binary_adaptive_window: Option<u32>,
+}
+
+/// Parameters that affect only the layering/output stage (VectorDoc → layer
+/// assignment → SVG). This stage is cheap and pure: it can be re-run any
+/// number of times against a cached vectorized document. New layering
+/// strategies extend [`layer_doc`], never the vectorization path.
+#[derive(Debug, Clone, Default, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LayerParams {
+    #[serde(default)]
+    pub line_art: bool,
+    #[serde(default)]
+    pub layers: usize,
+    #[serde(default)]
+    pub layer_strategy: Option<String>,
+    #[serde(default)]
+    pub complexity_threshold: Option<u8>,
+}
+
+impl TraceParams {
+    /// Split into the vectorization part (affects the VectorDoc) and the
+    /// layering part (affects only the layering/output stage).
+    pub fn split(&self) -> (VectorizeParams, LayerParams) {
+        (
+            VectorizeParams {
+                preset: self.preset.clone(),
+                clustering: self.clustering.clone(),
+                hierarchical: self.hierarchical.clone(),
+                color_precision: self.color_precision,
+                layer_difference: self.layer_difference,
+                filter_speckle: self.filter_speckle,
+                mode: self.mode.clone(),
+                simplify: self.simplify,
+                path_precision: self.path_precision,
+                max_colors: self.max_colors,
+                binary_adaptive: self.binary_adaptive,
+                binary_threshold: self.binary_threshold,
+                watershed_detail: self.watershed_detail,
+                palette: self.palette.clone(),
+                corner_threshold: self.corner_threshold,
+                length_threshold: self.length_threshold,
+                optimize: self.optimize,
+                binary_adaptive_t: self.binary_adaptive_t,
+                binary_adaptive_window: self.binary_adaptive_window,
+            },
+            LayerParams {
+                line_art: self.line_art,
+                layers: self.layers,
+                layer_strategy: self.layer_strategy.clone(),
+                complexity_threshold: self.complexity_threshold,
+            },
+        )
+    }
+
+    /// Reassemble a full param set from its two parts.
+    pub fn from_parts(v: &VectorizeParams, l: &LayerParams) -> Self {
+        Self {
+            preset: v.preset.clone(),
+            clustering: v.clustering.clone(),
+            hierarchical: v.hierarchical.clone(),
+            color_precision: v.color_precision,
+            layer_difference: v.layer_difference,
+            filter_speckle: v.filter_speckle,
+            mode: v.mode.clone(),
+            simplify: v.simplify,
+            path_precision: v.path_precision,
+            max_colors: v.max_colors,
+            line_art: l.line_art,
+            binary_adaptive: v.binary_adaptive,
+            binary_threshold: v.binary_threshold,
+            watershed_detail: v.watershed_detail,
+            palette: v.palette.clone(),
+            layers: l.layers,
+            corner_threshold: v.corner_threshold,
+            length_threshold: v.length_threshold,
+            optimize: v.optimize,
+            binary_adaptive_t: v.binary_adaptive_t,
+            binary_adaptive_window: v.binary_adaptive_window,
+            layer_strategy: l.layer_strategy.clone(),
+            complexity_threshold: l.complexity_threshold,
+        }
+    }
+}
+
+/// Canonical signature of the vectorization parameters: the key under which
+/// the vectorized document is cached, so layering re-runs can find it.
+pub fn vectorize_signature(v: &VectorizeParams) -> String {
+    serde_json::to_string(v).unwrap_or_default()
 }
 
 /// Build a vtracer config from the (possibly partial) trace params.
@@ -182,6 +317,18 @@ pub struct TraceResult {
     pub profile_ms: Option<u64>,
 }
 
+/// Result of the vectorization stage: the raw vectorized document rendered as
+/// a single-layer SVG. Layering is a separate, re-runnable stage on top of
+/// the same document.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VectorizeResult {
+    pub svg: String,
+    pub width: u32,
+    pub height: u32,
+    pub shape_count: usize,
+}
+
 /// Convert a smart-recommended parameter set into `TraceParams`.
 /// Both structs use camelCase with identical field names, so a JSON round-trip
 /// is a safe, field-agnostic mapping.
@@ -205,17 +352,16 @@ pub fn lock_session(session: &Mutex<Session>) -> MutexGuard<'_, Session> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Layering + SVG over a document produced by a [`Session`].
+/// Vectorization stage: image → [`VectorDoc`] via a [`Session`].
 ///
 /// `session.render` reuses the cached segmentation when the clustering
 /// parameters are unchanged and only re-runs the cheap downstream stages — the
 /// core of the interactive tuning loop.
-pub fn trace_with_session(
+pub fn vectorize_with_session(
     session: &mut Session,
     config: &Config,
-    params: &TraceParams,
     cancel: &CancelToken,
-) -> Result<TraceResult, String> {
+) -> Result<VectorDoc, String> {
     let mut on_progress = |_p: vtracer::progress::Progress| {};
     let doc = session
         .render_with_progress(config, cancel, &mut on_progress)
@@ -229,7 +375,15 @@ pub fn trace_with_session(
     if cancel.is_cancelled() {
         return Err("cancelled".into());
     }
+    Ok(doc)
+}
 
+/// Layering stage: [`VectorDoc`] → layered SVG.
+///
+/// Cheap and pure: re-runnable any number of times against a cached
+/// vectorized document, without touching the vectorization pipeline. New
+/// layering strategies extend the match below.
+pub fn layer_doc(doc: &VectorDoc, params: &TraceParams) -> TraceResult {
     // "auto": derive the strategy + multi-level profiles from the ideal params.
     let is_auto = params.layer_strategy.as_deref() == Some("auto");
     let ideal = IdealParams::from_options(
@@ -246,37 +400,34 @@ pub fn trace_with_session(
         params.optimize,
     );
     let (assignment, decision) = if is_auto {
-        let (a, d) = AutoDecision::assign(&doc, &ideal);
+        let (a, d) = AutoDecision::assign(doc, &ideal);
         (a, Some(d))
     } else {
         let assignment = match params.layer_strategy.as_deref().unwrap_or("none") {
             "color" => {
                 let n = params.layers.max(2);
-                LayerAssignment::by_color(&doc, n)
+                LayerAssignment::by_color(doc, n)
             }
             "complexity" => {
                 let n = params.layers.max(2);
                 let t = params.complexity_threshold.unwrap_or(70);
-                LayerAssignment::by_complexity(&doc, t, n)
+                LayerAssignment::by_complexity(doc, t, n)
             }
             "hybrid" => {
                 let n = params.layers.max(2);
                 let t = params.complexity_threshold.unwrap_or(70);
-                LayerAssignment::hybrid(&doc, n, t)
+                LayerAssignment::hybrid(doc, n, t)
             }
             "spatial" => {
                 let n = params.layers.max(2);
                 let gap = (doc.width.min(doc.height) as f64 * 0.02).max(5.0);
-                LayerAssignment::by_spatial(&doc, n, gap)
+                LayerAssignment::by_spatial(doc, n, gap)
             }
             _ => LayerAssignment::single_layer(),
         };
         (assignment, None)
     };
-    if cancel.is_cancelled() {
-        return Err("cancelled".into());
-    }
-    let mut layered = LayeredDoc::from_vector_doc(&doc, &assignment);
+    let mut layered = LayeredDoc::from_vector_doc(doc, &assignment);
     let mut profile_ms: Option<u64> = None;
     if is_auto {
         let t = std::time::Instant::now();
@@ -304,7 +455,7 @@ pub fn trace_with_session(
         })
         .collect();
 
-    Ok(TraceResult {
+    TraceResult {
         svg,
         width: layered.width,
         height: layered.height,
@@ -313,7 +464,106 @@ pub fn trace_with_session(
         layers,
         strategy_info: decision,
         profile_ms,
-    })
+    }
+}
+
+/// Full pipeline over a [`Session`]: vectorization + layering in one call.
+///
+/// Kept for one-shot consumers (batch trace, smart tuning, CLI, Python,
+/// WASM) that want the complete result without managing the two stages
+/// separately. The interactive editor drives [`vectorize_with_session`] and
+/// [`layer_doc`] independently.
+pub fn trace_with_session(
+    session: &mut Session,
+    config: &Config,
+    params: &TraceParams,
+    cancel: &CancelToken,
+) -> Result<TraceResult, String> {
+    let doc = vectorize_with_session(session, config, cancel)?;
+    Ok(layer_doc(&doc, params))
+}
+
+/// Render a vectorized document as a single-layer SVG: the raw vectorization
+/// preview shown before layering is applied. `line_art` selects the output
+/// style (stroke vs fill) so the preview matches what layering will produce;
+/// it is an output-style param and does not affect the cached document.
+pub fn vectorize_preview(doc: &VectorDoc, line_art: bool) -> VectorizeResult {
+    let layered = LayeredDoc::from_vector_doc(doc, &LayerAssignment::single_layer());
+    let svg = if line_art {
+        LayeredWriter::write_line_art(&layered)
+    } else {
+        LayeredWriter::write(&layered)
+    };
+    VectorizeResult {
+        svg,
+        width: doc.width,
+        height: doc.height,
+        shape_count: doc.shapes.len(),
+    }
+}
+
+/// Bounded LRU cache of vectorized documents, keyed by
+/// `image_key::vectorize_signature`. Layering re-runs against a cached doc
+/// without touching the (expensive) vectorization stage. Wrap in a `Mutex`
+/// like [`patternstudio_core::SessionCache`].
+pub struct DocCache {
+    map: HashMap<String, Arc<VectorDoc>>,
+    order: VecDeque<String>,
+    cap: usize,
+}
+
+impl DocCache {
+    /// Create a cache holding at most `cap` documents (evicts least-recently
+    /// used entries beyond that).
+    pub fn new(cap: usize) -> Self {
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+            cap: cap.max(1),
+        }
+    }
+
+    fn touch(&mut self, key: &str) {
+        self.order.retain(|k| k != key);
+        self.order.push_back(key.to_string());
+    }
+
+    /// The cached document for `key`, if present (refreshes its LRU position).
+    pub fn get(&mut self, key: &str) -> Option<Arc<VectorDoc>> {
+        if self.map.contains_key(key) {
+            self.touch(key);
+            self.map.get(key).cloned()
+        } else {
+            None
+        }
+    }
+
+    /// Insert (or replace) the document for `key`, evicting LRU entries
+    /// beyond the cap.
+    pub fn insert(&mut self, key: String, doc: VectorDoc) {
+        if !self.map.contains_key(&key) {
+            while self.map.len() >= self.cap {
+                match self.order.pop_front() {
+                    Some(old) => {
+                        self.map.remove(&old);
+                    }
+                    None => break,
+                }
+            }
+        }
+        self.touch(&key);
+        self.map.insert(key, Arc::new(doc));
+    }
+
+    /// Number of documents currently cached.
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Whether the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
 }
 
 /// One-shot trace from an image file: decode and run through a fresh session.
@@ -475,6 +725,79 @@ mod tests {
         assert_eq!(params.clustering.as_deref(), Some("color"));
         assert_eq!(params.color_precision, Some(6));
         assert!(!params.line_art);
+    }
+
+    #[test]
+    fn params_split_roundtrip() {
+        let params = TraceParams {
+            preset: "photo".into(),
+            clustering: Some("color".into()),
+            color_precision: Some(8),
+            simplify: Some(0.2),
+            optimize: Some(2),
+            line_art: true,
+            layers: 6,
+            layer_strategy: Some("hybrid".into()),
+            complexity_threshold: Some(55),
+            ..Default::default()
+        };
+        let (v, l) = params.split();
+        let back = TraceParams::from_parts(&v, &l);
+        assert_eq!(
+            serde_json::to_string(&params).unwrap(),
+            serde_json::to_string(&back).unwrap(),
+            "split/from_parts must be lossless"
+        );
+        // The two parts must be disjoint: the layer part carries no
+        // vectorization fields and vice versa.
+        assert_eq!(v.optimize, Some(2));
+        assert!(l.line_art);
+        assert_eq!(l.layers, 6);
+        assert_eq!(l.complexity_threshold, Some(55));
+    }
+
+    #[test]
+    fn vectorize_signature_stable_and_sensitive() {
+        let a = TraceParams {
+            color_precision: Some(6),
+            line_art: true,
+            ..Default::default()
+        }
+        .split()
+        .0;
+        let b = TraceParams {
+            color_precision: Some(6),
+            line_art: false,
+            ..Default::default()
+        }
+        .split()
+        .0;
+        let c = TraceParams {
+            color_precision: Some(7),
+            ..Default::default()
+        }
+        .split()
+        .0;
+        // Same vectorization params -> same signature, regardless of the
+        // (disjoint) layering params.
+        assert_eq!(vectorize_signature(&a), vectorize_signature(&b));
+        // A vectorization change -> different signature.
+        assert_ne!(vectorize_signature(&a), vectorize_signature(&c));
+    }
+
+    #[test]
+    fn doc_cache_evicts_least_recently_used() {
+        let doc = || VectorDoc::new(10, 10);
+        let mut cache = DocCache::new(2);
+        cache.insert("a".into(), doc());
+        cache.insert("b".into(), doc());
+        // Touch "a" so "b" becomes the least-recently-used.
+        assert!(cache.get("a").is_some());
+        cache.insert("c".into(), doc());
+        assert_eq!(cache.len(), 2);
+        assert!(cache.get("a").is_some());
+        assert!(cache.get("c").is_some());
+        assert!(cache.get("b").is_none(), "b must have been evicted");
     }
 
     #[test]

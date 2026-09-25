@@ -103,6 +103,82 @@ export async function traceSource(source, params, opts = {}) {
 }
 
 /**
+ * Vectorization stage only: image → vectorized document (single-layer SVG).
+ * The engine caches the document under the vectorize-params signature so the
+ * layering stage can re-run without re-vectorizing.
+ * `opts`: { requestId, priority } — same semantics as {@link traceSource}.
+ */
+export async function vectorizeSource(source, params, opts = {}) {
+  const { requestId, priority } = opts;
+  if (isTauri()) {
+    try {
+      return await tauriInvoke("vectorize_file", {
+        filePath: source.path, params,
+        requestId: requestId ?? null, priority: priority ?? null,
+      });
+    } catch (e) {
+      const msg = typeof e === "string" ? e : (e?.message || String(e));
+      if (msg === "cancelled") throw new TraceFlowError("cancelled", msg);
+      if (msg === "busy") throw new TraceFlowError("busy", msg);
+      throw new Error(msg);
+    }
+  }
+  const res = await fetch(`${BASE}/vectorize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      asset_id: source.assetId ?? null,
+      project_id: source.projectId ?? null, filename: source.filename ?? null, params,
+      request_id: requestId ?? null, priority: priority ?? null,
+    }),
+  });
+  if (res.status === 409) {
+    let body = {};
+    try { body = await res.json(); } catch { /* ignore */ }
+    throw new TraceFlowError(body.busy ? "busy" : "cancelled", body.busy ? "trace busy" : "trace cancelled");
+  }
+  return handle(res);
+}
+
+/**
+ * Layering stage only: cached vectorized document → layered SVG. The engine
+ * falls back to vectorizing (and caching the doc) on a cache miss, so this is
+ * self-contained. `opts`: { requestId, priority } — same semantics as
+ * {@link traceSource}.
+ */
+export async function layerSource(source, params, opts = {}) {
+  const { requestId, priority } = opts;
+  if (isTauri()) {
+    try {
+      return await tauriInvoke("layer_file", {
+        filePath: source.path, params,
+        requestId: requestId ?? null, priority: priority ?? null,
+      });
+    } catch (e) {
+      const msg = typeof e === "string" ? e : (e?.message || String(e));
+      if (msg === "cancelled") throw new TraceFlowError("cancelled", msg);
+      if (msg === "busy") throw new TraceFlowError("busy", msg);
+      throw new Error(msg);
+    }
+  }
+  const res = await fetch(`${BASE}/layer`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      asset_id: source.assetId ?? null,
+      project_id: source.projectId ?? null, filename: source.filename ?? null, params,
+      request_id: requestId ?? null, priority: priority ?? null,
+    }),
+  });
+  if (res.status === 409) {
+    let body = {};
+    try { body = await res.json(); } catch { /* ignore */ }
+    throw new TraceFlowError(body.busy ? "busy" : "cancelled", body.busy ? "trace busy" : "trace cancelled");
+  }
+  return handle(res);
+}
+
+/**
  * Cancel any in-flight trace for a source prepared by {@link prepareSource}
  * (e.g. the editor switched to a different image and the old work is no
  * longer wanted). The engine aborts the trace at its next batch boundary.
@@ -541,6 +617,53 @@ export const DEFAULT_PARAMS = {
   lengthThreshold: 4,
   optimize: 1,
 };
+
+/**
+ * Params grouped with the vectorization stage (left panel): changing any of
+ * these re-runs the vectorize preview immediately. Most affect the vectorized
+ * document (segmentation → curve fit → optimization). `lineArt` is an output
+ * style that does NOT affect the cached document — the engine keeps it out of
+ * the doc cache key (`VectorizeParams`) — but is grouped here so the preview
+ * reflects it without a manual "Process". Note this list is intentionally NOT
+ * identical to the engine's `VectorizeParams`: the frontend split drives UI
+ * placement + the preview cache key, the engine split drives the doc cache key.
+ */
+export const VECTORIZE_PARAM_KEYS = [
+  "preset", "clustering", "hierarchical", "colorPrecision", "layerDifference",
+  "filterSpeckle", "mode", "simplify", "pathPrecision", "maxColors",
+  "binaryAdaptive", "binaryThreshold", "binaryAdaptiveT", "binaryAdaptiveWindow",
+  "watershedDetail", "palette", "cornerThreshold", "lengthThreshold", "optimize",
+  "lineArt",
+];
+
+/**
+ * Params that affect only the layering stage (VectorDoc → layers → SVG),
+ * applied manually via the layer panel's "Process" button. This stage is
+ * cheap and re-runnable against a cached document. Must stay in sync with
+ * `LayerParams` in patternstudio-engine (minus `lineArt`, which the frontend
+ * groups with vectorization for UX while the engine keeps it here for the
+ * doc cache key).
+ */
+export const LAYER_PARAM_KEYS = ["layers", "layerStrategy", "complexityThreshold"];
+
+/**
+ * Split a full param set into { trace, layer } parts (both complete objects
+ * over DEFAULT_PARAMS). `trace` keys the vectorization cache; `layer` keys
+ * the processed-result cache.
+ */
+export function splitTraceParams(full) {
+  const base = { ...DEFAULT_PARAMS, ...(full || {}) };
+  const trace = {};
+  const layer = {};
+  for (const k of VECTORIZE_PARAM_KEYS) trace[k] = base[k];
+  for (const k of LAYER_PARAM_KEYS) layer[k] = base[k];
+  return { trace, layer };
+}
+
+/** Reassemble a full param set from its { trace, layer } parts. */
+export function mergeTraceParams(trace, layer) {
+  return { ...DEFAULT_PARAMS, ...(trace || {}), ...(layer || {}) };
+}
 
 /**
  * Bottom-strip presets: each one showcases a different algorithmic dimension

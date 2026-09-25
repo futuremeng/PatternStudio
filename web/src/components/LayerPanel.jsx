@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import JSZip from "jszip";
 import { downloadSvg, downloadBlob } from "../api.js";
 import { useI18n } from "../i18n/index.jsx";
+import { SegmentedControl, Slider, Group } from "./ParameterPanel.jsx";
 
 // Rebuild a layer's preview SVG as a standalone file with explicit width/height.
 // The viewBox origin (x y) is preserved: layers snapshotted from a
@@ -62,10 +63,14 @@ function LayerCard({ layer, selected, onToggle }) {
   );
 }
 
-export default function LayerPanel({ layers, strategyInfo, profileMs, onSaveAsLayer, canSaveAsLayer }) {
+export default function LayerPanel({
+  layers, strategyInfo, profileMs, onSaveAsLayer, canSaveAsLayer,
+  layerParams, onLayerParamsChange, onProcess, processBusy, processPending, processed,
+}) {
   const { t } = useI18n();
   const [selected, setSelected] = useState(new Set());
   const [exporting, setExporting] = useState(false);
+  const set = (key) => (val) => onLayerParamsChange(prev => ({ ...prev, [key]: val }));
 
   const STRATEGY_LABELS = {
     none: t("layer.strategyNone"),
@@ -118,12 +123,59 @@ export default function LayerPanel({ layers, strategyInfo, profileMs, onSaveAsLa
     }
   };
 
-  if (layers.length === 0) {
-    return <div className="muted">{t("layer.noData")}</div>;
-  }
-
   return (
     <div className="layer-panel">
+      {/* Layering settings: applied to the cached vectorized document via the
+          "Process" button below — changing them never re-vectorizes. */}
+      <Group title={t("param.groupLayerStrategy")}>
+        <SegmentedControl
+          label={t("param.layerStrategy")}
+          title={t("param.layerStrategyTitle")}
+          value={layerParams.layerStrategy ?? "none"}
+          options={[
+            { value: "none", label: t("param.singleLayer"), title: t("param.singleLayerTitle") },
+            { value: "auto", label: t("param.auto"), title: t("param.autoStrategyTitle") },
+            { value: "color", label: t("param.color"), title: t("param.colorStrategyTitle") },
+            { value: "spatial", label: t("param.spatial"), title: t("param.spatialStrategyTitle") },
+            { value: "complexity", label: t("param.complexity"), title: t("param.complexityStrategyTitle") },
+            { value: "hybrid", label: t("param.hybrid"), title: t("param.hybridStrategyTitle") },
+          ]}
+          onChange={set("layerStrategy")}
+        />
+        {layerParams.layerStrategy !== "none" && (
+          <div className="param-row">
+            <label title={t("param.maxLayersTitle")}>{t("param.maxLayers")}</label>
+            <input
+              type="number"
+              min={2}
+              max={16}
+              value={layerParams.layers || 4}
+              onChange={e => set("layers")(Number(e.target.value) || 4)}
+            />
+          </div>
+        )}
+        {(layerParams.layerStrategy === "complexity" || layerParams.layerStrategy === "hybrid") && (
+          <Slider
+            label={t("param.complexityThreshold")}
+            title={t("param.complexityThresholdTitle")}
+            value={layerParams.complexityThreshold ?? 70}
+            min={10}
+            max={90}
+            step={5}
+            onChange={set("complexityThreshold")}
+          />
+        )}
+      </Group>
+
+      <button
+        className="primary process-btn"
+        onClick={onProcess}
+        disabled={!processPending || processBusy}
+        title={t("layer.processHint")}
+      >
+        {processBusy ? t("processing") : t("layer.process")}
+      </button>
+
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <h3>{t("layer.title", { n: layers.length })}</h3>
         <div style={{ display: "flex", gap: "0.3rem" }}>
@@ -160,14 +212,20 @@ export default function LayerPanel({ layers, strategyInfo, profileMs, onSaveAsLa
         </div>
       )}
 
-      {layers.map(layer => (
-        <LayerCard
-          key={layer.name}
-          layer={layer}
-          selected={selected.has(layer.name)}
-          onToggle={() => toggle(layer.name)}
-        />
-      ))}
+      {layers.length === 0 ? (
+        <div className="muted">
+          {processed ? t("layer.noData") : t("layer.noDataUnprocessed")}
+        </div>
+      ) : (
+        layers.map(layer => (
+          <LayerCard
+            key={layer.name}
+            layer={layer}
+            selected={selected.has(layer.name)}
+            onToggle={() => toggle(layer.name)}
+          />
+        ))
+      )}
 
       <button
         className="primary"

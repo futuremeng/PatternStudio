@@ -15,7 +15,9 @@ use futures::stream::{Stream, StreamExt};
 use patternstudio_core::smart::SmartDecision;
 use patternstudio_core::{key_for_source, SessionCache};
 use patternstudio_engine::{
-    build_vtracer_config, lock_session, trace_with_session, ActiveTraces, TraceParams, TraceResult,
+    build_vtracer_config, layer_doc, lock_session, trace_with_session, vectorize_preview,
+    vectorize_signature, vectorize_with_session, ActiveTraces, DocCache, TraceParams, TraceResult,
+    VectorizeResult,
 };
 use patternstudio_tracer::load_image;
 use serde::{Deserialize, Serialize};
@@ -29,6 +31,11 @@ use tower_http::services::ServeDir;
 /// presets plus headroom for interactive clustering tweaks.
 const MAX_SESSIONS: usize = 10;
 
+/// How many vectorized documents to keep around for instant layering re-runs.
+/// Each entry holds the full shape geometry of one (image, vectorize-params)
+/// combination, so layering can re-run without re-vectorizing.
+const MAX_DOCS: usize = 8;
+
 #[derive(Clone)]
 struct AppState {
     upload_dir: PathBuf,
@@ -40,6 +47,9 @@ struct AppState {
     /// Reusable VTracer sessions keyed by source (path:size:mtime). Caching the
     /// expensive segmentation here is what makes parameter tweaks instant.
     sessions: Arc<Mutex<SessionCache>>,
+    /// Vectorized documents keyed by `image_key::vectorize_signature`. The
+    /// layering stage re-runs against a cached doc without re-vectorizing.
+    docs: Arc<Mutex<DocCache>>,
     /// In-flight traces keyed by image path, for preemption: a newer
     /// interactive request trips the older one's token so it aborts between
     /// pipeline batches.
@@ -280,6 +290,156 @@ async fn trace(
     })?;
 
     // Drop our registration only if we are still the current trace for this image.
+    state.active_traces.finish(&image_key, &request_id);
+
+    match result {
+        Ok(r) => Ok(Json(r)),
+        Err(e) if e == "cancelled" => Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "cancelled": true })),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e })),
+        )),
+    }
+}
+
+/// Vectorization stage only: image → VectorDoc. The document is cached under
+/// `image_key::vectorize_signature` so the layering stage can re-run without
+/// re-vectorizing. Returns the raw document as a single-layer SVG.
+async fn vectorize(
+    State(state): State<AppState>,
+    Json(req): Json<TraceRequest>,
+) -> Result<Json<VectorizeResult>, (StatusCode, Json<serde_json::Value>)> {
+    let img_path = resolve_source_path(&state, &req)
+        .map_err(|(s, e)| (s, Json(serde_json::json!({ "error": e }))))?;
+    let params = req.params.unwrap_or_default();
+    let request_id = req
+        .request_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let is_background = req.priority.as_deref() == Some("background");
+    let image_key = img_path.to_string_lossy().to_string();
+    let doc_image_key = image_key.clone();
+    let sessions = state.sessions.clone();
+    let docs = state.docs.clone();
+
+    let cancel = state
+        .active_traces
+        .register(&image_key, &request_id, is_background)
+        .map_err(|_| {
+            (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({ "busy": true })),
+            )
+        })?;
+
+    let result = tokio::task::spawn_blocking(move || {
+        let config = build_vtracer_config(&params)?;
+        let key = key_for_source(&img_path, &config.segment_key());
+        let session = {
+            let mut cache = sessions.lock().unwrap();
+            let path = img_path.clone();
+            cache.get_or_create(&key, || {
+                load_image(&path).map_err(|e| format!("failed to load image: {e}"))
+            })?
+        };
+        let mut guard = lock_session(&session);
+        let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
+        let doc_key = format!("{}::{}", doc_image_key, vectorize_signature(&params.split().0));
+        docs.lock().unwrap().insert(doc_key, doc.clone());
+        Ok::<VectorizeResult, String>(vectorize_preview(&doc, params.line_art))
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+    })?;
+
+    state.active_traces.finish(&image_key, &request_id);
+
+    match result {
+        Ok(r) => Ok(Json(r)),
+        Err(e) if e == "cancelled" => Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "cancelled": true })),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e })),
+        )),
+    }
+}
+
+/// Layering stage only: cached VectorDoc → layered SVG. Falls back to
+/// vectorizing (and caching the doc) when the doc cache has no entry, so the
+/// endpoint is self-contained after a restart or cache eviction.
+async fn layer(
+    State(state): State<AppState>,
+    Json(req): Json<TraceRequest>,
+) -> Result<Json<TraceResult>, (StatusCode, Json<serde_json::Value>)> {
+    let img_path = resolve_source_path(&state, &req)
+        .map_err(|(s, e)| (s, Json(serde_json::json!({ "error": e }))))?;
+    let params = req.params.unwrap_or_default();
+    let request_id = req
+        .request_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let is_background = req.priority.as_deref() == Some("background");
+    let image_key = img_path.to_string_lossy().to_string();
+    let doc_image_key = image_key.clone();
+    let sessions = state.sessions.clone();
+    let docs = state.docs.clone();
+
+    let cancel = state
+        .active_traces
+        .register(&image_key, &request_id, is_background)
+        .map_err(|_| {
+            (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({ "busy": true })),
+            )
+        })?;
+
+    let result = tokio::task::spawn_blocking(move || {
+        let (v, _l) = params.split();
+        let doc_key = format!("{}::{}", doc_image_key, vectorize_signature(&v));
+        let doc = match {
+            let mut cache = docs.lock().unwrap();
+            cache.get(&doc_key)
+        } {
+            Some(doc) => doc,
+            None => {
+                // Cache miss: vectorize first (the session cache keeps this
+                // cheap when the segmentation parameters are unchanged).
+                let config = build_vtracer_config(&params)?;
+                let key = key_for_source(&img_path, &config.segment_key());
+                let session = {
+                    let mut cache = sessions.lock().unwrap();
+                    let path = img_path.clone();
+                    cache.get_or_create(&key, || {
+                        load_image(&path).map_err(|e| format!("failed to load image: {e}"))
+                    })?
+                };
+                let mut guard = lock_session(&session);
+                let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
+                docs.lock().unwrap().insert(doc_key, doc.clone());
+                Arc::new(doc)
+            }
+        };
+        Ok::<TraceResult, String>(layer_doc(&doc, &params))
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+    })?;
+
     state.active_traces.finish(&image_key, &request_id);
 
     match result {
@@ -990,11 +1150,14 @@ async fn main() {
         local_only,
         projects_file,
         sessions: Arc::new(Mutex::new(SessionCache::new(MAX_SESSIONS))),
+        docs: Arc::new(Mutex::new(DocCache::new(MAX_DOCS))),
     };
     let app = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/uploads", post(upload))
         .route("/api/v1/trace", post(trace))
+        .route("/api/v1/vectorize", post(vectorize))
+        .route("/api/v1/layer", post(layer))
         .route("/api/v1/trace/cancel", post(cancel_trace))
         .route("/api/v1/smart", post(smart))
         .route("/api/v1/preprocess", post(preprocess))

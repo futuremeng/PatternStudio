@@ -79,6 +79,15 @@ export function makeKey(imageId, params) {
   return imageId + "::" + stableStringify(params || {});
 }
 
+/**
+ * Key for a vectorization-stage result. Depends only on the vectorize part
+ * of the params (see VECTORIZE_PARAM_KEYS), so layering-only changes never
+ * invalidate it. The `vec` tag keeps it distinct from processed-result keys.
+ */
+export function makeVectorizeKey(imageId, traceParams) {
+  return imageId + "::vec::" + stableStringify(traceParams || {});
+}
+
 function sizeOf(result) {
   return (result && result.svg ? result.svg : "").length;
 }
@@ -109,11 +118,8 @@ function memSet(key, result) {
   }
 }
 
-/**
- * Get a cached trace result for (imageId, params), or null on miss.
- */
-export async function getCachedTrace(imageId, params) {
-  const key = makeKey(imageId, params);
+/** Get a cached result by key, or null on miss. */
+async function getCachedByKey(key) {
   if (!idbSupported()) return (memFallback.get(key) || {}).result || null;
   try {
     const db = await openDB();
@@ -128,6 +134,22 @@ export async function getCachedTrace(imageId, params) {
     idbBroken = true;
     return (memFallback.get(key) || {}).result || null;
   }
+}
+
+/**
+ * Get a cached processed (layered) trace result for (imageId, fullParams),
+ * or null on miss.
+ */
+export async function getCachedTrace(imageId, params) {
+  return getCachedByKey(makeKey(imageId, params));
+}
+
+/**
+ * Get a cached vectorization-stage result for (imageId, traceParams), or
+ * null on miss.
+ */
+export async function getCachedVectorize(imageId, traceParams) {
+  return getCachedByKey(makeVectorizeKey(imageId, traceParams));
 }
 
 /**
@@ -165,12 +187,9 @@ export async function clearProjectCache(projectId) {
   }
 }
 
-/**
- * Store a trace result under (imageId, params).
- */
-export async function setCachedTrace(imageId, params, result) {
+/** Store a result under a cache key. */
+async function setCachedByKey(key, imageId, result) {
   if (!result || !result.svg) return;
-  const key = makeKey(imageId, params);
   const now = Date.now();
   const size = sizeOf(result);
   if (!idbSupported()) {
@@ -188,4 +207,18 @@ export async function setCachedTrace(imageId, params, result) {
     idbBroken = true;
     memSet(key, result);
   }
+}
+
+/**
+ * Store a processed (layered) trace result under (imageId, fullParams).
+ */
+export async function setCachedTrace(imageId, params, result) {
+  await setCachedByKey(makeKey(imageId, params), imageId, result);
+}
+
+/**
+ * Store a vectorization-stage result under (imageId, traceParams).
+ */
+export async function setCachedVectorize(imageId, traceParams, result) {
+  await setCachedByKey(makeVectorizeKey(imageId, traceParams), imageId, result);
 }
