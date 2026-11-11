@@ -2,27 +2,8 @@ import React, { useState } from "react";
 import JSZip from "jszip";
 import { downloadSvg, downloadBlob } from "../api.js";
 import { useI18n } from "../i18n/index.jsx";
-import { canvasBox, withCanvasBox } from "../editorUtils.js";
+import { layerToStandaloneSvg, layerToThumbnailSvg } from "../editorUtils.js";
 import { SegmentedControl, Slider, Group } from "./ParameterPanel.jsx";
-
-// Rebuild a layer's preview SVG as a standalone file with explicit width/height
-// on the *original* canvas. A separated layer holds a subset of the shapes, not
-// a crop: the shapes keep their image-space coordinates, so the canvas must
-// stay the size of the source image (`canvasSize`). Only when that is unknown
-// does the box carried by the snapshot itself get used — a layer snapshotted
-// from a shrink-to-content editing canvas would otherwise export shrunken.
-function layerToStandaloneSvg(previewSvg, canvasSize) {
-  const innerMatch = previewSvg.match(/<svg[^>]*>([\s\S]*)<\/svg>/);
-  const inner = innerMatch ? innerMatch[1] : "";
-  const box = canvasBox(previewSvg, canvasSize);
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${box.x} ${box.y} ${box.w} ${box.h}" width="${box.w}" height="${box.h}">${inner}</svg>\n`;
-}
-
-// The card thumbnail shows the layer in the context of the full canvas, so the
-// figure's position within the original artwork stays recognizable.
-function layerToThumbnailSvg(previewSvg, canvasSize) {
-  return withCanvasBox(previewSvg, canvasBox(previewSvg, canvasSize));
-}
 
 // Make a layer name safe to use as a file name inside the export ZIP.
 function sanitizeFilename(name) {
@@ -72,10 +53,15 @@ export default function LayerPanel({
   layers, strategyInfo, profileMs, onSaveAsLayer, canSaveAsLayer,
   layerParams, onLayerParamsChange, onProcess, onCancel, processBusy, processPending, processed,
   canvasSize,
+  savedLayers = [], editingLayerId = null, onUseAsEditingObject, onRestoreFullResult,
 }) {
   const { t } = useI18n();
   const [selected, setSelected] = useState(new Set());
   const [exporting, setExporting] = useState(false);
+  // The exported layer whose "switch editing object" prompt is open (null = no
+  // prompt). Switching replaces what the editing area shows and edits, so it
+  // is always confirmed first.
+  const [confirmLayer, setConfirmLayer] = useState(null);
   const set = (key) => (val) => onLayerParamsChange(prev => ({ ...prev, [key]: val }));
 
   const STRATEGY_LABELS = {
@@ -127,6 +113,20 @@ export default function LayerPanel({
     } finally {
       setExporting(false);
     }
+  };
+
+  // Download one exported layer as its own .svg (they are no longer part of the
+  // checkbox list above, so they keep their own export action).
+  const exportOne = async (layer) => {
+    await downloadSvg(layerToStandaloneSvg(layer.previewSvg, canvasSize), `${sanitizeFilename(layer.name)}.svg`);
+  };
+
+  // Clicking an exported layer's picture asks whether it should become the
+  // object the editing area works on; clicking the one already in use switches
+  // back to the full layered result.
+  const pickEditingLayer = (layer) => {
+    if (editingLayerId === layer.id) onRestoreFullResult?.();
+    else setConfirmLayer(layer);
   };
 
   return (
@@ -254,6 +254,82 @@ export default function LayerPanel({
       >
         {t("layer.exportSelected", { n: selected.size })}
       </button>
+
+      {/* Exported layers live in their own list at the bottom: each picture is
+          a candidate editing object for the area on the left. */}
+      {savedLayers.length > 0 && (
+        <div className="saved-layers">
+          <div className="saved-layers-header">
+            <h3>{t("layer.exportedTitle", { n: savedLayers.length })}</h3>
+            {editingLayerId != null && (
+              <button
+                onClick={onRestoreFullResult}
+                style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}
+                title={t("layer.restoreFullHint")}
+              >
+                {t("layer.restoreFull")}
+              </button>
+            )}
+          </div>
+          {savedLayers.map(layer => (
+            <div
+              key={layer.id}
+              className={`layer-card saved-layer-card${editingLayerId === layer.id ? " editing" : ""}`}
+              onClick={() => pickEditingLayer(layer)}
+              title={editingLayerId === layer.id ? t("layer.editingHint") : t("layer.useAsEditingHint")}
+            >
+              <div className="mini-preview" dangerouslySetInnerHTML={{ __html: layerToThumbnailSvg(layer.previewSvg, canvasSize) }} />
+              <div className="info">
+                <div className="name">
+                  {layer.name}
+                  {editingLayerId === layer.id && (
+                    <span className="editing-badge">{t("layer.editingBadge")}</span>
+                  )}
+                </div>
+                <div className="meta">
+                  <span className="color-dot" style={{ background: layer.dominantColor }} />
+                  <span>{t("layer.shapes", { n: layer.shapeCount })}</span>
+                </div>
+              </div>
+              <button
+                className="saved-layer-export"
+                onClick={e => { e.stopPropagation(); exportOne(layer); }}
+                title={t("layer.exportOneHint")}
+                aria-label={t("layer.exportOne")}
+              >
+                ↓
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {confirmLayer && (
+        <div className="modal-overlay" onClick={() => setConfirmLayer(null)}>
+          <div className="modal confirm-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>{t("layer.exportedTitle", { n: savedLayers.length })}</h2>
+              <button className="icon-btn" onClick={() => setConfirmLayer(null)} aria-label={t("close")}>×</button>
+            </div>
+            <div className="confirm-body">
+              <div
+                className="confirm-preview"
+                dangerouslySetInnerHTML={{ __html: layerToThumbnailSvg(confirmLayer.previewSvg, canvasSize) }}
+              />
+              <p>{t("layer.useAsEditingConfirm", { name: confirmLayer.name })}</p>
+            </div>
+            <div className="modal-footer">
+              <button onClick={() => setConfirmLayer(null)}>{t("settings.cancel")}</button>
+              <button
+                className="primary"
+                onClick={() => { onUseAsEditingObject?.(confirmLayer); setConfirmLayer(null); }}
+              >
+                {t("layer.useAsEditingOk")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

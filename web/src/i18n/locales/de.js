@@ -275,6 +275,16 @@ export default {
   "layer.advLayer": "Erweiterte Ebene {n}",
   "layer.saveAsLayer": "Als neue Ebene speichern",
   "layer.saveAsLayerHint": "Aktuelle bearbeitete Leinwand (inkl. Verschiebungen/Löschungen) als neue exportierbare Ebene speichern",
+  "layer.exportedTitle": "Exportierte Ebenen ({n})",
+  "layer.useAsEditingHint": "Klicken, um diese Ebene als aktuelles Bearbeitungsobjekt zu verwenden",
+  "layer.editingHint": "Diese Ebene wird bearbeitet — klicken für zurück zum vollständigen Ergebnis",
+  "layer.useAsEditingConfirm": "„{name}“ als Bearbeitungsobjekt verwenden? Der Bearbeitungsbereich zeigt und bearbeitet nur diese Ebene.",
+  "layer.useAsEditingOk": "Wechseln",
+  "layer.editingBadge": "In Bearbeitung",
+  "layer.restoreFull": "Zurück zum vollständigen Ergebnis",
+  "layer.restoreFullHint": "Bearbeitungsbereich auf das vollständige Endergebnis zurücksetzen",
+  "layer.exportOne": "Ebene exportieren",
+  "layer.exportOneHint": "Diese Ebene als eigenständige SVG exportieren",
 
   // Advanced editor
   "adv.enter": "Erweiterte Bearbeitung (Pfadknoten, Transformationen, Gruppierung)",

@@ -275,6 +275,16 @@ export default {
   "layer.advLayer": "詳細レイヤー {n}",
   "layer.saveAsLayer": "新しいレイヤーとして保存",
   "layer.saveAsLayerHint": "現在の編集済みキャンバス（移動/削除を含む）を新しいエクスポート可能なレイヤーとして保存",
+  "layer.exportedTitle": "エクスポートしたレイヤー ({n})",
+  "layer.useAsEditingHint": "クリックするとこのレイヤーを現在の編集対象にします",
+  "layer.editingHint": "このレイヤーを編集中です。クリックで完全な結果に戻ります",
+  "layer.useAsEditingConfirm": "「{name}」を編集対象にしますか？編集領域はこのレイヤーのみを表示・編集します。",
+  "layer.useAsEditingOk": "切り替え",
+  "layer.editingBadge": "編集中",
+  "layer.restoreFull": "完全な結果に戻る",
+  "layer.restoreFullHint": "編集領域を完全なレイヤー化結果に戻します",
+  "layer.exportOne": "レイヤーを出力",
+  "layer.exportOneHint": "このレイヤーを独立した SVG として出力します",
 
   // Advanced editor
   "adv.enter": "高度編集（パスノード、変形、グループ）",

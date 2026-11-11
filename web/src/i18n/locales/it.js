@@ -275,6 +275,16 @@ export default {
   "layer.advLayer": "Livello avanzato {n}",
   "layer.saveAsLayer": "Salva come nuovo livello",
   "layer.saveAsLayerHint": "Salva la tela corrente modificata (con spostamenti/eliminazioni) come nuovo livello esportabile",
+  "layer.exportedTitle": "Livelli esportati ({n})",
+  "layer.useAsEditingHint": "Fai clic per usare questo livello come oggetto di modifica attuale",
+  "layer.editingHint": "Livello in modifica — fai clic per tornare al risultato completo",
+  "layer.useAsEditingConfirm": "Usare “{name}” come oggetto di modifica? L'area di modifica mostrerà e modificherà solo questo livello.",
+  "layer.useAsEditingOk": "Cambia",
+  "layer.editingBadge": "In modifica",
+  "layer.restoreFull": "Torna al risultato completo",
+  "layer.restoreFullHint": "Ripristina l'area di modifica sul risultato completo a livelli",
+  "layer.exportOne": "Esporta livello",
+  "layer.exportOneHint": "Esporta questo livello come SVG autonomo",
 
   // Advanced editor
   "adv.enter": "Modifica avanzata (nodi percorso, trasformazioni, raggruppamento)",

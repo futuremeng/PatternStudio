@@ -38,6 +38,11 @@ All notable changes to PatternStudio are documented in this file.
 - Layer panel: an abort button while layering is running — auto layering
   re-fits every shape and can take a long time; cancelling keeps the previous
   result on screen
+- Exported layers: their own list at the bottom of the layer panel, each with
+  its own export button; clicking a layer's picture asks whether it becomes the
+  editing object of the editing area (preview, patch editing and the advanced
+  editor then work on that layer alone), and clicking it again — or "Back to
+  full result" — switches back to the full layered result
 
 **Architecture**
 - New `patternstudio-engine` crate: the trace pipeline (params → vtracer

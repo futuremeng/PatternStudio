@@ -275,6 +275,16 @@ export default {
   "layer.advLayer": "Calque avancé {n}",
   "layer.saveAsLayer": "Enregistrer en nouveau calque",
   "layer.saveAsLayerHint": "Capturer le canevas actuel modifié (déplacements/suppressions inclus) en nouveau calque exportable",
+  "layer.exportedTitle": "Calques exportés ({n})",
+  "layer.useAsEditingHint": "Cliquer pour utiliser ce calque comme objet d'édition actuel",
+  "layer.editingHint": "Calque en cours d'édition — cliquer pour revenir au résultat complet",
+  "layer.useAsEditingConfirm": "Utiliser « {name} » comme objet d'édition ? La zone d'édition n'affichera et modifiera que ce calque.",
+  "layer.useAsEditingOk": "Basculer",
+  "layer.editingBadge": "En édition",
+  "layer.restoreFull": "Revenir au résultat complet",
+  "layer.restoreFullHint": "Rétablir la zone d'édition sur le résultat caliqué complet",
+  "layer.exportOne": "Exporter le calque",
+  "layer.exportOneHint": "Exporter ce calque comme SVG autonome",
 
   // Advanced editor
   "adv.enter": "Édition avancée (nœuds de chemin, transformations, regroupement)",

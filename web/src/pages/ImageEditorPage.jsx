@@ -4,7 +4,7 @@ import { getImageUrl, getProjectLineage, prepareSource, vectorizeSource, layerSo
 import { getCachedTrace, setCachedTrace, getCachedVectorize, setCachedVectorize, stableStringify } from "../traceCache.js";
 import { createTraceQueue } from "../traceQueue.js";
 import { loadSavedConfigs, saveConfig, deleteSavedConfig } from "../configStore.js";
-import { loadLastPreset, saveLastPreset, errMsg, buildDefaultConfigs, dominantFill } from "../editorUtils.js";
+import { loadLastPreset, saveLastPreset, errMsg, buildDefaultConfigs, dominantFill, layerToStandaloneSvg } from "../editorUtils.js";
 import { usePatchEditing } from "../hooks/usePatchEditing.js";
 import { useSmartPreset } from "../hooks/useSmartPreset.js";
 import ParameterPanel from "../components/ParameterPanel.jsx";
@@ -49,6 +49,12 @@ export default function ImageEditorPage() {
   // Layers the user has snapshotted from the edited preview (see saveAsLayer).
   // Kept separate from result.layers so a re-trace can reset them cleanly.
   const [savedLayers, setSavedLayers] = useState([]);
+  // Stable id source for exported layers (state updates must not mint ids).
+  const savedLayerSeqRef = useRef(0);
+  // The exported layer the editing area currently works on, or null for the
+  // full layered result. An exported layer is a candidate artwork in its own
+  // right, so picking one swaps it in as the editing object.
+  const [editingLayerId, setEditingLayerId] = useState(null);
   const [busy, setBusy] = useState(false);
   // True only while a layering ("Process") task is in flight — drives the
   // layer panel's button, decoupled from the vectorization busy flag.
@@ -148,11 +154,35 @@ export default function ImageEditorPage() {
     [result?.width, result?.height, srcSize.w, srcSize.h]
   );
 
+  // The exported layer picked as editing object (null = the full layered
+  // result), and the SVG the editing area therefore shows and edits: an
+  // exported layer is emitted on the original canvas, so switching the editing
+  // object never moves or crops the artwork.
+  const editingLayer = useMemo(
+    () => savedLayers.find(l => l.id === editingLayerId) || null,
+    [savedLayers, editingLayerId]
+  );
+  const editingSvg = editingLayer
+    ? layerToStandaloneSvg(editingLayer.previewSvg, canvasSize)
+    : result?.svg;
+
   // --- Patch selection & dragging (see usePatchEditing) ---
+  // Layer content derived from an SVG string: shape count + dominant fill.
+  const layerSnapshotFromSvg = useCallback((svgStr) => {
+    try {
+      const doc = new DOMParser().parseFromString(svgStr, "image/svg+xml");
+      const paths = Array.from(doc.querySelectorAll("path"));
+      return { shapeCount: paths.length, dominantColor: dominantFill(paths), previewSvg: svgStr };
+    } catch {
+      return null;
+    }
+  }, []);
   const snapshotEditedLayer = useCallback((snap) => {
+    const id = ++savedLayerSeqRef.current;
     setSavedLayers((prev) => [
       ...prev,
       {
+        id,
         name: t("layer.editedLayer", { n: prev.length + 1 }),
         role: "edited",
         shapeCount: snap.shapeCount,
@@ -164,6 +194,7 @@ export default function ImageEditorPage() {
   }, [t]);
   const { tool, setTool, svgContainerRef, saveAsLayer } = usePatchEditing({
     result,
+    svgKey: editingSvg,
     compareMode,
     canvasSize,
     onSnapshotLayer: snapshotEditedLayer,
@@ -272,26 +303,19 @@ export default function ImageEditorPage() {
       return;
     }
     setSavedLayers([]);
+    setEditingLayerId(null);
   }, [result]);
 
   // Snapshot the advanced editor's canvas as a new, exportable layer.
   const saveAdvancedAsLayer = useCallback((svgStr) => {
-    try {
-      const doc = new DOMParser().parseFromString(svgStr, "image/svg+xml");
-      const paths = Array.from(doc.querySelectorAll("path"));
-      setSavedLayers((prev) => [
-        ...prev,
-        {
-          name: t("layer.advLayer", { n: prev.length + 1 }),
-          role: "edited",
-          shapeCount: paths.length,
-          dominantColor: dominantFill(paths),
-          previewSvg: svgStr,
-          profile: null,
-        },
-      ]);
-    } catch { /* ignore an unparseable snapshot */ }
-  }, [t]);
+    const snap = layerSnapshotFromSvg(svgStr);
+    if (!snap) return;
+    const id = ++savedLayerSeqRef.current;
+    setSavedLayers((prev) => [
+      ...prev,
+      { id, name: t("layer.advLayer", { n: prev.length + 1 }), role: "edited", profile: null, ...snap },
+    ]);
+  }, [t, layerSnapshotFromSvg]);
 
   // --- Smart Preset tuning (see useSmartPreset) ---
   // Normalize + apply a full param set, deselecting the active config (the
@@ -665,13 +689,21 @@ export default function ImageEditorPage() {
             <div className="preview-viewport" ref={advViewportRef}>
               <AdvancedSvgEditor
                 ref={advEditorRef}
-                svgString={result.svg}
+                svgString={editingSvg || result.svg}
                 canvasSize={canvasSize}
                 onComplete={(editedSvg) => {
-                  // Non-retrace result update: keep any layers the user
-                  // snapshotted from the advanced editor.
-                  skipLayerResetRef.current = true;
-                  setResult(prev => prev ? { ...prev, svg: editedSvg } : prev);
+                  // The editing object decides where the edits land: an
+                  // exported layer gets its own content replaced, otherwise the
+                  // layered result takes them.
+                  if (editingLayer) {
+                    const snap = layerSnapshotFromSvg(editedSvg) || {};
+                    setSavedLayers(prev => prev.map(l => l.id === editingLayer.id ? { ...l, ...snap } : l));
+                  } else {
+                    // Non-retrace result update: keep any layers the user
+                    // snapshotted from the advanced editor.
+                    skipLayerResetRef.current = true;
+                    setResult(prev => prev ? { ...prev, svg: editedSvg } : prev);
+                  }
                   setAdvancedMode(false);
                 }}
                 onCancel={() => setAdvancedMode(false)}
@@ -693,7 +725,7 @@ export default function ImageEditorPage() {
             <CompareViewer
               key={imageId}
               leftUrl={imageUrl}
-              right={result?.svg ? { svg: result.svg } : null}
+              right={editingSvg ? { svg: editingSvg } : null}
               contentSize={canvasSize}
               onImageLoad={(w, h) => setSrcSize({ w, h })}
               compareMode={compareMode}
@@ -733,7 +765,7 @@ export default function ImageEditorPage() {
 
         <aside className="editor-layers">
           <LayerPanel
-            layers={[...(result?.layers || []), ...savedLayers]}
+            layers={result?.layers || []}
             strategyInfo={result?.strategyInfo}
             profileMs={result?.profileMs}
             // In advanced mode the preview stage is unmounted, so the panel's
@@ -748,6 +780,10 @@ export default function ImageEditorPage() {
             processPending={lastVectorizeSig != null && stableStringify(mergedParams) !== lastProcessSig}
             processed={!!result?.processed}
             canvasSize={canvasSize}
+            savedLayers={savedLayers}
+            editingLayerId={editingLayer ? editingLayer.id : null}
+            onUseAsEditingObject={(layer) => setEditingLayerId(layer.id)}
+            onRestoreFullResult={() => setEditingLayerId(null)}
           />
         </aside>
       </div>

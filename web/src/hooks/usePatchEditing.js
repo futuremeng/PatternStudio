@@ -11,7 +11,12 @@ import { serializeEditedSvg, dominantFill } from "../editorUtils.js";
  * the ref) imperatively. `onSnapshotLayer` receives
  * `{ shapeCount, dominantColor, previewSvg }` for a new edited layer.
  */
-export function usePatchEditing({ result, compareMode, canvasSize, onSnapshotLayer }) {
+export function usePatchEditing({ result, svgKey, compareMode, canvasSize, onSnapshotLayer }) {
+  // The SVG actually rendered in the preview: the layered result, or one
+  // exported layer when the user picked it as the editing object. Everything
+  // here keys off that string, so switching the editing object also drops the
+  // selection and the per-path transforms of the previous canvas.
+  const canvasSvg = svgKey ?? result?.svg;
   const [tool, setTool] = useState("none");
   const svgContainerRef = useRef(null);
   const pathTransformsRef = useRef(new Map()); // pathIdx → { dx, dy } in SVG coords
@@ -101,15 +106,16 @@ export function usePatchEditing({ result, compareMode, canvasSize, onSnapshotLay
     }
   }, [getSvgAndPaths]);
 
-  // Reset patch selection when the SVG changes (new trace result).
+  // Reset patch selection when the SVG changes (new trace result or a new
+  // editing object).
   useEffect(() => {
     selectedPathIdxsRef.current = new Set();
     pathTransformsRef.current.clear();
-  }, [result?.svg]);
+  }, [canvasSvg]);
 
   // Attach pointer interactions to SVG paths for patch selection & dragging.
   useEffect(() => {
-    if (tool !== "select" || !result?.svg) return;
+    if (tool !== "select" || !canvasSvg) return;
     const res = getSvgAndPaths();
     if (!res) return;
     const { svg, paths } = res;
@@ -300,7 +306,7 @@ export function usePatchEditing({ result, compareMode, canvasSize, onSnapshotLay
       window.removeEventListener("keydown", onKeyDown);
       dragRef.current = null;
     };
-  }, [tool, result?.svg, compareMode, getSvgAndPaths, highlightPaths, renderControlPoints, clearPatchSelection]);
+  }, [tool, canvasSvg, compareMode, getSvgAndPaths, highlightPaths, renderControlPoints, clearPatchSelection]);
 
   return { tool, setTool, svgContainerRef, saveAsLayer };
 }

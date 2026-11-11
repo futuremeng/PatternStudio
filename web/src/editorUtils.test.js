@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canvasBox, withCanvasBox, serializeEditedSvg } from "./editorUtils.js";
+import { canvasBox, withCanvasBox, serializeEditedSvg, layerToStandaloneSvg, layerToThumbnailSvg } from "./editorUtils.js";
 
 // A layer snapshot taken after the editing view was cropped to its content:
 // the shapes still live in image space, only the canvas box got smaller.
@@ -55,6 +55,31 @@ describe("withCanvasBox", () => {
   it("keeps a self-closing root self-closing", () => {
     const out = withCanvasBox('<svg viewBox="0 0 10 10"/>', { x: 0, y: 0, w: 20, h: 20 });
     expect(out).toBe('<svg viewBox="0 0 20 20" width="20" height="20"/>');
+  });
+});
+
+describe("layerToStandaloneSvg", () => {
+  it("emits the layer on the original canvas, shapes untouched", () => {
+    const out = layerToStandaloneSvg(CROPPED, { w: 1000, h: 400 });
+    expect(out).toContain('viewBox="0 0 1000 400"');
+    expect(out).toContain('width="1000"');
+    expect(out).toContain('height="400"');
+    expect(out).toContain('d="M400 60L420 60L400 80Z"');
+    expect(out.match(/viewBox=/g)).toHaveLength(1);
+  });
+
+  it("adds the SVG namespace to a snapshot that lacks one", () => {
+    const out = layerToStandaloneSvg('<svg><path d="M0 0Z"/></svg>', { w: 64, h: 64 });
+    expect(out.match(/xmlns="/g)).toHaveLength(1);
+    expect(out).toContain('xmlns="http://www.w3.org/2000/svg"');
+  });
+
+  it("thumbnail and export use the same canvas", () => {
+    const box = { w: 1000, h: 400 };
+    const thumb = layerToThumbnailSvg(CROPPED, box);
+    expect(thumb).toContain('viewBox="0 0 1000 400"');
+    expect(thumb).toContain('d="M400 60L420 60L400 80Z"');
+    expect(thumb.match(/viewBox=/g)).toHaveLength(1);
   });
 });
 

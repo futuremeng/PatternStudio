@@ -73,6 +73,31 @@ export function serializeEditedSvg(svg, canvasSize) {
   );
 }
 
+/**
+ * Rebuild a layer's preview SVG as a standalone file with explicit
+ * width/height on the *original* canvas. A separated layer holds a subset of
+ * the shapes, not a crop: the shapes keep their image-space coordinates, so
+ * the canvas must stay the size of the source image (`canvasSize`). Only when
+ * that is unknown does the box carried by the snapshot itself get used — a
+ * layer snapshotted from a shrink-to-content editing canvas would otherwise
+ * export shrunken.
+ */
+export function layerToStandaloneSvg(previewSvg, canvasSize) {
+  const boxed = withCanvasBox(previewSvg, canvasBox(previewSvg, canvasSize));
+  // A standalone file must declare the SVG namespace; snapshots from the
+  // backend and the editor already do, a hand-made one might not.
+  return boxed.replace(/<svg\b(?![^>]*\bxmlns=)/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+}
+
+/**
+ * The card thumbnail: the layer shown in the context of the full canvas, so
+ * the figure's position within the original artwork stays recognizable.
+ * Same box as the standalone export — thumbnail and file agree.
+ */
+export function layerToThumbnailSvg(previewSvg, canvasSize) {
+  return withCanvasBox(previewSvg, canvasBox(previewSvg, canvasSize));
+}
+
 // Most common non-"none" fill color among a set of path elements.
 export function dominantFill(paths) {
   const counts = {};

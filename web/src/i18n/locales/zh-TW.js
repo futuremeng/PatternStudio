@@ -275,6 +275,16 @@ export default {
   "layer.advLayer": "進階圖層 {n}",
   "layer.saveAsLayer": "儲存為新圖層",
   "layer.saveAsLayerHint": "將目前編輯後的畫布（含移動/刪除）存為一個可匯出的新圖層",
+  "layer.exportedTitle": "匯出的圖層 ({n})",
+  "layer.useAsEditingHint": "點擊將其設為目前編輯對象",
+  "layer.editingHint": "正在編輯該圖層，點擊返回完整結果",
+  "layer.useAsEditingConfirm": "將「{name}」設為目前編輯對象？編輯區將只顯示並編輯這個圖層。",
+  "layer.useAsEditingOk": "切換",
+  "layer.editingBadge": "編輯中",
+  "layer.restoreFull": "返回完整結果",
+  "layer.restoreFullHint": "編輯區恢復為完整的分層結果",
+  "layer.exportOne": "匯出該圖層",
+  "layer.exportOneHint": "將該圖層匯出為獨立 SVG",
 
   // Advanced editor
   "adv.enter": "進階編輯（路徑節點、變換、分組）",

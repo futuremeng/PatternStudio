@@ -275,6 +275,16 @@ export default {
   "layer.advLayer": "Advanced layer {n}",
   "layer.saveAsLayer": "Save as new layer",
   "layer.saveAsLayerHint": "Snapshot the current edited canvas (moves/deletes included) as a new exportable layer",
+  "layer.exportedTitle": "Exported layers ({n})",
+  "layer.useAsEditingHint": "Click to use this layer as the current editing object",
+  "layer.editingHint": "Editing this layer — click to go back to the full result",
+  "layer.useAsEditingConfirm": "Use “{name}” as the editing object? The editing area will show and edit only this layer.",
+  "layer.useAsEditingOk": "Switch",
+  "layer.editingBadge": "Editing",
+  "layer.restoreFull": "Back to full result",
+  "layer.restoreFullHint": "Restore the editing area to the full layered result",
+  "layer.exportOne": "Export layer",
+  "layer.exportOneHint": "Export this layer as a standalone SVG",
 
   // Advanced editor
   "adv.enter": "Advanced editing (path nodes, transforms, grouping)",

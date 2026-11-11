@@ -275,6 +275,16 @@ export default {
   "layer.advLayer": "高级图层 {n}",
   "layer.saveAsLayer": "保存为新图层",
   "layer.saveAsLayerHint": "将当前编辑后的画布（含移动/删除）存为一个可导出的新图层",
+  "layer.exportedTitle": "导出的图层 ({n})",
+  "layer.useAsEditingHint": "点击将其设为当前编辑对象",
+  "layer.editingHint": "正在编辑该图层，点击返回完整结果",
+  "layer.useAsEditingConfirm": "将「{name}」设为当前编辑对象？编辑区将只显示并编辑这个图层。",
+  "layer.useAsEditingOk": "切换",
+  "layer.editingBadge": "编辑中",
+  "layer.restoreFull": "返回完整结果",
+  "layer.restoreFullHint": "编辑区恢复为完整的分层结果",
+  "layer.exportOne": "导出该图层",
+  "layer.exportOneHint": "将该图层导出为独立 SVG",
 
   // Advanced editor
   "adv.enter": "高级编辑（路径节点、变换、分组）",
