@@ -188,4 +188,52 @@ mod tests {
         assert!(svg.contains("fill=\"#ff0000\""));
         assert!(svg.ends_with("</svg>\n"));
     }
+
+    /// A layer holds a *subset* of the shapes, not a crop of the artwork: every
+    /// SVG a separated layer produces must stay on the full document canvas,
+    /// whatever corner of it the shapes happen to occupy.
+    fn corner_shape_doc() -> LayeredDoc {
+        let mut doc = VectorDoc::new(1000, 400);
+        for i in 0..2 {
+            let mut sub = SubPath::new();
+            sub.commands
+                .push(vtracer::ir::PathCmd::MoveTo(PointF64 { x: 10.0, y: 10.0 }));
+            sub.commands.push(vtracer::ir::PathCmd::LineTo(PointF64 {
+                x: 10.0 + 20.0 * i as f64,
+                y: 10.0,
+            }));
+            sub.commands.push(vtracer::ir::PathCmd::LineTo(PointF64 {
+                x: 10.0,
+                y: 30.0,
+            }));
+            sub.commands.push(vtracer::ir::PathCmd::Close);
+            doc.shapes.push(Shape {
+                paint: Paint::Solid(Color::new(0, 0, 0)),
+                path: MultiPath {
+                    subpaths: vec![sub],
+                },
+            });
+        }
+        LayeredDoc::from_vector_doc(&doc, &LayerAssignment::single_layer())
+    }
+
+    #[test]
+    fn layer_preview_keeps_the_document_canvas() {
+        let doc = corner_shape_doc();
+        let svg = LayeredWriter::layer_preview_svg(&doc, 0);
+        assert!(
+            svg.contains("viewBox=\"0 0 1000 400\""),
+            "layer preview must not shrink to the shapes' bbox: {svg}"
+        );
+    }
+
+    #[test]
+    fn selected_layer_export_keeps_the_document_canvas() {
+        let doc = corner_shape_doc();
+        let svg = LayeredWriter::write_selected_layers(&doc, &["artwork".to_string()]);
+        assert!(
+            svg.contains("viewBox=\"0 0 1000 400\" width=\"1000\" height=\"400\""),
+            "selected-layer export must not shrink to the shapes' bbox: {svg}"
+        );
+    }
 }

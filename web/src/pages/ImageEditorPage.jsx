@@ -139,6 +139,15 @@ export default function ImageEditorPage() {
   // zoom/fit controls from the very first paint.
   const [srcSize, setSrcSize] = useState({ w: 0, h: 0 });
 
+  // The canvas every separated layer and every layer export is emitted on: the
+  // size the artwork was traced at. Separating a layer takes a subset of the
+  // shapes, it does not crop the artwork, so the canvas must never shrink to
+  // their bounding box.
+  const canvasSize = useMemo(
+    () => ({ w: result?.width || srcSize.w || 0, h: result?.height || srcSize.h || 0 }),
+    [result?.width, result?.height, srcSize.w, srcSize.h]
+  );
+
   // --- Patch selection & dragging (see usePatchEditing) ---
   const snapshotEditedLayer = useCallback((snap) => {
     setSavedLayers((prev) => [
@@ -156,6 +165,7 @@ export default function ImageEditorPage() {
   const { tool, setTool, svgContainerRef, saveAsLayer } = usePatchEditing({
     result,
     compareMode,
+    canvasSize,
     onSnapshotLayer: snapshotEditedLayer,
   });
 
@@ -644,6 +654,7 @@ export default function ImageEditorPage() {
               <AdvancedSvgEditor
                 ref={advEditorRef}
                 svgString={result.svg}
+                canvasSize={canvasSize}
                 onComplete={(editedSvg) => {
                   // Non-retrace result update: keep any layers the user
                   // snapshotted from the advanced editor.
@@ -671,7 +682,7 @@ export default function ImageEditorPage() {
               key={imageId}
               leftUrl={imageUrl}
               right={result?.svg ? { svg: result.svg } : null}
-              contentSize={{ w: result?.width || srcSize.w || 0, h: result?.height || srcSize.h || 0 }}
+              contentSize={canvasSize}
               onImageLoad={(w, h) => setSrcSize({ w, h })}
               compareMode={compareMode}
               onCompareModeChange={setCompareMode}
@@ -723,6 +734,7 @@ export default function ImageEditorPage() {
             processBusy={processBusy}
             processPending={lastVectorizeSig != null && stableStringify(mergedParams) !== lastProcessSig}
             processed={!!result?.processed}
+            canvasSize={canvasSize}
           />
         </aside>
       </div>

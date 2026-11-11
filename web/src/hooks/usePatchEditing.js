@@ -11,7 +11,7 @@ import { serializeEditedSvg, dominantFill } from "../editorUtils.js";
  * the ref) imperatively. `onSnapshotLayer` receives
  * `{ shapeCount, dominantColor, previewSvg }` for a new edited layer.
  */
-export function usePatchEditing({ result, compareMode, onSnapshotLayer }) {
+export function usePatchEditing({ result, compareMode, canvasSize, onSnapshotLayer }) {
   const [tool, setTool] = useState("none");
   const svgContainerRef = useRef(null);
   const pathTransformsRef = useRef(new Map()); // pathIdx → { dx, dy } in SVG coords
@@ -33,9 +33,11 @@ export function usePatchEditing({ result, compareMode, onSnapshotLayer }) {
     onSnapshotLayer({
       shapeCount: res.paths.length,
       dominantColor: dominantFill(res.paths),
-      previewSvg: serializeEditedSvg(res.svg),
+      // Pin the snapshot to the original canvas: the layer holds a subset of
+      // the shapes, not a crop of the artwork.
+      previewSvg: serializeEditedSvg(res.svg, canvasSize),
     });
-  }, [getSvgAndPaths, onSnapshotLayer]);
+  }, [getSvgAndPaths, canvasSize, onSnapshotLayer]);
 
   const clearPatchSelection = useCallback(() => {
     selectedPathIdxsRef.current = new Set();

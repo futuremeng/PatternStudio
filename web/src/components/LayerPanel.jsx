@@ -2,21 +2,26 @@ import React, { useState } from "react";
 import JSZip from "jszip";
 import { downloadSvg, downloadBlob } from "../api.js";
 import { useI18n } from "../i18n/index.jsx";
+import { canvasBox, withCanvasBox } from "../editorUtils.js";
 import { SegmentedControl, Slider, Group } from "./ParameterPanel.jsx";
 
-// Rebuild a layer's preview SVG as a standalone file with explicit width/height.
-// The viewBox origin (x y) is preserved: layers snapshotted from a
-// shrink-to-content canvas carry an offset viewBox that keeps their shapes
-// in the original image coordinates.
-function layerToStandaloneSvg(previewSvg) {
+// Rebuild a layer's preview SVG as a standalone file with explicit width/height
+// on the *original* canvas. A separated layer holds a subset of the shapes, not
+// a crop: the shapes keep their image-space coordinates, so the canvas must
+// stay the size of the source image (`canvasSize`). Only when that is unknown
+// does the box carried by the snapshot itself get used — a layer snapshotted
+// from a shrink-to-content editing canvas would otherwise export shrunken.
+function layerToStandaloneSvg(previewSvg, canvasSize) {
   const innerMatch = previewSvg.match(/<svg[^>]*>([\s\S]*)<\/svg>/);
   const inner = innerMatch ? innerMatch[1] : "";
-  const vbMatch = previewSvg.match(/viewBox="(-?[\d.]+) (-?[\d.]+) ([\d.]+) ([\d.]+)"/);
-  const x = vbMatch ? vbMatch[1] : "0";
-  const y = vbMatch ? vbMatch[2] : "0";
-  const w = vbMatch ? vbMatch[3] : "100";
-  const h = vbMatch ? vbMatch[4] : "100";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x} ${y} ${w} ${h}" width="${w}" height="${h}">${inner}</svg>\n`;
+  const box = canvasBox(previewSvg, canvasSize);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${box.x} ${box.y} ${box.w} ${box.h}" width="${box.w}" height="${box.h}">${inner}</svg>\n`;
+}
+
+// The card thumbnail shows the layer in the context of the full canvas, so the
+// figure's position within the original artwork stays recognizable.
+function layerToThumbnailSvg(previewSvg, canvasSize) {
+  return withCanvasBox(previewSvg, canvasBox(previewSvg, canvasSize));
 }
 
 // Make a layer name safe to use as a file name inside the export ZIP.
@@ -24,7 +29,7 @@ function sanitizeFilename(name) {
   return name.replace(/[\\/:*?"<>|]/g, "_").trim() || "layer";
 }
 
-function LayerCard({ layer, selected, onToggle }) {
+function LayerCard({ layer, selected, onToggle, canvasSize }) {
   const { t } = useI18n();
   const PROFILE_TITLES = {
     L0: t("layer.profileL0"),
@@ -42,7 +47,7 @@ function LayerCard({ layer, selected, onToggle }) {
         onChange={onToggle}
         onClick={e => e.stopPropagation()}
       />
-      <div className="mini-preview" dangerouslySetInnerHTML={{ __html: layer.previewSvg }} />
+      <div className="mini-preview" dangerouslySetInnerHTML={{ __html: layerToThumbnailSvg(layer.previewSvg, canvasSize) }} />
       <div className="info">
         <div className="name">
           {layer.name}
@@ -66,6 +71,7 @@ function LayerCard({ layer, selected, onToggle }) {
 export default function LayerPanel({
   layers, strategyInfo, profileMs, onSaveAsLayer, canSaveAsLayer,
   layerParams, onLayerParamsChange, onProcess, processBusy, processPending, processed,
+  canvasSize,
 }) {
   const { t } = useI18n();
   const [selected, setSelected] = useState(new Set());
@@ -109,12 +115,12 @@ export default function LayerPanel({
     try {
       if (selectedLayers.length === 1) {
         const layer = selectedLayers[0];
-        await downloadSvg(layerToStandaloneSvg(layer.previewSvg), `${sanitizeFilename(layer.name)}.svg`);
+        await downloadSvg(layerToStandaloneSvg(layer.previewSvg, canvasSize), `${sanitizeFilename(layer.name)}.svg`);
         return;
       }
       const zip = new JSZip();
       for (const layer of selectedLayers) {
-        zip.file(`${sanitizeFilename(layer.name)}.svg`, layerToStandaloneSvg(layer.previewSvg));
+        zip.file(`${sanitizeFilename(layer.name)}.svg`, layerToStandaloneSvg(layer.previewSvg, canvasSize));
       }
       const blob = await zip.generateAsync({ type: "blob" });
       await downloadBlob(blob, "selected-layers.zip");
@@ -221,6 +227,7 @@ export default function LayerPanel({
           <LayerCard
             key={layer.name}
             layer={layer}
+            canvasSize={canvasSize}
             selected={selected.has(layer.name)}
             onToggle={() => toggle(layer.name)}
           />

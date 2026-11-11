@@ -290,5 +290,5 @@ export default {
   "adv.done": "Fine — applica modifiche",
   "adv.cancel": "Annulla (Esc)",
   "adv.saveLayer": "Salva come livello",
-  "adv.shrinkCanvas": "Riduci la tela al contenuto",
+  "adv.shrinkCanvas": "Ritaglia la vista sul contenuto (l'esportazione mantiene la tela originale)",
 };

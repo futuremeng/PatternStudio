@@ -64,8 +64,12 @@ function flattenLayerGroups(svgString) {
  *     object again
  *
  * Returns null when the raw string cannot be parsed.
+ *
+ * `box` is the canvas the result must be emitted on — the original canvas of
+ * the artwork, never the editing view's crop (see exportBoxRef).
  */
-function normalizeEditedSvg(rawSvg, w, h, x = 0, y = 0) {
+function normalizeEditedSvg(rawSvg, box) {
+  const { x = 0, y = 0, w, h } = box;
   try {
     const doc = new DOMParser().parseFromString(rawSvg, "image/svg+xml");
     const root = doc.documentElement;
@@ -116,6 +120,9 @@ function normalizeEditedSvg(rawSvg, w, h, x = 0, y = 0) {
  *
  * Props:
  *   svgString     – the current SVG markup to load into the canvas
+ *   canvasSize    – {w,h} the original canvas the artwork was traced on. Every
+ *                   exported result (done / save-as-layer) is emitted on this
+ *                   canvas, so separating or cropping never shrinks it.
  *   onComplete    – callback(editedSvgString) invoked when the user finishes
  *   onCancel      – optional callback() invoked when the user aborts
  *   onSaveAsLayer – optional callback(svgString) invoked to snapshot the
@@ -125,16 +132,19 @@ function normalizeEditedSvg(rawSvg, w, h, x = 0, y = 0) {
  *   zoomIn() / zoomOut() / zoomFit()
  */
 const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
-  { svgString, onComplete, onCancel, onSaveAsLayer },
+  { svgString, canvasSize, onComplete, onCancel, onSaveAsLayer },
   ref
 ) {
   const { t } = useI18n();
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
-  // Canvas window in user space: the viewBox origin (x, y) plus its size.
-  // A fresh trace has x = y = 0; "shrink canvas" moves the origin to crop
-  // the canvas without touching the shapes (see doShrinkCanvas).
+  // Editing window in user space: the viewBox origin (x, y) plus its size.
+  // A fresh trace has x = y = 0; "shrink canvas" moves the origin to crop the
+  // *view* without touching the shapes (see doShrinkCanvas). Exports use
+  // exportBoxRef instead, which always lands on the original canvas.
   const dimsRef = useRef({ x: 0, y: 0, w: 800, h: 600 });
+  // The original canvas every result is emitted on (see canvasSize prop).
+  const exportBoxRef = useRef({ x: 0, y: 0, w: 800, h: 600 });
   const [mode, setMode] = useState("select");
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -152,14 +162,18 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
     const container = containerRef.current;
     if (!container || !svgString) return;
 
-    // Parse the canvas window from the SVG viewBox (x y w h — the origin
-    // may be non-zero after a shrink-to-content).
+    // The canvas to edit and to export on: the original one when the page
+    // knows it (a crop carried by a previously-saved layer is undone here),
+    // otherwise the box the incoming markup declares.
     const vbMatch = svgString.match(/viewBox="(-?[\d.]+) (-?[\d.]+) ([\d.]+) ([\d.]+)"/);
-    const x = vbMatch ? parseFloat(vbMatch[1]) : 0;
-    const y = vbMatch ? parseFloat(vbMatch[2]) : 0;
-    const w = vbMatch ? parseFloat(vbMatch[3]) : 800;
-    const h = vbMatch ? parseFloat(vbMatch[4]) : 600;
-    dimsRef.current = { x, y, w, h };
+    const box = canvasSize && canvasSize.w > 0 && canvasSize.h > 0
+      ? { x: 0, y: 0, w: canvasSize.w, h: canvasSize.h }
+      : vbMatch
+        ? { x: parseFloat(vbMatch[1]), y: parseFloat(vbMatch[2]), w: parseFloat(vbMatch[3]), h: parseFloat(vbMatch[4]) }
+        : { x: 0, y: 0, w: 800, h: 600 };
+    const { x, y, w, h } = box;
+    dimsRef.current = { ...box };
+    exportBoxRef.current = { ...box };
 
     const canvas = new SvgCanvas(container, {
       canvasName: "advanced-canvas",
@@ -274,12 +288,13 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
       zoomIn: () => setZoom((z) => Math.min(8, z * 1.25)),
       zoomOut: () => setZoom((z) => Math.max(0.1, z / 1.25)),
       zoomFit: () => setZoom(1),
-      // Snapshot the canvas as a new layer (used by the layer panel).
+      // Snapshot the canvas as a new layer (used by the layer panel). Always
+      // on the original canvas: a layer holds a subset of the shapes, not a
+      // crop, so the view crop from "shrink canvas" must not leak into it.
       saveAsLayer: () => {
         const canvas = canvasRef.current;
         if (!canvas || !onSaveAsLayerRef.current) return;
-        const { x, y, w, h } = dimsRef.current;
-        const clean = normalizeEditedSvg(canvas.getSvgString(), w, h, x, y);
+        const clean = normalizeEditedSvg(canvas.getSvgString(), exportBoxRef.current);
         if (clean) onSaveAsLayerRef.current(clean);
       },
     }),
@@ -331,13 +346,14 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
     canvasRef.current?.deleteSelectedElements();
   }, []);
 
-  // --- Shrink the canvas to fit the content ---
+  // --- Crop the editing view to the content ---
   // Computes the union bbox of all top-level shapes (in user space) and crops
-  // the canvas to it by moving the viewBox origin. The shapes keep their
+  // the view to it by moving the viewBox origin. The shapes keep their
   // original (image-space) coordinates, so the main editor can still align
   // the vectors with the original image, and shrinking twice stays correct
-  // (no cumulative translation). Subsequent "save as layer" / "done" exports
-  // carry the offset viewBox.
+  // (no cumulative translation). This is a view-only crop: the "save as layer"
+  // / "done" exports always emit the original canvas (exportBoxRef), so a
+  // separated layer never inherits the crop.
   const doShrinkCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -386,8 +402,7 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
   const handleSaveAsLayer = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !onSaveAsLayer) return;
-    const { x, y, w, h } = dimsRef.current;
-    const clean = normalizeEditedSvg(canvas.getSvgString(), w, h, x, y);
+    const clean = normalizeEditedSvg(canvas.getSvgString(), exportBoxRef.current);
     if (clean) onSaveAsLayer(clean);
   }, [onSaveAsLayer]);
 
@@ -395,8 +410,7 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
   const handleComplete = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const { x, y, w, h } = dimsRef.current;
-    const clean = normalizeEditedSvg(canvas.getSvgString(), w, h, x, y);
+    const clean = normalizeEditedSvg(canvas.getSvgString(), exportBoxRef.current);
     if (clean) onComplete(clean);
   }, [onComplete]);
 

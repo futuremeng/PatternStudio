@@ -64,6 +64,12 @@ All notable changes to PatternStudio are documented in this file.
 - `projects.json` is written atomically (tmp file + rename)
 - `projects.json` location is cross-platform (`HOME` / `USERPROFILE`)
 - Removed debug `eprintln!` from library code (`apply_profiles`)
+- Separated layers keep the original canvas: a layer holds a subset of the
+  shapes, not a crop, so layer thumbnails, layer exports (`导出选中图层` /
+  ZIP), patch-edit and advanced-editor snapshots and the layered preview are
+  all emitted on the traced canvas size instead of shrinking to the shapes'
+  bounding box. The advanced editor's shrink-to-content button is now a
+  view-only crop that no longer leaks into any export
 
 ### Removed
 

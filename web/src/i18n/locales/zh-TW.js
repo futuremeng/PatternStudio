@@ -290,5 +290,5 @@ export default {
   "adv.done": "完成 — 套用修改",
   "adv.cancel": "取消 (Esc)",
   "adv.saveLayer": "存為新圖層",
-  "adv.shrinkCanvas": "收縮畫布至內容範圍",
+  "adv.shrinkCanvas": "檢視收縮至內容範圍（僅檢視，匯出仍保留原畫布尺寸）",
 };

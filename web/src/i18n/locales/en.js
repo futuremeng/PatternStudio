@@ -290,5 +290,5 @@ export default {
   "adv.done": "Done — apply changes",
   "adv.cancel": "Cancel (Esc)",
   "adv.saveLayer": "Save as layer",
-  "adv.shrinkCanvas": "Shrink canvas to content",
+  "adv.shrinkCanvas": "Crop view to content (exports keep the original canvas)",
 };

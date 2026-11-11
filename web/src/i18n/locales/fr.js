@@ -290,5 +290,5 @@ export default {
   "adv.done": "Terminé — appliquer les modifications",
   "adv.cancel": "Annuler (Échap)",
   "adv.saveLayer": "Enregistrer en calque",
-  "adv.shrinkCanvas": "Réduire le canevas au contenu",
+  "adv.shrinkCanvas": "Recadrer la vue sur le contenu (l'export garde le canevas d'origine)",
 };

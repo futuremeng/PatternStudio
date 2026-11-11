@@ -290,5 +290,5 @@ export default {
   "adv.done": "Fertig — Änderungen übernehmen",
   "adv.cancel": "Abbrechen (Esc)",
   "adv.saveLayer": "Als Ebene speichern",
-  "adv.shrinkCanvas": "Leinwand auf Inhalt zuschneiden",
+  "adv.shrinkCanvas": "Ansicht auf Inhalt zuschneiden (Export behält die Original-Leinwand)",
 };

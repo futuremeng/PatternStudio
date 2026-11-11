@@ -3,16 +3,56 @@
 
 import { MODE_PRESETS, presetFullParams } from "./api.js";
 
+/**
+ * The canvas box a layer snapshot must be emitted with.
+ *
+ * Separating a layer takes a *subset* of the shapes, it does not crop the
+ * artwork: every shape keeps its original image-space coordinates, so the
+ * canvas has to stay the size of the source image. `canvasSize` (the trace
+ * result's width/height) is the source of truth. When it is unknown we fall
+ * back to the box the snapshot already carries (`source` is either an SVG
+ * markup string or a live <svg> element) so nothing regresses.
+ */
+export function canvasBox(source, canvasSize) {
+  if (canvasSize && canvasSize.w > 0 && canvasSize.h > 0) {
+    return { x: 0, y: 0, w: canvasSize.w, h: canvasSize.h };
+  }
+  if (typeof source === "string") {
+    const m = source.match(/viewBox="(-?[\d.]+) (-?[\d.]+) ([\d.]+) ([\d.]+)"/);
+    if (m) return { x: Number(m[1]), y: Number(m[2]), w: Number(m[3]), h: Number(m[4]) };
+  } else if (source) {
+    const vb = source.viewBox?.baseVal;
+    if (vb && vb.width > 0) return { x: vb.x || 0, y: vb.y || 0, w: vb.width, h: vb.height };
+  }
+  return { x: 0, y: 0, w: 100, h: 100 };
+}
+
+/**
+ * Rewrite the root <svg> canvas box (viewBox + width/height) of a markup
+ * string, leaving every shape untouched. Moving the canvas box of a layer
+ * snapshot never moves the artwork — the shapes live in image space — it only
+ * restores the canvas they were cut out of.
+ */
+export function withCanvasBox(svgMarkup, box) {
+  const attrs =
+    `viewBox="${box.x} ${box.y} ${box.w} ${box.h}" width="${box.w}" height="${box.h}"`;
+  return svgMarkup.replace(/<svg\b[^>]*>/, (tag) => {
+    const selfClosing = /\/\s*>$/.test(tag);
+    const bare = tag
+      .replace(/\s(?:viewBox|width|height)="[^"]*"/gi, "")
+      .replace(/\s*\/?\s*>$/, "");
+    return `${bare} ${attrs}${selfClosing ? "/>" : ">"}`;
+  });
+}
+
 // Serialize the current (edited) preview SVG into a standalone SVG whose single
 // <g> holds every path exactly as it is now — moves applied, deleted patches
 // removed, and selection highlights / control points / marquee stripped out.
-// Used to snapshot the user's edits as a new, exportable layer.
-export function serializeEditedSvg(svg) {
-  const vb = svg.viewBox.baseVal;
-  const X = vb.x || 0;
-  const Y = vb.y || 0;
-  const W = vb.width;
-  const H = vb.height;
+// Used to snapshot the user's edits as a new, exportable layer. `canvasSize`
+// (when known) pins the snapshot to the original canvas so editing crops never
+// shrink the layer's canvas.
+export function serializeEditedSvg(svg, canvasSize) {
+  const { x: X, y: Y, w: W, h: H } = canvasBox(svg, canvasSize);
   const serializer = new XMLSerializer();
   const parts = [];
   svg.querySelectorAll("path").forEach((p) => {

@@ -290,5 +290,5 @@ export default {
   "adv.done": "完了 — 変更を適用",
   "adv.cancel": "キャンセル (Esc)",
   "adv.saveLayer": "レイヤーとして保存",
-  "adv.shrinkCanvas": "キャンバスを内容に合わせる",
+  "adv.shrinkCanvas": "表示を内容に合わせて切り抜く（書き出しは元のキャンバスサイズを維持）",
 };
