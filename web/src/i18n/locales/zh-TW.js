@@ -263,6 +263,8 @@ export default {
   "layer.noDataUnprocessed": "暫無圖層數據（請先處理）",
   "layer.process": "⚡ 處理",
   "layer.processHint": "將目前分層策略與輸出樣式應用到矢量化結果",
+  "layer.cancelProcessing": "取消",
+  "layer.cancelProcessingHint": "中止目前分層，保留之前的結果",
   "layer.title": "圖層 ({n})",
   "layer.selectAll": "全選",
   "layer.clear": "清空",

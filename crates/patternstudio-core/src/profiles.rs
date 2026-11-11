@@ -381,13 +381,46 @@ impl AutoDecision {
     }
 }
 
+/// A long pure stage stopped because the caller asked to abort.
+///
+/// Layering is usually cheap, but the `auto` strategy re-fits every shape's
+/// curves ([`apply_profiles`]), which on large artwork can take tens of
+/// seconds — long enough that the user needs an abort.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cancelled;
+
+impl std::fmt::Display for Cancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "cancelled")
+    }
+}
+
+impl std::error::Error for Cancelled {}
+
+/// Cancellation probe: returns `true` once the caller wants the work to stop.
+/// Checked at shape granularity, so the probe should be an atomic load.
+pub type CancelProbe<'a> = &'a dyn Fn() -> bool;
+
+/// Probe for one-shot callers that never cancel.
+pub fn never_cancelled() -> bool {
+    false
+}
+
 /// Apply the per-layer parameter profiles to a layered doc, in place.
 ///
 /// L0 layers are coarsened (larger simplification tolerance + coarser
 /// quantization), L2 layers are refined (finer quantization + cleanup), L1
 /// layers are left untouched. Topology is never changed, so stacking all
 /// layers still reproduces the ideal result.
-pub fn apply_profiles(layered: &mut LayeredDoc, ideal: &IdealParams) {
+///
+/// This is the expensive part of layering (one curve re-fit per shape), so it
+/// polls `cancelled` between shapes and stops with [`Cancelled`]. The doc is
+/// then left partially re-fitted and must be discarded by the caller.
+pub fn apply_profiles(
+    layered: &mut LayeredDoc,
+    ideal: &IdealParams,
+    cancelled: CancelProbe,
+) -> Result<(), Cancelled> {
     let profiles = LayerProfile::derive(ideal);
     for layer in &mut layered.layers {
         // Derive the level from the role so this also works for layers built
@@ -396,12 +429,16 @@ pub fn apply_profiles(layered: &mut LayeredDoc, ideal: &IdealParams) {
         layer.profile = level;
         let profile = profiles[level as usize];
         for shape in &mut layer.shapes {
+            if cancelled() {
+                return Err(Cancelled);
+            }
             refine_shape(shape, &profile);
         }
         layer
             .metadata
             .insert("profile".into(), serde_json::json!(level.as_str()));
     }
+    Ok(())
 }
 
 fn refine_shape(shape: &mut vtracer::ir::Shape, profile: &LayerProfile) {
@@ -768,7 +805,7 @@ mod tests {
         doc.shapes.push(cubic_shape());
         let mut layered = LayeredDoc::from_vector_doc(&doc, &LayerAssignment::single_layer());
         layered.layers[0].role = LayerRole::Background;
-        apply_profiles(&mut layered, &ideal());
+        apply_profiles(&mut layered, &ideal(), &never_cancelled).unwrap();
         assert_eq!(
             layered.layers[0]
                 .metadata
@@ -776,6 +813,27 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("L0")
         );
+    }
+
+    /// The auto strategy re-fits every shape's curves, which is the slow part
+    /// of layering — an abort must stop it mid-way, not after the last shape.
+    #[test]
+    fn apply_profiles_stops_on_cancel() {
+        let mut doc = VectorDoc::new(100, 100);
+        for _ in 0..8 {
+            doc.shapes.push(cubic_shape());
+        }
+        let mut layered = LayeredDoc::from_vector_doc(&doc, &LayerAssignment::single_layer());
+        layered.layers[0].role = LayerRole::Background;
+
+        let probes = std::cell::Cell::new(0usize);
+        let err = apply_profiles(&mut layered, &ideal(), &|| {
+            probes.set(probes.get() + 1);
+            probes.get() > 3
+        })
+        .expect_err("cancelling mid-way must abort the re-fit");
+        assert_eq!(err, Cancelled);
+        assert!(probes.get() < 8, "must stop early, not probe every shape");
     }
 
     /// Create a simple positioned rectangle shape for spatial tests.

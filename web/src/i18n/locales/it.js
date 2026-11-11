@@ -263,6 +263,8 @@ export default {
   "layer.noDataUnprocessed": "Nessun dato livelli (elabora prima)",
   "layer.process": "⚡ Elabora",
   "layer.processHint": "Applica la strategia livelli e lo stile di output attuali al risultato vettorizzato",
+  "layer.cancelProcessing": "Annulla",
+  "layer.cancelProcessingHint": "Interrompi la creazione dei livelli in corso; il risultato attuale resta invariato",
   "layer.title": "Livelli ({n})",
   "layer.selectAll": "Seleziona tutto",
   "layer.clear": "Deseleziona",

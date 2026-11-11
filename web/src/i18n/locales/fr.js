@@ -263,6 +263,8 @@ export default {
   "layer.noDataUnprocessed": "Pas encore de calques (d'abord traiter)",
   "layer.process": "⚡ Traiter",
   "layer.processHint": "Appliquer la stratégie de calques et le style de sortie actuels au résultat vectorisé",
+  "layer.cancelProcessing": "Annuler",
+  "layer.cancelProcessingHint": "Interrompre la création des calques en cours ; le résultat actuel reste inchangé",
   "layer.title": "Calques ({n})",
   "layer.selectAll": "Tout sélectionner",
   "layer.clear": "Tout effacer",

@@ -70,7 +70,7 @@ function LayerCard({ layer, selected, onToggle, canvasSize }) {
 
 export default function LayerPanel({
   layers, strategyInfo, profileMs, onSaveAsLayer, canSaveAsLayer,
-  layerParams, onLayerParamsChange, onProcess, processBusy, processPending, processed,
+  layerParams, onLayerParamsChange, onProcess, onCancel, processBusy, processPending, processed,
   canvasSize,
 }) {
   const { t } = useI18n();
@@ -173,14 +173,27 @@ export default function LayerPanel({
         )}
       </Group>
 
-      <button
-        className="primary process-btn"
-        onClick={onProcess}
-        disabled={!processPending || processBusy}
-        title={t("layer.processHint")}
-      >
-        {processBusy ? t("processing") : t("layer.process")}
-      </button>
+      {/* Manual processing. Auto layering re-fits every shape and can take a
+          long time, so while it runs the row also offers an abort. */}
+      <div className="process-row">
+        <button
+          className="primary process-btn"
+          onClick={onProcess}
+          disabled={!processPending || processBusy}
+          title={t("layer.processHint")}
+        >
+          {processBusy ? t("processing") : t("layer.process")}
+        </button>
+        {processBusy && onCancel && (
+          <button
+            className="cancel-btn"
+            onClick={onCancel}
+            title={t("layer.cancelProcessingHint")}
+          >
+            {t("layer.cancelProcessing")}
+          </button>
+        )}
+      </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <h3>{t("layer.title", { n: layers.length })}</h3>

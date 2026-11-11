@@ -22,6 +22,9 @@ All notable changes to PatternStudio are documented in this file.
   params); interactive parameter tweaks re-run only the cheap downstream stages
 - In-flight trace preemption: a new interactive request cancels the older one
   between pipeline batches; background (pre-warm) requests yield with 409 busy
+- Cancellable layering: the `auto` strategy's per-shape curve re-fit polls the
+  request's cancel token, so a long layering run aborts at the next shape
+  instead of running to completion (server + desktop)
 - Project batch tracing with SSE progress stream and cancellation (web + desktop)
 - Spatial layering (`by_spatial`) uses an x-axis sweep line instead of an
   O(n²) pair scan: same clusters, but sparse motif layouts only compare local
@@ -32,6 +35,9 @@ All notable changes to PatternStudio are documented in this file.
   (no server needed), recent projects, native file dialogs
 - Web UI: smart preset panel, preprocess modal with iteration comparison,
   project browser with batch trace, layer profiles in the layer panel
+- Layer panel: an abort button while layering is running — auto layering
+  re-fits every shape and can take a long time; cancelling keeps the previous
+  result on screen
 
 **Architecture**
 - New `patternstudio-engine` crate: the trace pipeline (params → vtracer

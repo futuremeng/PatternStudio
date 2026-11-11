@@ -509,6 +509,18 @@ export default function ImageEditorPage() {
     queueRef.current?.enqueueInteractive("layer", mergeTraceParams(params, layerParams));
   }, [params, layerParams]);
 
+  /**
+   * Abort a running layering (auto layering re-fits every shape and can take a
+   * long time). The engine cancels the in-flight request for this image at its
+   * next shape boundary and answers 409; the queue treats "cancelled" as a
+   * silent no-op, so the previous result stays on screen.
+   */
+  const cancelLayerProcessing = useCallback(() => {
+    const source = sourceByImageRef.current.get(imageId)
+      || prepareSource(projectId, filename, { generated: isGenerated });
+    cancelTrace(source);
+  }, [projectId, filename, isGenerated, imageId]);
+
   // Pre-warm in the background after each interactive trace settles: the
   // system presets plus any user-saved configs whose trace is not cached yet
   // (so selecting them is instant and their thumbnails fill in without a
@@ -731,6 +743,7 @@ export default function ImageEditorPage() {
             layerParams={layerParams}
             onLayerParamsChange={onLayerParamsChange}
             onProcess={runLayerProcessing}
+            onCancel={cancelLayerProcessing}
             processBusy={processBusy}
             processPending={lastVectorizeSig != null && stableStringify(mergedParams) !== lastProcessSig}
             processed={!!result?.processed}

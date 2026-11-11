@@ -263,6 +263,8 @@ export default {
   "layer.noDataUnprocessed": "No layer data yet (run processing first)",
   "layer.process": "⚡ Process",
   "layer.processHint": "Apply the current layer strategy and output style to the vectorized result",
+  "layer.cancelProcessing": "Cancel",
+  "layer.cancelProcessingHint": "Stop the running layering; the previous result stays unchanged",
   "layer.title": "Layers ({n})",
   "layer.selectAll": "Select all",
   "layer.clear": "Clear",

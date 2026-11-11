@@ -773,8 +773,13 @@ body {
 
 .layer-panel { display: flex; flex-direction: column; gap: 0.6rem; }
 .layer-panel h3 { margin: 0; font-size: 0.95rem; }
-/* Manual layering trigger: full-width so it reads as the panel's main action. */
+/* Manual layering trigger: full-width so it reads as the panel's main action.
+   While layering runs, an abort sits beside it — auto layering re-fits every
+   shape and can take a long time. */
+.layer-panel .process-row { display: flex; gap: 0.4rem; }
 .layer-panel .process-btn { width: 100%; }
+.layer-panel .process-row .process-btn { min-width: 0; }
+.layer-panel .process-row .cancel-btn { flex: 0 0 auto; white-space: nowrap; }
 .layer-card {
   display: flex; align-items: center; gap: 0.5rem;
   padding: 0.5rem; border: 1px solid var(--border);

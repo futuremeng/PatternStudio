@@ -218,7 +218,7 @@ pub async fn layer_file(
                 Arc::new(doc)
             }
         };
-        Ok::<TraceResult, String>(layer_doc(&doc, &params))
+        Ok::<TraceResult, String>(layer_doc(&doc, &params, &cancel)?)
     })
     .await
     .map_err(|e| e.to_string())?;

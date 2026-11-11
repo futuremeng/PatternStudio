@@ -263,6 +263,8 @@ export default {
   "layer.noDataUnprocessed": "まだレイヤーデータがありません（先に処理を実行）",
   "layer.process": "⚡ 処理",
   "layer.processHint": "現在のレイヤー戦略と出力スタイルをベクター化結果に適用します",
+  "layer.cancelProcessing": "キャンセル",
+  "layer.cancelProcessingHint": "実行中のレイヤー分割を中止し、現在の結果を保持します",
   "layer.title": "レイヤー ({n})",
   "layer.selectAll": "すべて選択",
   "layer.clear": "選択解除",

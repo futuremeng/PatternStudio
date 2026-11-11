@@ -380,10 +380,23 @@ pub fn vectorize_with_session(
 
 /// Layering stage: [`VectorDoc`] → layered SVG.
 ///
-/// Cheap and pure: re-runnable any number of times against a cached
-/// vectorized document, without touching the vectorization pipeline. New
+/// Pure and usually cheap, so it can be re-run any number of times against a
+/// cached vectorized document, without touching the vectorization pipeline. New
 /// layering strategies extend the match below.
-pub fn layer_doc(doc: &VectorDoc, params: &TraceParams) -> TraceResult {
+///
+/// The `auto` strategy is the exception: it re-fits every shape's curves, which
+/// on large artwork can take tens of seconds. `cancel` is therefore polled at
+/// every stage boundary and inside the re-fit loop; on abort the result is
+/// `Err("cancelled")`, which callers map to the same 409 as a cancelled
+/// vectorization.
+pub fn layer_doc(
+    doc: &VectorDoc,
+    params: &TraceParams,
+    cancel: &CancelToken,
+) -> Result<TraceResult, String> {
+    if cancel.is_cancelled() {
+        return Err("cancelled".into());
+    }
     // "auto": derive the strategy + multi-level profiles from the ideal params.
     let is_auto = params.layer_strategy.as_deref() == Some("auto");
     let ideal = IdealParams::from_options(
@@ -401,6 +414,9 @@ pub fn layer_doc(doc: &VectorDoc, params: &TraceParams) -> TraceResult {
     );
     let (assignment, decision) = if is_auto {
         let (a, d) = AutoDecision::assign(doc, &ideal);
+        if cancel.is_cancelled() {
+            return Err("cancelled".into());
+        }
         (a, Some(d))
     } else {
         let assignment = match params.layer_strategy.as_deref().unwrap_or("none") {
@@ -431,8 +447,14 @@ pub fn layer_doc(doc: &VectorDoc, params: &TraceParams) -> TraceResult {
     let mut profile_ms: Option<u64> = None;
     if is_auto {
         let t = std::time::Instant::now();
-        apply_profiles(&mut layered, &ideal);
+        // The slow step: polls the token between shapes so a long auto layering
+        // can be aborted instead of running to completion.
+        apply_profiles(&mut layered, &ideal, &|| cancel.is_cancelled())
+            .map_err(|_| "cancelled".to_string())?;
         profile_ms = Some(t.elapsed().as_millis() as u64);
+    }
+    if cancel.is_cancelled() {
+        return Err("cancelled".into());
     }
 
     let svg = if params.line_art {
@@ -441,6 +463,11 @@ pub fn layer_doc(doc: &VectorDoc, params: &TraceParams) -> TraceResult {
         LayeredWriter::write(&layered)
     };
 
+    // Per-layer previews re-serialize each layer: worth one more abort check
+    // before the loop on large documents.
+    if cancel.is_cancelled() {
+        return Err("cancelled".into());
+    }
     let layers: Vec<LayerInfo> = layered
         .layers
         .iter()
@@ -455,7 +482,7 @@ pub fn layer_doc(doc: &VectorDoc, params: &TraceParams) -> TraceResult {
         })
         .collect();
 
-    TraceResult {
+    Ok(TraceResult {
         svg,
         width: layered.width,
         height: layered.height,
@@ -464,7 +491,7 @@ pub fn layer_doc(doc: &VectorDoc, params: &TraceParams) -> TraceResult {
         layers,
         strategy_info: decision,
         profile_ms,
-    }
+    })
 }
 
 /// Full pipeline over a [`Session`]: vectorization + layering in one call.
@@ -480,7 +507,7 @@ pub fn trace_with_session(
     cancel: &CancelToken,
 ) -> Result<TraceResult, String> {
     let doc = vectorize_with_session(session, config, cancel)?;
-    Ok(layer_doc(&doc, params))
+    layer_doc(&doc, params, cancel)
 }
 
 /// Render a vectorized document as a single-layer SVG: the raw vectorization
@@ -709,6 +736,20 @@ impl ActiveTraces {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Auto layering re-fits every shape and can run for a long time, so the
+    /// layering stage must honour the cancel token its request registered.
+    #[test]
+    fn layer_doc_aborts_when_cancelled() {
+        let doc = VectorDoc::new(100, 100);
+        let params = TraceParams {
+            layer_strategy: Some("auto".into()),
+            ..Default::default()
+        };
+        let cancel = CancelToken::new();
+        cancel.cancel();
+        assert_eq!(layer_doc(&doc, &params, &cancel).unwrap_err(), "cancelled");
+    }
 
     #[test]
     fn default_params_build_config() {

@@ -263,6 +263,8 @@ export default {
   "layer.noDataUnprocessed": "Noch keine Ebenendaten (zuerst verarbeiten)",
   "layer.process": "⚡ Verarbeiten",
   "layer.processHint": "Aktuelle Ebenenstrategie und Ausgabeformat auf das vektorisierte Ergebnis anwenden",
+  "layer.cancelProcessing": "Abbrechen",
+  "layer.cancelProcessingHint": "Laufende Ebenenerstellung abbrechen; das bisherige Ergebnis bleibt erhalten",
   "layer.title": "Ebenen ({n})",
   "layer.selectAll": "Alle auswählen",
   "layer.clear": "Leeren",

@@ -17,7 +17,10 @@ pub use lineage::{
     KIND_REDRAW,
 };
 pub use pipeline::PatternStudioPipeline;
-pub use profiles::{apply_profiles, AutoDecision, IdealParams, LayerProfile, ProfileLevel};
+pub use profiles::{
+    apply_profiles, never_cancelled, AutoDecision, CancelProbe, Cancelled, IdealParams,
+    LayerProfile, ProfileLevel,
+};
 pub use session_cache::{key_for_path, key_for_source, SessionCache};
 pub use smart::{
     analyze_image, candidate_params, recommend, ImageStats, SmartDecision, SmartParams,
