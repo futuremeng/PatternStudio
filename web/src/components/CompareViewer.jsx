@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
 import { IconCompare, IconZoomIn, IconZoomOut, IconFit } from "./icons.jsx";
+import { useI18n } from "../i18n/index.jsx";
 
 /**
  * Viewport interaction shared by the editor preview and the preprocess
@@ -91,6 +92,7 @@ export default function CompareViewer({
   selectMode, // editor: patch-select tool active (pointer events on paths)
   svgContainerRef,
 }) {
+  const { t } = useI18n();
   const [zoom, setZoom] = useState(1);
   const [actualSize, setActualSize] = useState(false);
   const [overlayPos, setOverlayPos] = useState(50); // divider position, percent
@@ -270,13 +272,13 @@ export default function CompareViewer({
 
       <div className="preview-controls">
         {extraControls}
-        <button onClick={() => onCompareModeChange(compareMode === "side" ? "overlay" : "side")} title={compareMode === "side" ? "overlay" : "side"} aria-label="toggle compare">
+        <button onClick={() => onCompareModeChange(compareMode === "side" ? "overlay" : "side")} title={t("viewer.toggleCompare")} aria-label={t("viewer.toggleCompare")}>
           <IconCompare />
         </button>
-        <button onClick={zoomIn} aria-label="zoom in">
+        <button onClick={zoomIn} title={t("editor.zoomIn")} aria-label={t("editor.zoomIn")}>
           <IconZoomIn />
         </button>
-        <button onClick={zoomOut} aria-label="zoom out">
+        <button onClick={zoomOut} title={t("editor.zoomOut")} aria-label={t("editor.zoomOut")}>
           <IconZoomOut />
         </button>
         <button
@@ -289,8 +291,8 @@ export default function CompareViewer({
               setZoom(1 / fitScale);
             }
           }}
-          title={actualSize ? "fit" : "1:1"}
-          aria-label={actualSize ? "fit" : "1:1"}
+          title={actualSize ? t("editor.fit") : t("viewer.actualSize")}
+          aria-label={actualSize ? t("editor.fit") : t("viewer.actualSize")}
         >
           {actualSize ? <IconFit /> : <span style={{ fontSize: "0.65rem", fontWeight: 700 }}>1:1</span>}
         </button>

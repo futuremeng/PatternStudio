@@ -15,7 +15,7 @@ import AdvancedSvgEditor from "../components/AdvancedSvgEditor.jsx";
 import CompareViewer, { useViewportControls } from "../components/CompareViewer.jsx";
 import PreprocessModal from "../components/PreprocessModal.jsx";
 import SmartBanner from "../components/SmartBanner.jsx";
-import { IconMaximize, IconRestore, IconSelect, IconZoomIn, IconZoomOut, IconFit, IconAdvanced } from "../components/icons.jsx";
+import { IconMaximize, IconRestore, IconSelect, IconZoomIn, IconZoomOut, IconFit, IconAdvanced, IconPanels } from "../components/icons.jsx";
 import { useI18n } from "../i18n/index.jsx";
 
 // Wait this long after a trace settles before snapshotting a user config (ms)
@@ -24,6 +24,10 @@ const MAX_USER_CONFIGS = 12;
 // Pre-warm: presets to pre-generate in the background after the initial trace,
 // in priority order. The currently-active preset is already cached and skipped.
 const PREWARM_ORDER = ["color", "lineArt", "bw", "gradient", "lowPoly"];
+// Patch-selection gestures are explained once (see the preview hint chip).
+const SELECT_HINT_KEY = "patternstudio.selectHintSeen";
+// A layer name is part of a file name: keep it filesystem-safe.
+const sanitizeName = (name) => name.replace(/[\\/:*?"<>|]/g, "_").trim();
 
 export default function ImageEditorPage() {
   const { t, presetLabel, locale } = useI18n();
@@ -132,6 +136,9 @@ export default function ImageEditorPage() {
 
   // --- Preview view controls: maximize ---
   const [maximized, setMaximized] = useState(false);
+  // On narrow screens the two side panels become drawers over the preview;
+  // this opens them (see the .panels-open styles).
+  const [panelsOpen, setPanelsOpen] = useState(false);
   const [advancedMode, setAdvancedMode] = useState(false);
   // Viewport of the advanced-mode branch (CompareViewer owns its own viewport).
   const advViewportRef = useRef(null);
@@ -192,13 +199,68 @@ export default function ImageEditorPage() {
       },
     ]);
   }, [t]);
-  const { tool, setTool, svgContainerRef, saveAsLayer } = usePatchEditing({
+  const {
+    tool, setTool, svgContainerRef, saveAsLayer,
+    dirty: patchDirty, canUndo, applyEdits, markEditsApplied, undoEdit, discardEdits,
+  } = usePatchEditing({
     result,
     svgKey: editingSvg,
     compareMode,
     canvasSize,
     onSnapshotLayer: snapshotEditedLayer,
   });
+
+  // --- Preview-local patch edits ---
+  /**
+   * Write pending preview edits into the editing object, so what the user moved
+   * or deleted stops being a preview-only state. Returns the applied SVG, or
+   * null when nothing was pending. Called by everything that must not silently
+   * lose what is on screen: an export, or switching the editing object.
+   */
+  const commitPatchEdits = useCallback(() => {
+    if (!patchDirty) return null;
+    const svg = applyEdits();
+    if (!svg) return null;
+    if (editingLayer) {
+      const snap = layerSnapshotFromSvg(svg);
+      if (snap) setSavedLayers(prev => prev.map(l => (l.id === editingLayer.id ? { ...l, ...snap } : l)));
+    } else {
+      // A non-retrace update of the working canvas: keep the snapshots taken
+      // from it (same rule as the advanced editor's "done").
+      skipLayerResetRef.current = true;
+      setResult(prev => (prev ? { ...prev, svg } : prev));
+    }
+    markEditsApplied();
+    return svg;
+  }, [patchDirty, applyEdits, markEditsApplied, editingLayer, layerSnapshotFromSvg]);
+
+  // Pick (or drop) an exported layer as the editing object. Any pending preview
+  // edit belongs to the canvas being left, so it is applied first.
+  const useAsEditingObject = useCallback((layer) => {
+    commitPatchEdits();
+    setEditingLayerId(layer.id);
+  }, [commitPatchEdits]);
+  const restoreFullResult = useCallback(() => {
+    commitPatchEdits();
+    setEditingLayerId(null);
+  }, [commitPatchEdits]);
+
+  // Drop a snapshot from the exported list; the editing area falls back to the
+  // full result when the removed one was the editing object.
+  const removeSavedLayer = useCallback((layer) => {
+    setSavedLayers(prev => prev.filter(l => l.id !== layer.id));
+    setEditingLayerId(prev => (prev === layer.id ? null : prev));
+  }, []);
+
+  // Patch selection is an icon-only toggle in the preview corner, so its
+  // gestures are spelled out once per browser profile.
+  const [selectHintSeen, setSelectHintSeen] = useState(() => {
+    try { return localStorage.getItem(SELECT_HINT_KEY) === "1"; } catch { return false; }
+  });
+  const dismissSelectHint = useCallback(() => {
+    setSelectHintSeen(true);
+    try { localStorage.setItem(SELECT_HINT_KEY, "1"); } catch { /* storage unavailable */ }
+  }, []);
 
   // In advanced mode the preview stage is replaced by the advanced editor's
   // own canvas; the page keeps the viewport chrome for that branch (wheel
@@ -245,9 +307,12 @@ export default function ImageEditorPage() {
         id: s.id, label: s.label, params: { ...DEFAULT_PARAMS, ...s.params },
         isDefault: false, saved: true, result: null,
       }));
-      for (const c of restored) {
-        c.result = await getCachedTrace(imageId, c.params).catch(() => null);
-      }
+      // Read every config's cached result concurrently: one after another made
+      // the strip fill in one thumbnail at a time.
+      const results = await Promise.all(
+        restored.map(c => getCachedTrace(imageId, c.params).catch(() => null))
+      );
+      restored.forEach((c, i) => { c.result = results[i]; });
       if (cancelled) return;
       setConfigs(prev => {
         const known = new Set(prev.map(c => c.id));
@@ -313,7 +378,7 @@ export default function ImageEditorPage() {
     const id = ++savedLayerSeqRef.current;
     setSavedLayers((prev) => [
       ...prev,
-      { id, name: t("layer.advLayer", { n: prev.length + 1 }), role: "edited", profile: null, ...snap },
+      { id, name: t("layer.editedLayer", { n: prev.length + 1 }), role: "edited", profile: null, ...snap },
     ]);
   }, [t, layerSnapshotFromSvg]);
 
@@ -644,13 +709,16 @@ export default function ImageEditorPage() {
   }, []);
 
   const onDownload = useCallback(() => {
-    if (result?.svg) {
-      downloadSvg(result.svg, filename.replace(/\.\w+$/, "") + ".svg");
-    }
-  }, [result, filename]);
+    // Export what the editing area shows: the editing object's SVG, with any
+    // pending preview edit applied first — what you see is what you get.
+    const svg = commitPatchEdits() || editingSvg;
+    if (!svg) return;
+    const base = sanitizeName(filename.replace(/\.\w+$/, ""));
+    downloadSvg(svg, editingLayer ? `${base}-${sanitizeName(editingLayer.name)}.svg` : `${base}.svg`);
+  }, [commitPatchEdits, editingSvg, editingLayer, filename]);
 
   return (
-    <div className={`editor-page${maximized ? " maximized" : ""}${advancedMode ? " advanced" : ""}`}>
+    <div className={`editor-page${maximized ? " maximized" : ""}${advancedMode ? " advanced" : ""}${panelsOpen ? " panels-open" : ""}`}>
       <AppHeader
         title={filename}
         // Back to the lineage tree page of this image's root original (the
@@ -658,10 +726,21 @@ export default function ImageEditorPage() {
         // its own tree page.
         onBack={() => navigate(`/project/${encodeURIComponent(projectId)}/tree/${encodeURIComponent(currentLineage?.root || filename)}`)}
       >
-        <button onClick={onDownload} disabled={!result?.svg}>{t("editor.downloadSvg")}</button>
+        <button onClick={onDownload} disabled={!editingSvg} title={t("editor.downloadSvgHint")}>
+          {t("editor.downloadSvg")}
+        </button>
         {result?.width > 0 && (
           <span className="page-meta">{result.width} x {result.height} px</span>
         )}
+        <button
+          className="icon-btn panels-toggle"
+          onClick={() => setPanelsOpen(v => !v)}
+          title={t("editor.panels")}
+          aria-label={t("editor.panels")}
+          aria-expanded={panelsOpen}
+        >
+          <IconPanels />
+        </button>
         <button
           className="icon-btn"
           onClick={toggleMaximize}
@@ -673,6 +752,8 @@ export default function ImageEditorPage() {
       </AppHeader>
 
       <div className="editor-main">
+        {/* Narrow screens: the panels are drawers, so tapping the preview closes them. */}
+        <div className="panels-scrim" onClick={() => setPanelsOpen(false)} />
         <aside className="editor-sidebar">
           <ParameterPanel
             params={params}
@@ -730,7 +811,9 @@ export default function ImageEditorPage() {
               onImageLoad={(w, h) => setSrcSize({ w, h })}
               compareMode={compareMode}
               onCompareModeChange={setCompareMode}
-              busy={busy}
+              // Smart tuning runs trial traces in the background: show it in the
+              // preview too, it can take longer than a single trace.
+              busy={busy || smartBusy}
               leftLabel={t("editor.original")}
               rightLabel={t("editor.vector")}
               busyLabel={t("processing")}
@@ -742,11 +825,32 @@ export default function ImageEditorPage() {
                 <button className={tool === "select" ? "active" : ""} onClick={() => setTool(tool === "select" ? "none" : "select")} title={tool === "select" ? t("editor.disableSelection") : t("editor.selectPatches")} aria-label={tool === "select" ? t("editor.disableSelection") : t("editor.selectPatches")}>
                   <IconSelect />
                 </button>
-                <button className={advancedMode ? "active" : ""} onClick={() => { if (!advancedMode && result?.svg) { setAdvancedMode(true); setTool("none"); } }} title={t("adv.enter")} aria-label={t("adv.enter")} disabled={!result?.svg || advancedMode}>
+                <button className={advancedMode ? "active" : ""} onClick={() => { if (!advancedMode && result?.svg) { commitPatchEdits(); setAdvancedMode(true); setTool("none"); } }} title={t("adv.enter")} aria-label={t("adv.enter")} disabled={!result?.svg || advancedMode}>
                   <IconAdvanced />
                 </button>
               </>}
             />
+          )}
+
+          {/* Patch edits live in the preview until applied: say so, and make
+              them applicable, undoable or discardable from here. */}
+          {patchDirty && !advancedMode && (
+            <div className="patch-edits-bar">
+              <span className="patch-edits-note">{t("editor.pendingEdits")}</span>
+              <button className="primary" onClick={commitPatchEdits}>{t("editor.applyEdits")}</button>
+              <button onClick={discardEdits}>{t("editor.discardEdits")}</button>
+              <button onClick={undoEdit} disabled={!canUndo} title={t("editor.undoHint")}>
+                {t("editor.undoEdit")}
+              </button>
+            </div>
+          )}
+
+          {/* The select tool is an icon-only toggle: spell its gestures out once. */}
+          {tool === "select" && !selectHintSeen && !advancedMode && (
+            <div className="select-hint">
+              <span>{t("editor.selectHint")}</span>
+              <button className="icon-btn" onClick={dismissSelectHint} aria-label={t("close")}>×</button>
+            </div>
           )}
 
 
@@ -782,8 +886,9 @@ export default function ImageEditorPage() {
             canvasSize={canvasSize}
             savedLayers={savedLayers}
             editingLayerId={editingLayer ? editingLayer.id : null}
-            onUseAsEditingObject={(layer) => setEditingLayerId(layer.id)}
-            onRestoreFullResult={() => setEditingLayerId(null)}
+            onUseAsEditingObject={useAsEditingObject}
+            onRestoreFullResult={restoreFullResult}
+            onRemoveSavedLayer={removeSavedLayer}
           />
         </aside>
       </div>

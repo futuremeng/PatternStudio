@@ -10,6 +10,13 @@ import { serializeEditedSvg, dominantFill } from "../editorUtils.js";
  * drives the SVG rendered inside `svgContainerRef` (CompareViewer forwards
  * the ref) imperatively. `onSnapshotLayer` receives
  * `{ shapeCount, dominantColor, previewSvg }` for a new edited layer.
+ *
+ * Patch edits are preview-local until they are applied, so they are also
+ * undoable: every move / delete pushes an undo record holding the transform
+ * map (and the removed nodes) as they were *before* the edit. `applyEdits`
+ * hands the serialized canvas to the caller and marks the edits applied,
+ * `undoEdit` steps back one record, `discardEdits` steps back to the pristine
+ * canvas the editing object holds.
  */
 export function usePatchEditing({ result, svgKey, compareMode, canvasSize, onSnapshotLayer }) {
   // The SVG actually rendered in the preview: the layered result, or one
@@ -22,6 +29,26 @@ export function usePatchEditing({ result, svgKey, compareMode, canvasSize, onSna
   const pathTransformsRef = useRef(new Map()); // pathIdx → { dx, dy } in SVG coords
   const dragRef = useRef(null); // { idx, startClientX, startClientY, origDx, origDy }
   const selectedPathIdxsRef = useRef(new Set()); // Set of selected path indices
+  // Undo records for the preview-local edits: each holds the transform map (and
+  // the nodes removed by that one edit) as they were *before* it happened.
+  const undoRef = useRef([]);
+  const [undoDepth, setUndoDepth] = useState(0);
+  // The transform attribute a path had before the first drag overwrote it
+  // (usually none). Undo and discard restore exactly that, so a source SVG that
+  // carries its own transforms is never flattened by an undo step.
+  const origTransformsRef = useRef(new Map());
+
+  const setUndoRecords = useCallback((records) => {
+    undoRef.current = records;
+    setUndoDepth(records.length);
+  }, []);
+
+  /** Record the state before an edit so it can be stepped back. */
+  const pushUndo = useCallback((transforms, removals = []) => {
+    const records = [...undoRef.current, { transforms, removals }];
+    // Bound the history: a long drag session should not grow without end.
+    setUndoRecords(records.length > 60 ? records.slice(-60) : records);
+  }, [setUndoRecords]);
 
   const getSvgAndPaths = useCallback(() => {
     const container = svgContainerRef.current;
@@ -106,12 +133,102 @@ export function usePatchEditing({ result, svgKey, compareMode, canvasSize, onSna
     }
   }, [getSvgAndPaths]);
 
+  /** Write every recorded transform onto the current path list. */
+  const applyTransformsToDom = useCallback((paths, transforms) => {
+    paths.forEach((p, i) => {
+      const t = transforms.get(i);
+      if (t && (t.dx || t.dy)) {
+        p.setAttribute("transform", `translate(${t.dx}, ${t.dy})`);
+      } else if (origTransformsRef.current.has(i)) {
+        const orig = origTransformsRef.current.get(i);
+        if (orig) p.setAttribute("transform", orig);
+        else p.removeAttribute("transform");
+      }
+    });
+  }, []);
+
+  /** Remember what a path's transform looked like before we touch it. */
+  const recordOrigTransform = useCallback((path, idx) => {
+    if (!origTransformsRef.current.has(idx)) {
+      origTransformsRef.current.set(idx, path.getAttribute("transform"));
+    }
+  }, []);
+
+  /**
+   * The edited canvas as a standalone SVG, ready for the caller to write into
+   * the editing object. Selection highlights, control points and the marquee
+   * are stripped; the snapshot stays on the original canvas.
+   */
+  const applyEdits = useCallback(() => {
+    const res = getSvgAndPaths();
+    if (!res) return null;
+    return serializeEditedSvg(res.svg, canvasSize);
+  }, [getSvgAndPaths, canvasSize]);
+
+  /** Mark the pending edits as applied: the canvas is the new baseline. */
+  const markEditsApplied = useCallback(() => {
+    setUndoRecords([]);
+    // The applied SVG now carries the offsets in its own transform attributes,
+    // so the extra-translate map starts over at zero — otherwise the next drag
+    // would add the applied offset a second time.
+    pathTransformsRef.current.clear();
+    origTransformsRef.current.clear();
+    clearPatchSelection();
+  }, [clearPatchSelection, setUndoRecords]);
+
+  /** Step back one edit: re-insert what it removed, restore its transforms. */
+  const undoEdit = useCallback(() => {
+    const records = undoRef.current;
+    if (!records.length) return;
+    const op = records[records.length - 1];
+    setUndoRecords(records.slice(0, -1));
+    const container = svgContainerRef.current;
+    if (!container) return;
+    // Put the removed shapes back where they were, then re-read the path list:
+    // the indices the record's transform map uses only line up again once the
+    // removed shapes sit in their old places.
+    for (const r of op.removals) {
+      if (r.parent && container.contains(r.parent)) r.parent.insertBefore(r.node, r.next || null);
+    }
+    const res = getSvgAndPaths();
+    if (!res) return;
+    pathTransformsRef.current = op.transforms;
+    applyTransformsToDom(res.paths, op.transforms);
+    selectedPathIdxsRef.current = new Set(
+      [...selectedPathIdxsRef.current].filter(i => i < res.paths.length)
+    );
+    highlightPaths();
+    renderControlPoints();
+  }, [getSvgAndPaths, highlightPaths, renderControlPoints, applyTransformsToDom, setUndoRecords]);
+
+  /** Drop every pending edit: back to the canvas the editing object holds. */
+  const discardEdits = useCallback(() => {
+    while (undoRef.current.length) {
+      const op = undoRef.current[undoRef.current.length - 1];
+      const container = svgContainerRef.current;
+      if (container) {
+        for (const r of op.removals) {
+          if (r.parent && container.contains(r.parent)) r.parent.insertBefore(r.node, r.next || null);
+        }
+        applyTransformsToDom(Array.from(container.querySelectorAll("path")), op.transforms);
+      }
+      undoRef.current = undoRef.current.slice(0, -1);
+      pathTransformsRef.current = op.transforms;
+    }
+    setUndoRecords([]);
+    // The map now holds the baseline again: the offsets of edits that were
+    // applied earlier stay in it, so dragging those shapes keeps their place.
+    clearPatchSelection();
+  }, [clearPatchSelection, applyTransformsToDom, setUndoRecords]);
+
   // Reset patch selection when the SVG changes (new trace result or a new
-  // editing object).
+  // editing object). Any pending edit belongs to the canvas that is gone.
   useEffect(() => {
     selectedPathIdxsRef.current = new Set();
     pathTransformsRef.current.clear();
-  }, [canvasSvg]);
+    origTransformsRef.current.clear();
+    setUndoRecords([]);
+  }, [canvasSvg, setUndoRecords]);
 
   // Attach pointer interactions to SVG paths for patch selection & dragging.
   useEffect(() => {
@@ -123,7 +240,10 @@ export function usePatchEditing({ result, svgKey, compareMode, canvasSize, onSna
 
     // Re-apply existing transforms & highlight (e.g. after compare-mode switch)
     pathTransformsRef.current.forEach((t, idx) => {
-      if (paths[idx]) paths[idx].setAttribute("transform", `translate(${t.dx}, ${t.dy})`);
+      if (paths[idx]) {
+        recordOrigTransform(paths[idx], idx);
+        paths[idx].setAttribute("transform", `translate(${t.dx}, ${t.dy})`);
+      }
     });
     if (selectedPathIdxsRef.current.size > 0) {
       highlightPaths();
@@ -181,6 +301,8 @@ export function usePatchEditing({ result, svgKey, compareMode, canvasSize, onSna
       renderControlPoints();
       const t = pathTransformsRef.current.get(idx) || { dx: 0, dy: 0 };
       dragRef.current = { idx, sx: e.clientX, sy: e.clientY, ox: t.dx, oy: t.dy };
+      // The state to go back to if the user undoes this drag.
+      const before = new Map(pathTransformsRef.current);
 
       const onMove = (me) => {
         const d = dragRef.current;
@@ -193,6 +315,7 @@ export function usePatchEditing({ result, svgKey, compareMode, canvasSize, onSna
         const dx = d.ox + (cur.x - start.x);
         const dy = d.oy + (cur.y - start.y);
         pathTransformsRef.current.set(d.idx, { dx, dy });
+        recordOrigTransform(paths[d.idx], d.idx);
         paths[d.idx].setAttribute("transform", `translate(${dx}, ${dy})`);
         renderControlPoints();
       };
@@ -200,6 +323,10 @@ export function usePatchEditing({ result, svgKey, compareMode, canvasSize, onSna
         dragRef.current = null;
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
+        // Only a drag that actually moved the shape is an edit worth undoing.
+        const was = before.get(idx) || { dx: 0, dy: 0 };
+        const now = pathTransformsRef.current.get(idx) || { dx: 0, dy: 0 };
+        if (now.dx !== was.dx || now.dy !== was.dy) pushUndo(before);
       };
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
@@ -263,15 +390,31 @@ export function usePatchEditing({ result, svgKey, compareMode, canvasSize, onSna
     };
 
     const onKeyDown = (e) => {
+      const tag = e.target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      // ⌘/Ctrl+Z steps back one preview edit. Guarded by the canvas being live:
+      // in advanced mode the advanced editor owns its own undo stack.
+      if ((e.metaKey || e.ctrlKey) && (e.key === "z" || e.key === "Z")) {
+        if (!svgContainerRef.current?.isConnected) return;
+        e.preventDefault();
+        undoEdit();
+        return;
+      }
       if (e.key === "Escape") { clearPatchSelection(); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && selectedPathIdxsRef.current.size > 0) {
+        if (!svgContainerRef.current?.isConnected) return;
         e.preventDefault();
         const current = getSvgAndPaths();
         if (!current) return;
+        // Remember what is about to go, so ⌘Z can put it back.
+        const before = new Map(pathTransformsRef.current);
+        const removals = [];
         // Remove in descending order so earlier indices stay valid.
         const removed = [...selectedPathIdxsRef.current].sort((a, b) => b - a);
         for (const idx of removed) {
-          if (current.paths[idx]) current.paths[idx].remove();
+          const node = current.paths[idx];
+          if (node) removals.push({ node, parent: node.parentNode, next: node.nextSibling });
+          if (node) node.remove();
           pathTransformsRef.current.delete(idx);
         }
         // Removing paths shifts the remaining indices: remap transforms and
@@ -283,6 +426,7 @@ export function usePatchEditing({ result, svgKey, compareMode, canvasSize, onSna
         selectedPathIdxsRef.current = new Set([...selectedPathIdxsRef.current].map(remap));
         highlightPaths();
         renderControlPoints();
+        pushUndo(before, removals);
       }
     };
 
@@ -306,7 +450,19 @@ export function usePatchEditing({ result, svgKey, compareMode, canvasSize, onSna
       window.removeEventListener("keydown", onKeyDown);
       dragRef.current = null;
     };
-  }, [tool, canvasSvg, compareMode, getSvgAndPaths, highlightPaths, renderControlPoints, clearPatchSelection]);
+  }, [tool, canvasSvg, compareMode, getSvgAndPaths, highlightPaths, renderControlPoints, clearPatchSelection, pushUndo, undoEdit, recordOrigTransform]);
 
-  return { tool, setTool, svgContainerRef, saveAsLayer };
+  return {
+    tool,
+    setTool,
+    svgContainerRef,
+    saveAsLayer,
+    // Preview-local edits: pending (undoDepth > 0) until applied by the caller.
+    dirty: undoDepth > 0,
+    canUndo: undoDepth > 0,
+    applyEdits,
+    markEditsApplied,
+    undoEdit,
+    discardEdits,
+  };
 }

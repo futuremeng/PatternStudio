@@ -159,6 +159,8 @@ export default function AdvancedToolbar({
         </button>
       </div>
       <span className="toolbar-spacer" />
+      {/* The parameter panel is hidden here, so say where it went. */}
+      <span className="adv-note" title={t("adv.paramsHiddenHint")}>{t("adv.paramsHidden")}</span>
       <div className="toolbar-group">
         <button className="cancel" onClick={onCancel} title={t("adv.cancel")} aria-label={t("adv.cancel")}>
           <IconX />

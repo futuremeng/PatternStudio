@@ -78,11 +78,16 @@ function LineageRow({ row, projectId, onOpen }) {
         className="lineage-row-head"
         onClick={() => openable && onOpen(row.original)}
         role={openable ? "button" : undefined}
+        tabIndex={openable ? 0 : undefined}
+        onKeyDown={openable
+          ? (e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(row.original); } })
+          : undefined}
       >
         <button
           type="button"
           className="lineage-toggle"
-          aria-label={expanded ? "collapse" : "expand"}
+          aria-label={expanded ? t("tree.collapse") : t("tree.expand")}
+          title={expanded ? t("tree.collapse") : t("tree.expand")}
           onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}
         >
           {expanded ? "▾" : "▸"}
@@ -114,6 +119,10 @@ function LineageNode({ node, projectId, onOpen }) {
         title={lineageTooltip(node, t)}
         onClick={() => node.openName && onOpen(node.openName)}
         role={node.openName ? "button" : undefined}
+        tabIndex={node.openName ? 0 : undefined}
+        onKeyDown={node.openName
+          ? (e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(node.openName); } })
+          : undefined}
       >
         <LazyThumb projectId={projectId} filename={node.name} size="node" />
         <span className="lineage-name" title={node.name}>{node.name}</span>

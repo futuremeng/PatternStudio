@@ -1,15 +1,23 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { openProject, listProjects, deleteProject, getImageUrl } from "../api.js";
+import { errMsg } from "../editorUtils.js";
 import AppHeader from "../components/AppHeader.jsx";
+import ConfirmModal from "../components/ConfirmModal.jsx";
 import { useI18n } from "../i18n/index.jsx";
 
 export default function ProjectListPage() {
   const { t } = useI18n();
   const [projects, setProjects] = useState([]);
   const [thumbs, setThumbs] = useState({});
+  // Distinguishes "still loading" from "no projects", so the empty state does
+  // not flash at the start of every visit.
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // The project whose removal is being confirmed (null = no prompt). Removing
+  // one drops it from the list, so it is always confirmed first.
+  const [removeTarget, setRemoveTarget] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -17,22 +25,26 @@ export default function ProjectListPage() {
   }, []);
 
   async function loadProjects() {
+    setLoading(true);
+    setError(null);
     try {
       const data = await listProjects();
       const projs = data.projects || [];
       setProjects(projs);
-      // Load thumbnails (first image of each project)
-      const newThumbs = {};
-      for (const p of projs) {
-        if (p.images && p.images.length > 0) {
-          try {
-            newThumbs[p.id] = await getImageUrl(p.id, p.images[0]);
-          } catch {}
-        }
-      }
-      setThumbs(newThumbs);
+      // Thumbnails (first image of each project) are fetched concurrently: a
+      // serial loop made a list of N folders cost N round trips before the
+      // first picture appeared. Each card fills in as its own image arrives.
+      await Promise.all(projs.map(async p => {
+        if (!p.images || p.images.length === 0) return;
+        try {
+          const u = await getImageUrl(p.id, p.images[0]);
+          setThumbs(prev => ({ ...prev, [p.id]: u }));
+        } catch { /* the placeholder stays visible */ }
+      }));
     } catch (e) {
-      console.error("Failed to load projects:", e);
+      setError(errMsg(e));
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -43,20 +55,19 @@ export default function ProjectListPage() {
       const project = await openProject();
       navigate(`/project/${encodeURIComponent(project.id)}`);
     } catch (e) {
-      if (e.message !== "cancelled") setError(e.message);
+      if (e.message !== "cancelled") setError(errMsg(e));
     } finally {
       setBusy(false);
     }
   }
 
-  async function onRemoveProject(e, projectId) {
-    e.stopPropagation();
-    try {
-      await deleteProject(projectId);
-      setProjects(prev => prev.filter(p => p.id !== projectId));
-    } catch (err) {
-      console.error("Failed to remove project:", err);
-    }
+  function onRemoveProject() {
+    const target = removeTarget;
+    setRemoveTarget(null);
+    if (!target) return;
+    deleteProject(target.id).then(() => {
+      setProjects(prev => prev.filter(p => p.id !== target.id));
+    }).catch(e => setError(errMsg(e)));
   }
 
   return (
@@ -69,7 +80,13 @@ export default function ProjectListPage() {
 
       <div className="project-list-body">
         {error && <div className="error">{error}</div>}
-        {projects.length === 0 ? (
+        {loading ? (
+          <div className="project-grid">
+            {[0, 1, 2, 3, 4, 5].map(i => (
+              <div key={i} className="project-card skeleton" aria-hidden="true" />
+            ))}
+          </div>
+        ) : projects.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">📁</div>
             <p>{t("projects.empty")}</p>
@@ -90,8 +107,9 @@ export default function ProjectListPage() {
                   )}
                   <button
                     className="remove-btn"
-                    onClick={(e) => onRemoveProject(e, p.id)}
+                    onClick={(e) => { e.stopPropagation(); setRemoveTarget(p); }}
                     title={t("projects.remove")}
+                    aria-label={t("projects.remove")}
                   >
                     ×
                   </button>
@@ -105,6 +123,18 @@ export default function ProjectListPage() {
           </div>
         )}
       </div>
+
+      {removeTarget && (
+        <ConfirmModal
+          title={t("projects.remove")}
+          confirmLabel={t("projects.removeOk")}
+          danger
+          onConfirm={onRemoveProject}
+          onCancel={() => setRemoveTarget(null)}
+        >
+          <p>{t("projects.removeConfirm", { name: removeTarget.name })}</p>
+        </ConfirmModal>
+      )}
     </div>
   );
 }

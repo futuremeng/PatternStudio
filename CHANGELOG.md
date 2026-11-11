@@ -43,6 +43,22 @@ All notable changes to PatternStudio are documented in this file.
   editing object of the editing area (preview, patch editing and the advanced
   editor then work on that layer alone), and clicking it again — or "Back to
   full result" — switches back to the full layered result
+- Editing-object-consistent export: "Download SVG" now saves what the editing
+  area shows — the selected snapshot when one is picked (named
+  `<image>-<layer>.svg`) — instead of always the full layered result
+- Patch editing is reversible: moved or deleted shapes are marked as unapplied
+  in the preview and can be applied, discarded or stepped back one edit at a
+  time (⌘/Ctrl+Z); switching the editing object, entering the advanced editor
+  or exporting applies them first so nothing on screen is silently dropped
+- Confirmation before an irreversible action: removing a project from the list
+  and dropping an exported snapshot both ask first, through a shared
+  `ConfirmModal` (also used by the layer panel's editing-object switch)
+- Discoverability: the exported-layer cards name their click action on hover,
+  the patch-select tool explains its gestures once, smart tuning shows its
+  busy state in the preview, and the advanced toolbar notes that the parameter
+  panel is hidden there
+- Narrow screens: the editor's parameter and layer panels fold into drawers
+  opened from the header, with a scrim that closes them again
 
 **Architecture**
 - New `patternstudio-engine` crate: the trace pipeline (params → vtracer
@@ -67,6 +83,17 @@ All notable changes to PatternStudio are documented in this file.
   `editorUtils.js` (pure helpers), `hooks/usePatchEditing.js` (patch
   selection & dragging), `hooks/useSmartPreset.js` (smart tuning), and
   `components/SmartBanner.jsx` (decision banner)
+- Layer naming unified across the UI: snapshots taken from the canvas (patch
+  "save as layer" and the advanced editor alike) are all "snapshot N", the list
+  is "Snapshots", and the layered-result export says "Export checked layers"
+  to keep the two apart
+- Loading is concurrent where it was serial: project thumbnails on the project
+  list, cached-result lookups for the split previews and for saved-config
+  thumbnails; the project list now shows a skeleton instead of an empty state
+  while it loads, and reports a failed project removal
+- Accessibility: viewer and lineage controls label themselves in the active
+  language instead of hardcoded English, lineage rows and nodes are reachable
+  by keyboard, and every focusable element gets a visible focus ring
 
 ### Fixed
 

@@ -162,25 +162,34 @@ export default function ProjectDetailPage() {
   }, [project]);
 
   // Load cached line/color results (fixed preset params or smart results)
-  // for the split preview
+  // for the split preview.
   useEffect(() => {
     if (!originals.length) return;
     let cancelled = false;
+    // The cache check is one storage read per image; doing them one after
+    // another made a large project's previews land only after a long wait.
+    // Read them in small concurrent batches and fill the grid as each lands.
+    const CHUNK = 8;
     (async () => {
-      const found = {};
-      for (const name of originals) {
-        const imageId = `${projectId}/${name}`;
-        const [lineFixed, lineSmart, colorFixed, colorSmart] = await Promise.all([
-          getCachedTrace(imageId, presetFullParams("lineArt")).catch(() => null),
-          getCachedTrace(imageId, smartCacheKey("lineArt")).catch(() => null),
-          getCachedTrace(imageId, presetFullParams("color")).catch(() => null),
-          getCachedTrace(imageId, smartCacheKey("color")).catch(() => null),
-        ]);
-        const line = (lineFixed || lineSmart)?.svg || null;
-        const color = (colorFixed || colorSmart)?.svg || null;
-        if (line || color) found[name] = { line, color };
+      for (let i = 0; i < originals.length; i += CHUNK) {
+        const chunk = originals.slice(i, i + CHUNK);
+        const found = await Promise.all(chunk.map(async (name) => {
+          const imageId = `${projectId}/${name}`;
+          const [lineFixed, lineSmart, colorFixed, colorSmart] = await Promise.all([
+            getCachedTrace(imageId, presetFullParams("lineArt")).catch(() => null),
+            getCachedTrace(imageId, smartCacheKey("lineArt")).catch(() => null),
+            getCachedTrace(imageId, presetFullParams("color")).catch(() => null),
+            getCachedTrace(imageId, smartCacheKey("color")).catch(() => null),
+          ]);
+          const line = (lineFixed || lineSmart)?.svg || null;
+          const color = (colorFixed || colorSmart)?.svg || null;
+          return line || color ? { name, preview: { line, color } } : null;
+        }));
+        if (cancelled) return;
+        const patch = {};
+        for (const r of found) if (r) patch[r.name] = r.preview;
+        if (Object.keys(patch).length) setPreviews(prev => ({ ...prev, ...patch }));
       }
-      if (!cancelled) setPreviews(found);
     })();
     return () => { cancelled = true; };
   }, [originals, projectId]);
@@ -202,12 +211,15 @@ export default function ProjectDetailPage() {
     // and are never batch-processed here.
     const plan = [];
     for (const job of jobs) {
-      const missing = [];
-      for (const name of originals) {
-        const key = job.smart ? smartCacheKey(job.family) : job.params;
-        const cached = await getCachedTrace(`${projectId}/${name}`, key).catch(() => null);
-        if (!cached) missing.push(name);
-      }
+      const key = job.smart ? smartCacheKey(job.family) : job.params;
+      // One concurrent pass over the whole project: checking images one by one
+      // delayed the start of the batch by a round trip per image.
+      const cached = await Promise.all(
+        originals.map(name =>
+          getCachedTrace(`${projectId}/${name}`, key).then(r => !!r).catch(() => false)
+        )
+      );
+      const missing = originals.filter((_, i) => !cached[i]);
       if (missing.length) plan.push({ ...job, missing });
     }
     const total = plan.reduce((s, j) => s + j.missing.length, 0);

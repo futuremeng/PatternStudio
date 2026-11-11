@@ -4,6 +4,7 @@ import { downloadSvg, downloadBlob } from "../api.js";
 import { useI18n } from "../i18n/index.jsx";
 import { layerToStandaloneSvg, layerToThumbnailSvg } from "../editorUtils.js";
 import { SegmentedControl, Slider, Group } from "./ParameterPanel.jsx";
+import ConfirmModal from "./ConfirmModal.jsx";
 
 // Make a layer name safe to use as a file name inside the export ZIP.
 function sanitizeFilename(name) {
@@ -54,6 +55,7 @@ export default function LayerPanel({
   layerParams, onLayerParamsChange, onProcess, onCancel, processBusy, processPending, processed,
   canvasSize,
   savedLayers = [], editingLayerId = null, onUseAsEditingObject, onRestoreFullResult,
+  onRemoveSavedLayer,
 }) {
   const { t } = useI18n();
   const [selected, setSelected] = useState(new Set());
@@ -62,6 +64,8 @@ export default function LayerPanel({
   // prompt). Switching replaces what the editing area shows and edits, so it
   // is always confirmed first.
   const [confirmLayer, setConfirmLayer] = useState(null);
+  // Likewise for dropping a snapshot: it discards artwork the user made.
+  const [removeLayer, setRemoveLayer] = useState(null);
   const set = (key) => (val) => onLayerParamsChange(prev => ({ ...prev, [key]: val }));
 
   const STRATEGY_LABELS = {
@@ -278,7 +282,17 @@ export default function LayerPanel({
               onClick={() => pickEditingLayer(layer)}
               title={editingLayerId === layer.id ? t("layer.editingHint") : t("layer.useAsEditingHint")}
             >
-              <div className="mini-preview" dangerouslySetInnerHTML={{ __html: layerToThumbnailSvg(layer.previewSvg, canvasSize) }} />
+              <div className="mini-preview saved-preview">
+                <div
+                  className="saved-thumb"
+                  dangerouslySetInnerHTML={{ __html: layerToThumbnailSvg(layer.previewSvg, canvasSize) }}
+                />
+                {/* The card is clickable but looks like a picture: name the
+                    action on it so the affordance is visible, not discovered. */}
+                <span className="pick-hint">
+                  {editingLayerId === layer.id ? t("layer.restoreFull") : t("layer.useAsEditing")}
+                </span>
+              </div>
               <div className="info">
                 <div className="name">
                   {layer.name}
@@ -299,36 +313,48 @@ export default function LayerPanel({
               >
                 ↓
               </button>
+              <button
+                className="saved-layer-remove"
+                onClick={e => { e.stopPropagation(); setRemoveLayer(layer); }}
+                title={t("layer.removeSnapshotHint")}
+                aria-label={t("layer.removeSnapshot")}
+              >
+                ×
+              </button>
             </div>
           ))}
         </div>
       )}
 
       {confirmLayer && (
-        <div className="modal-overlay" onClick={() => setConfirmLayer(null)}>
-          <div className="modal confirm-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>{t("layer.exportedTitle", { n: savedLayers.length })}</h2>
-              <button className="icon-btn" onClick={() => setConfirmLayer(null)} aria-label={t("close")}>×</button>
-            </div>
-            <div className="confirm-body">
-              <div
-                className="confirm-preview"
-                dangerouslySetInnerHTML={{ __html: layerToThumbnailSvg(confirmLayer.previewSvg, canvasSize) }}
-              />
-              <p>{t("layer.useAsEditingConfirm", { name: confirmLayer.name })}</p>
-            </div>
-            <div className="modal-footer">
-              <button onClick={() => setConfirmLayer(null)}>{t("settings.cancel")}</button>
-              <button
-                className="primary"
-                onClick={() => { onUseAsEditingObject?.(confirmLayer); setConfirmLayer(null); }}
-              >
-                {t("layer.useAsEditingOk")}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmModal
+          title={t("layer.exportedTitle", { n: savedLayers.length })}
+          confirmLabel={t("layer.useAsEditingOk")}
+          onConfirm={() => { onUseAsEditingObject?.(confirmLayer); setConfirmLayer(null); }}
+          onCancel={() => setConfirmLayer(null)}
+        >
+          <div
+            className="confirm-preview"
+            dangerouslySetInnerHTML={{ __html: layerToThumbnailSvg(confirmLayer.previewSvg, canvasSize) }}
+          />
+          <p>{t("layer.useAsEditingConfirm", { name: confirmLayer.name })}</p>
+        </ConfirmModal>
+      )}
+
+      {removeLayer && (
+        <ConfirmModal
+          title={t("layer.removeSnapshot")}
+          confirmLabel={t("layer.removeSnapshotOk")}
+          danger
+          onConfirm={() => { onRemoveSavedLayer?.(removeLayer); setRemoveLayer(null); }}
+          onCancel={() => setRemoveLayer(null)}
+        >
+          <div
+            className="confirm-preview"
+            dangerouslySetInnerHTML={{ __html: layerToThumbnailSvg(removeLayer.previewSvg, canvasSize) }}
+          />
+          <p>{t("layer.removeSnapshotConfirm", { name: removeLayer.name })}</p>
+        </ConfirmModal>
       )}
     </div>
   );
