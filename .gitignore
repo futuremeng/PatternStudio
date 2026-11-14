@@ -11,3 +11,7 @@ desktop/gen/
 # Preprocessing runtime (fetched via `make preprocess-setup`)
 resources/bin/
 resources/models/
+
+# Playwright
+web/test-results/
+web/playwright-report/

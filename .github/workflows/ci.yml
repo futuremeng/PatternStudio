@@ -23,3 +23,50 @@ jobs:
         run: cargo clippy --workspace -- -D warnings
       - name: Format check
         run: cargo fmt --check
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        run: npm ci
+        working-directory: web
+      - name: Build
+        run: npm run build
+        working-directory: web
+      - name: Unit tests
+        run: npm test
+        working-directory: web
+
+  # Browser regression suite against the real server. PR-only for now to keep
+  # main-branch pipelines fast; promote to push when it proves stable.
+  e2e:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build server
+        run: cargo build -p patternstudio-server
+      - name: Build web
+        run: npm ci && npm run build
+        working-directory: web
+      - name: Install browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: web
+      - name: Seed fixtures
+        run: node tests/e2e/seed.cjs
+        working-directory: web
+      - name: E2E
+        run: npx playwright test
+        working-directory: web

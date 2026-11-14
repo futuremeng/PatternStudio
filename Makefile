@@ -1,4 +1,4 @@
-.PHONY: build test release clean check fmt clippy web web-dev web-serve desktop desktop-dev desktop-run
+.PHONY: build test release clean check fmt clippy web web-dev web-serve desktop desktop-dev desktop-run test-web test-e2e
 
 build:
 	cargo build --workspace
@@ -46,6 +46,18 @@ web-dev:
 
 web-serve:
 	cargo run --bin patternstudio-server
+
+## Web test suites
+
+test-web:
+	cd web && npm install && npm run build && npm test
+
+# Playwright browser tests against the real server: builds both halves,
+# seeds a throwaway HOME/fixtures, then runs the suite.
+test-e2e:
+	cd web && npm install && npm run build
+	cargo build -p patternstudio-server
+	cd web && node tests/e2e/seed.cjs && npx playwright test
 
 ## Desktop (Tauri)
 

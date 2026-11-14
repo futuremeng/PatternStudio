@@ -6,6 +6,17 @@ All notable changes to PatternStudio are documented in this file.
 
 ### Added
 
+**Browser e2e regression suite (WP3)**
+- Playwright specs cover the full happy path (projects → detail → editor
+  auto-trace → manual layer Process → visibility toggles → SVG download),
+  the classified error banner (`Invalid image: …`) for unreadable files, the
+  409 `busy` contract for concurrent background traces, and the empty-projects
+  state with keyboard reachability
+- Fixtures are generated deterministically by `web/tests/e2e/seed.cjs` into a
+  throwaway HOME under `/tmp/patternstudio-e2e-home` (hand-rolled PNG encoder,
+  no binary files in the repo); the suite runs against the real debug server
+  via `make test-e2e`, and CI gained `web` (unit) plus PR-only `e2e` jobs
+
 **Error-code contract (WP1)**
 - Engine errors now carry a stable machine-readable `code`
   (`cancelled` / `busy` / `dependency` / `invalid_input` / `io` / `internal`)
