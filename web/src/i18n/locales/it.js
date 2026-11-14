@@ -2,6 +2,7 @@
 export default {
   // Common
   "back": "← Indietro",
+  "ctx.open": "Apri",
   "language": "Lingua",
   "theme": "Cambia tema chiaro/scuro",
   "loading": "Caricamento...",

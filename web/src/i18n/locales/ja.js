@@ -2,6 +2,7 @@
 export default {
   // Common
   "back": "← 戻る",
+  "ctx.open": "開く",
   "language": "言語",
   "theme": "ライト/ダークを切替",
   "loading": "読み込み中...",

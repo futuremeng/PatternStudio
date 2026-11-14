@@ -6,8 +6,9 @@ import { listProjects } from "../api.js";
  * Web mode: looked up in the server's project list. Tauri mode: the id is
  * the folder path itself; images + lineage come from dedicated commands
  * (also covers folders that are not in the recent-projects list).
+ * Bump `refreshKey` to re-read the folder (e.g. after a drag & drop import).
  */
-export function useProject(projectId) {
+export function useProject(projectId, refreshKey = 0) {
   const [project, setProject] = useState(null);
   const [error, setError] = useState(null);
 
@@ -41,7 +42,7 @@ export function useProject(projectId) {
       }
     })();
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, refreshKey]);
 
   return { project, error };
 }

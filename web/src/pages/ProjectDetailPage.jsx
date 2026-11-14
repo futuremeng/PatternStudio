@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getImageUrl, startBatchTrace, presetFullParams, MODE_PRESETS } from "../api.js";
+import { getImageUrl, startBatchTrace, presetFullParams, MODE_PRESETS, invalidateImageListCache } from "../api.js";
 import { getCachedTrace, setCachedTrace } from "../traceCache.js";
 import AppHeader from "../components/AppHeader.jsx";
+import ContextMenu, { useContextMenu } from "../components/ContextMenu.jsx";
 import { useProject } from "../hooks/useProject.js";
 import { useI18n } from "../i18n/index.jsx";
 
@@ -52,7 +53,7 @@ function cropSvgQuarter(svg, quarter) {
  * over IPC, so eagerly loading a 100-image project would stall the UI and
  * balloon memory; IntersectionObserver keeps only the visible cards loaded.
  */
-function ImageCard({ projectId, filename, preview, showSplit, onClick }) {
+function ImageCard({ projectId, filename, preview, showSplit, onClick, onContextMenu }) {
   const { t, presetLabel } = useI18n();
   const [url, setUrl] = useState(null);
   const cardRef = useRef(null);
@@ -91,7 +92,7 @@ function ImageCard({ projectId, filename, preview, showSplit, onClick }) {
   }, [url]);
 
   return (
-    <div className="image-card" ref={cardRef} onClick={onClick}>
+    <div className="image-card" ref={cardRef} onClick={onClick} onContextMenu={onContextMenu}>
       {showSplit && preview?.result ? (
         // Single-preset batch result (bw / gradient / lowPoly / smart), shown full on the right.
         <div className="img-wrap split">
@@ -137,7 +138,11 @@ export default function ProjectDetailPage() {
   const { t, presetLabel } = useI18n();
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const { project, error } = useProject(projectId);
+  const { menu, open, close } = useContextMenu();
+  // Bumped when files land in the project folder (drag & drop import) so the
+  // grid re-lists it.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { project, error } = useProject(projectId, refreshKey);
   // Batch: the user picks a preset family (what output they want), then
   // chooses fixed params or smart tuning (best params within that family).
   const [batchPreset, setBatchPreset] = useState("lineArt");
@@ -306,6 +311,17 @@ export default function ProjectDetailPage() {
     batchHandleRef.current?.cancel();
   }, []);
 
+  // A drag & drop import (see App) re-lists the folder.
+  useEffect(() => {
+    const onChanged = (e) => {
+      if (e.detail?.projectId !== projectId) return;
+      invalidateImageListCache(projectId);
+      setRefreshKey(k => k + 1);
+    };
+    window.addEventListener("ps:images-changed", onChanged);
+    return () => window.removeEventListener("ps:images-changed", onChanged);
+  }, [projectId]);
+
   if (!project) {
     return <div className="placeholder">{error ? error : t("loading")}</div>;
   }
@@ -372,10 +388,16 @@ export default function ProjectDetailPage() {
               preview={previews[filename]}
               showSplit={showSplit}
               onClick={() => navigate(`/project/${encodeURIComponent(projectId)}/tree/${encodeURIComponent(filename)}`)}
+              onContextMenu={(e) =>
+                open(e, [
+                  { label: t("ctx.open"), onSelect: () => navigate(`/project/${encodeURIComponent(projectId)}/tree/${encodeURIComponent(filename)}`) },
+                ])
+              }
             />
           ))}
         </div>
       </div>
+      <ContextMenu menu={menu} onClose={close} />
 
       {batchProgress && (
         <div className="batch-bar">

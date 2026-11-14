@@ -2,6 +2,7 @@
 export default {
   // Common
   "back": "← 返回",
+  "ctx.open": "打开",
   "language": "语言",
   "theme": "切换明暗主题",
   "loading": "加载中...",

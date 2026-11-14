@@ -6,6 +6,12 @@ All notable changes to PatternStudio are documented in this file.
 
 ### Added
 
+**Context menus & drag import**
+- Right-click menus on project and image cards (Open / Remove) with
+  keyboard-dismissable, focus-trapped popover
+- Dragging images from Finder onto the desktop window imports them into the
+  open project and refreshes the grid in place
+
 **Desktop integration & accessibility**
 - Native macOS menu bar in the Tauri app (About / Settings… / Open Folder… /
   Undo / Redo / Toggle Appearance / Help); custom items bridge to the UI via a

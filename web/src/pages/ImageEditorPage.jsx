@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getImageUrl, getProjectLineage, prepareSource, vectorizeSource, layerSource, cancelTrace, newTraceRequestId, downloadSvg, MODE_PRESETS, DEFAULT_PARAMS, presetFullParams, familyFromParams, splitTraceParams, mergeTraceParams } from "../api.js";
 import { getCachedTrace, setCachedTrace, getCachedVectorize, setCachedVectorize, stableStringify } from "../traceCache.js";

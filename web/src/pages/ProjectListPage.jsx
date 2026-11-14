@@ -4,10 +4,13 @@ import { openProject, listProjects, deleteProject, getImageUrl } from "../api.js
 import { errMsg } from "../editorUtils.js";
 import AppHeader from "../components/AppHeader.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
+import ContextMenu, { useContextMenu } from "../components/ContextMenu.jsx";
+import { IconFolder, IconImage } from "../components/icons.jsx";
 import { useI18n } from "../i18n/index.jsx";
 
 export default function ProjectListPage() {
   const { t } = useI18n();
+  const { menu, open, close } = useContextMenu();
   const [projects, setProjects] = useState([]);
   const [thumbs, setThumbs] = useState({});
   // Distinguishes "still loading" from "no projects", so the empty state does
@@ -88,7 +91,7 @@ export default function ProjectListPage() {
           </div>
         ) : projects.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">📁</div>
+            <div className="empty-icon"><IconFolder /></div>
             <p>{t("projects.empty")}</p>
           </div>
         ) : (
@@ -98,12 +101,18 @@ export default function ProjectListPage() {
                 key={p.id}
                 className="project-card"
                 onClick={() => navigate(`/project/${encodeURIComponent(p.id)}`)}
+                onContextMenu={(e) =>
+                  open(e, [
+                    { label: t("ctx.open"), onSelect: () => navigate(`/project/${encodeURIComponent(p.id)}`) },
+                    { label: t("projects.remove"), danger: true, onSelect: () => setRemoveTarget(p) },
+                  ])
+                }
               >
                 <div className="project-thumb">
                   {thumbs[p.id] ? (
                     <img src={thumbs[p.id]} alt={p.name} />
                   ) : (
-                    <div className="thumb-placeholder">🖼️</div>
+                    <div className="thumb-placeholder"><IconImage /></div>
                   )}
                   <button
                     className="remove-btn"
@@ -135,6 +144,7 @@ export default function ProjectListPage() {
           <p>{t("projects.removeConfirm", { name: removeTarget.name })}</p>
         </ConfirmModal>
       )}
+      <ContextMenu menu={menu} onClose={close} />
     </div>
   );
 }

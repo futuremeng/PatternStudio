@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useSyncExternalStore } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
-import { isTauri, openProject } from "./api.js";
+import { isTauri, openProject, importImageFile } from "./api.js";
 import { subscribeSettings, getSettingsOpen, openSettings, closeSettings } from "./settingsStore.js";
 import { toggleTheme } from "./theme.js";
 import SettingsModal from "./components/SettingsModal.jsx";
@@ -8,6 +8,8 @@ import ProjectListPage from "./pages/ProjectListPage.jsx";
 import ProjectDetailPage from "./pages/ProjectDetailPage.jsx";
 import LineageTreePage from "./pages/LineageTreePage.jsx";
 import ImageEditorPage from "./pages/ImageEditorPage.jsx";
+
+const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i;
 
 /**
  * Broadcast an app-level command (from the native menu bar or a shortcut) to
@@ -70,6 +72,36 @@ function Shell() {
   }, [openProjectFlow]);
 
   // Finder → window drag & drop: image files land in the current project.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten = null;
+    let disposed = false;
+    import("@tauri-apps/api/event").then(({ listen }) =>
+      listen("tauri://drag-drop", async (ev) => {
+        const paths = ev.payload?.paths || [];
+        const images = paths.filter((p) => IMAGE_EXT_RE.test(p));
+        if (!images.length) return;
+        const m = window.location.hash.match(/^#\/project\/([^/?#]+)/);
+        if (!m) return; // only importable while a project is open
+        const projectId = decodeURIComponent(m[1]);
+        for (const p of images) {
+          try {
+            await importImageFile(projectId, p);
+          } catch (e) {
+            console.error("drag-import failed:", p, e);
+          }
+        }
+        window.dispatchEvent(new CustomEvent("ps:images-changed", { detail: { projectId } }));
+      })
+    ).then((u) => {
+      if (disposed) u();
+      else unlisten = u;
+    });
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   // Mac convention: the window title names the current document/project.
   useEffect(() => {

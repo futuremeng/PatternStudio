@@ -369,6 +369,21 @@ export async function saveProjectImage(projectId, source, filename, opts = {}) {
 }
 
 /**
+ * Desktop-only: copy an image file dropped from Finder into the project
+ * folder, so drag & drop works the way Mac users expect. Invalidates the
+ * image-list cache so the project page re-lists the folder.
+ */
+export async function importImageFile(projectId, filePath) {
+  const filename = filePath.split("/").pop();
+  const name = await tauriInvoke("save_project_image", {
+    projectId, filePath, filename,
+    lineage: null, lineageKey: null, generated: false,
+  });
+  invalidateImageListCache(projectId);
+  return name;
+}
+
+/**
  * The project's lineage entries (derived images with provenance). Each entry:
  * { file, root, parent, kind, confirmed, confirmedFile, createdAt, meta } —
  * `file` is the generated filename (or the top-level filename for legacy
