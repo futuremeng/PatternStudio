@@ -421,10 +421,11 @@ async fn layer(
     let result = tokio::task::spawn_blocking(move || {
         let (v, _l) = params.split();
         let doc_key = format!("{}::{}", doc_image_key, vectorize_signature(&v));
-        let doc = match {
+        let cached = {
             let mut cache = docs.lock().unwrap();
             cache.get(&doc_key)
-        } {
+        };
+        let doc = match cached {
             Some(doc) => doc,
             None => {
                 // Cache miss: vectorize first (the session cache keeps this
@@ -444,7 +445,7 @@ async fn layer(
                 Arc::new(doc)
             }
         };
-        Ok::<TraceResult, String>(layer_doc(&doc, &params, &cancel)?)
+        layer_doc(&doc, &params, &cancel)
     })
     .await
     .map_err(|e| {
