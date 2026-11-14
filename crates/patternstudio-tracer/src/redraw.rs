@@ -624,7 +624,7 @@ mod tests {
         // is guaranteed to exceed MAX_INPUT_BYTES.
         let (w, h) = (2500u32, 2500u32);
         let img = image::RgbaImage::from_fn(w, h, |x, y| {
-            let n = (x as u32).wrapping_mul(2654435761) ^ (y as u32).wrapping_mul(40503);
+            let n = x.wrapping_mul(2654435761) ^ y.wrapping_mul(40503);
             image::Rgba([n as u8, (n >> 8) as u8, (n >> 16) as u8, 255])
         });
         let dir = std::env::temp_dir().join(format!("ps-redraw-large-{}", std::process::id()));
