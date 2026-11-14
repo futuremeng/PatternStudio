@@ -20,6 +20,103 @@ use vtracer::ir::VectorDoc;
 use vtracer::progress::CancelToken;
 use vtracer::{ColorImage, Config, Error, Session};
 
+/// Engine error with a stable machine-readable [`code`](EngineError::code).
+///
+/// The serialized shape — `{ "code", "message" }` — is the wire contract for
+/// both the HTTP server's JSON error bodies and the Tauri IPC rejections, so
+/// the UI can classify failures (retry / show detail / stay silent) without
+/// string-matching messages.
+///
+/// The `Display` strings are part of the compatibility contract: legacy
+/// callers still match `"cancelled"` / `"busy"` exactly (server 409 mapping,
+/// Tauri bridge in `api.js`), so variant messages must stay byte-identical to
+/// the historical error strings.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum EngineError {
+    /// A newer request for the same image aborted this trace.
+    #[error("cancelled")]
+    Cancelled,
+    /// A background request was rejected while an interactive trace runs.
+    #[error("busy")]
+    Busy,
+    /// An optional external dependency is missing or unusable
+    /// (e.g. the Real-ESRGAN binary or model files for preprocessing).
+    #[error("{0}")]
+    Dependency(String),
+    /// The request source is wrong or the bytes cannot be decoded as an image.
+    #[error("{0}")]
+    InvalidInput(String),
+    /// The source file could not be read from disk.
+    #[error("{0}")]
+    Io(String),
+    /// Everything else: pipeline internals, analysis and config failures.
+    #[error("{0}")]
+    Internal(String),
+}
+
+impl EngineError {
+    /// Stable machine-readable code, mirrored by the web/desktop error UI
+    /// (`web/src/errorText.js`). Must never change once shipped.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Cancelled => "cancelled",
+            Self::Busy => "busy",
+            Self::Dependency(_) => "dependency",
+            Self::InvalidInput(_) => "invalid_input",
+            Self::Io(_) => "io",
+            Self::Internal(_) => "internal",
+        }
+    }
+
+    /// Classify a `patternstudio_tracer::preprocess_image` error string: the
+    /// two missing-dependency probes (`binary not found`,
+    /// `models directory not found`, see tracer's `preprocess.rs`) mean the
+    /// optional Real-ESRGAN install is absent; anything else is an opaque
+    /// run failure.
+    pub fn from_preprocess_error(msg: String) -> Self {
+        if msg.contains("binary not found") || msg.contains("models directory not found") {
+            Self::Dependency(msg)
+        } else {
+            Self::Internal(msg)
+        }
+    }
+}
+
+/// Compat for bodies predating the code contract that still carry plain
+/// `String` errors: the two control-flow literals keep their exact meaning so
+/// existing call sites compile unchanged after the signature migration.
+impl From<&str> for EngineError {
+    fn from(s: &str) -> Self {
+        match s {
+            "cancelled" => Self::Cancelled,
+            "busy" => Self::Busy,
+            other => Self::Internal(other.to_owned()),
+        }
+    }
+}
+
+impl From<String> for EngineError {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "cancelled" => Self::Cancelled,
+            "busy" => Self::Busy,
+            other => Self::Internal(other.to_owned()),
+        }
+    }
+}
+
+/// Wire contract: Tauri rejects the IPC promise with this JSON object; the
+/// server embeds the same two fields in its JSON error bodies.
+impl Serialize for EngineError {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = ser.serialize_map(Some(2))?;
+        map.serialize_entry("code", self.code())?;
+        map.serialize_entry("message", &self.to_string())?;
+        map.end()
+    }
+}
+
 /// Trace parameters accepted by the API / desktop commands.
 /// All fields are optional so partial updates (e.g. a single slider change)
 /// can be sent without resending the full parameter set.
@@ -213,7 +310,7 @@ pub fn vectorize_signature(v: &VectorizeParams) -> String {
 }
 
 /// Build a vtracer config from the (possibly partial) trace params.
-pub fn build_vtracer_config(params: &TraceParams) -> Result<Config, String> {
+pub fn build_vtracer_config(params: &TraceParams) -> Result<Config, EngineError> {
     let preset = match params.preset.to_ascii_lowercase().as_str() {
         "bw" => Preset::Bw,
         "photo" => Preset::Photo,
@@ -267,7 +364,8 @@ pub fn build_vtracer_config(params: &TraceParams) -> Result<Config, String> {
         config.watershed_detail = v;
     }
     if let Some(ref p) = params.palette {
-        config.palette = patternstudio_tracer::parse_palette(p)?;
+        config.palette =
+            patternstudio_tracer::parse_palette(p).map_err(EngineError::InvalidInput)?;
     }
     if let Some(v) = params.corner_threshold {
         config.corner_threshold = v;
@@ -332,9 +430,9 @@ pub struct VectorizeResult {
 /// Convert a smart-recommended parameter set into `TraceParams`.
 /// Both structs use camelCase with identical field names, so a JSON round-trip
 /// is a safe, field-agnostic mapping.
-pub fn smart_to_trace_params(p: &SmartParams) -> Result<TraceParams, String> {
+pub fn smart_to_trace_params(p: &SmartParams) -> Result<TraceParams, EngineError> {
     let v = serde_json::to_value(p).map_err(|e| e.to_string())?;
-    serde_json::from_value(v).map_err(|e| e.to_string())
+    serde_json::from_value(v).map_err(|e| EngineError::Internal(e.to_string()))
 }
 
 /// Acquire a cached session's lock, blocking until a predecessor releases it.
@@ -361,19 +459,19 @@ pub fn vectorize_with_session(
     session: &mut Session,
     config: &Config,
     cancel: &CancelToken,
-) -> Result<VectorDoc, String> {
+) -> Result<VectorDoc, EngineError> {
     let mut on_progress = |_p: vtracer::progress::Progress| {};
     let doc = session
         .render_with_progress(config, cancel, &mut on_progress)
         .map_err(|e| {
             if matches!(e, Error::Cancelled) {
-                "cancelled".into()
+                EngineError::Cancelled
             } else {
-                format!("trace failed: {e}")
+                EngineError::Internal(format!("trace failed: {e}"))
             }
         })?;
     if cancel.is_cancelled() {
-        return Err("cancelled".into());
+        return Err(EngineError::Cancelled);
     }
     Ok(doc)
 }
@@ -393,9 +491,9 @@ pub fn layer_doc(
     doc: &VectorDoc,
     params: &TraceParams,
     cancel: &CancelToken,
-) -> Result<TraceResult, String> {
+) -> Result<TraceResult, EngineError> {
     if cancel.is_cancelled() {
-        return Err("cancelled".into());
+        return Err(EngineError::Cancelled);
     }
     // "auto": derive the strategy + multi-level profiles from the ideal params.
     let is_auto = params.layer_strategy.as_deref() == Some("auto");
@@ -415,7 +513,7 @@ pub fn layer_doc(
     let (assignment, decision) = if is_auto {
         let (a, d) = AutoDecision::assign(doc, &ideal);
         if cancel.is_cancelled() {
-            return Err("cancelled".into());
+            return Err(EngineError::Cancelled);
         }
         (a, Some(d))
     } else {
@@ -450,11 +548,11 @@ pub fn layer_doc(
         // The slow step: polls the token between shapes so a long auto layering
         // can be aborted instead of running to completion.
         apply_profiles(&mut layered, &ideal, &|| cancel.is_cancelled())
-            .map_err(|_| "cancelled".to_string())?;
+            .map_err(|_| EngineError::Cancelled)?;
         profile_ms = Some(t.elapsed().as_millis() as u64);
     }
     if cancel.is_cancelled() {
-        return Err("cancelled".into());
+        return Err(EngineError::Cancelled);
     }
 
     let svg = if params.line_art {
@@ -466,7 +564,7 @@ pub fn layer_doc(
     // Per-layer previews re-serialize each layer: worth one more abort check
     // before the loop on large documents.
     if cancel.is_cancelled() {
-        return Err("cancelled".into());
+        return Err(EngineError::Cancelled);
     }
     let layers: Vec<LayerInfo> = layered
         .layers
@@ -505,7 +603,7 @@ pub fn trace_with_session(
     config: &Config,
     params: &TraceParams,
     cancel: &CancelToken,
-) -> Result<TraceResult, String> {
+) -> Result<TraceResult, EngineError> {
     let doc = vectorize_with_session(session, config, cancel)?;
     layer_doc(&doc, params, cancel)
 }
@@ -594,9 +692,9 @@ impl DocCache {
 }
 
 /// One-shot trace from an image file: decode and run through a fresh session.
-pub fn trace_file_once(img_path: &Path, params: &TraceParams) -> Result<TraceResult, String> {
+pub fn trace_file_once(img_path: &Path, params: &TraceParams) -> Result<TraceResult, EngineError> {
     let img = patternstudio_tracer::load_image(img_path)
-        .map_err(|e| format!("failed to load image: {e}"))?;
+        .map_err(|e| EngineError::Io(format!("failed to load image: {e}")))?;
     let config = build_vtracer_config(params)?;
     let mut session = Session::new(img);
     trace_with_session(&mut session, &config, params, &CancelToken::new())
@@ -604,9 +702,9 @@ pub fn trace_file_once(img_path: &Path, params: &TraceParams) -> Result<TraceRes
 
 /// One-shot trace from in-memory image bytes. Used by batch tracing, where
 /// each file is traced exactly once (no session reuse).
-pub fn trace_bytes_once(data: &[u8], params: &TraceParams) -> Result<TraceResult, String> {
+pub fn trace_bytes_once(data: &[u8], params: &TraceParams) -> Result<TraceResult, EngineError> {
     let img = patternstudio_tracer::load_image_from_memory(data)
-        .map_err(|e| format!("failed to decode image: {e}"))?;
+        .map_err(|e| EngineError::InvalidInput(format!("failed to decode image: {e}")))?;
     let config = build_vtracer_config(params)?;
     let mut session = Session::new(img);
     trace_with_session(&mut session, &config, params, &CancelToken::new())
@@ -618,9 +716,9 @@ pub fn trace_bytes_once(data: &[u8], params: &TraceParams) -> Result<TraceResult
 pub fn trace_file_smart(
     img_path: &Path,
     family: Option<&str>,
-) -> Result<(TraceResult, SmartDecision), String> {
+) -> Result<(TraceResult, SmartDecision), EngineError> {
     let img = patternstudio_tracer::load_image(img_path)
-        .map_err(|e| format!("failed to load image: {e}"))?;
+        .map_err(|e| EngineError::Io(format!("failed to load image: {e}")))?;
     smart_trace_image(img, family)
 }
 
@@ -628,21 +726,21 @@ pub fn trace_file_smart(
 pub fn trace_bytes_smart(
     data: &[u8],
     family: Option<&str>,
-) -> Result<(TraceResult, SmartDecision), String> {
+) -> Result<(TraceResult, SmartDecision), EngineError> {
     let img = patternstudio_tracer::load_image_from_memory(data)
-        .map_err(|e| format!("failed to decode image: {e}"))?;
+        .map_err(|e| EngineError::InvalidInput(format!("failed to decode image: {e}")))?;
     smart_trace_image(img, family)
 }
 
 fn smart_trace_image(
     img: ColorImage,
     family: Option<&str>,
-) -> Result<(TraceResult, SmartDecision), String> {
+) -> Result<(TraceResult, SmartDecision), EngineError> {
     let decision = match family {
         Some(f) => patternstudio_core::smart::recommend_for(&img, f),
         None => patternstudio_core::smart::recommend(&img),
     }
-    .map_err(|e| format!("smart analysis failed: {e}"))?;
+    .map_err(|e| EngineError::Internal(format!("smart analysis failed: {e}")))?;
     let params = smart_to_trace_params(&decision.params)?;
     let config = build_vtracer_config(&params)?;
     let mut session = Session::new(img);
@@ -679,18 +777,18 @@ impl ActiveTraces {
     ///
     /// - Foreground (`is_background = false`): cancels any in-flight trace for
     ///   the same image, then registers the new one.
-    /// - Background (`is_background = true`): returns `Err("busy")` if a trace
-    ///   is already in flight, otherwise registers.
+    /// - Background (`is_background = true`): returns [`EngineError::Busy`] if
+    ///   a trace is already in flight, otherwise registers.
     pub fn register(
         &self,
         image_key: &str,
         request_id: &str,
         is_background: bool,
-    ) -> Result<CancelToken, String> {
+    ) -> Result<CancelToken, EngineError> {
         let mut map = self.map.lock().unwrap();
         if is_background {
             if map.contains_key(image_key) {
-                return Err("busy".into());
+                return Err(EngineError::Busy);
             }
         } else if let Some(old) = map.remove(image_key) {
             old.cancel.cancel();
@@ -748,7 +846,10 @@ mod tests {
         };
         let cancel = CancelToken::new();
         cancel.cancel();
-        assert_eq!(layer_doc(&doc, &params, &cancel).unwrap_err(), "cancelled");
+        assert_eq!(
+            layer_doc(&doc, &params, &cancel).unwrap_err().code(),
+            "cancelled"
+        );
     }
 
     #[test]
@@ -851,7 +952,7 @@ mod tests {
         assert!(!t2.is_cancelled());
         // A background request is rejected while one is in flight.
         assert_eq!(
-            traces.register("img1", "req-3", true).err().unwrap(),
+            traces.register("img1", "req-3", true).err().unwrap().code(),
             "busy"
         );
         // Finishing with a stale request id keeps the newer registration.
@@ -859,5 +960,61 @@ mod tests {
         assert!(traces.is_busy("img1"));
         traces.finish("img1", "req-2");
         assert!(!traces.is_busy("img1"));
+    }
+
+    /// The error-code contract: stable codes, byte-identical Display strings
+    /// (legacy callers string-match `"cancelled"`/`"busy"`), the wire shape
+    /// `{ code, message }`, and the string/preprocess classifiers.
+    #[test]
+    fn engine_error_code_contract() {
+        for (err, code, msg) in [
+            (EngineError::Cancelled, "cancelled", "cancelled"),
+            (EngineError::Busy, "busy", "busy"),
+            (
+                EngineError::Dependency("binary not found".into()),
+                "dependency",
+                "binary not found",
+            ),
+            (
+                EngineError::InvalidInput("bad bytes".into()),
+                "invalid_input",
+                "bad bytes",
+            ),
+            (EngineError::Io("disk gone".into()), "io", "disk gone"),
+            (EngineError::Internal("boom".into()), "internal", "boom"),
+        ] {
+            assert_eq!(err.code(), code);
+            assert_eq!(err.to_string(), msg, "Display must stay byte-identical");
+            assert_eq!(
+                serde_json::to_value(&err).unwrap(),
+                serde_json::json!({ "code": code, "message": msg }),
+            );
+        }
+        // String compat: the two control-flow literals keep classifying;
+        // anything else is an opaque internal failure with its message kept.
+        assert_eq!(EngineError::from("cancelled"), EngineError::Cancelled);
+        assert_eq!(EngineError::from("busy".to_string()), EngineError::Busy);
+        assert_eq!(EngineError::from("anything else").code(), "internal");
+        assert_eq!(
+            EngineError::from("anything else").to_string(),
+            "anything else"
+        );
+        // Preprocess classification mirrors tracer's preprocess.rs probes.
+        assert_eq!(
+            EngineError::from_preprocess_error(
+                "realesrgan-ncnn-vulkan binary not found (looked in resources/bin/).".into()
+            )
+            .code(),
+            "dependency"
+        );
+        assert_eq!(
+            EngineError::from_preprocess_error("models directory not found (need x.param).".into())
+                .code(),
+            "dependency"
+        );
+        assert_eq!(
+            EngineError::from_preprocess_error("enhance step exited with signal 11".into()).code(),
+            "internal"
+        );
     }
 }

@@ -4,7 +4,7 @@ use patternstudio_core::{key_for_source, LineageEntry, LineageFile, SessionCache
 use patternstudio_engine::{
     build_vtracer_config, layer_doc, lock_session, trace_bytes_once, trace_bytes_smart,
     trace_with_session, vectorize_preview, vectorize_signature, vectorize_with_session,
-    ActiveTraces, DocCache, TraceParams, TraceResult, VectorizeResult,
+    ActiveTraces, DocCache, EngineError, TraceParams, TraceResult, VectorizeResult,
 };
 use patternstudio_patterns::{generate_sized, list_kinds};
 use patternstudio_tracer::load_image;
@@ -21,22 +21,23 @@ use tauri::{Emitter, Manager};
 pub async fn smart_file(
     path: String,
     family: Option<String>,
-) -> Result<patternstudio_core::smart::SmartDecision, String> {
+) -> Result<patternstudio_core::smart::SmartDecision, EngineError> {
     tauri::async_runtime::spawn_blocking(move || {
         let p = Path::new(&path);
         if !p.exists() {
-            return Err(format!("image not found: {path}"));
+            return Err(EngineError::Io(format!("image not found: {path}")));
         }
-        let image = load_image(p).map_err(|e| format!("failed to load image: {e}"))?;
+        let image =
+            load_image(p).map_err(|e| EngineError::Io(format!("failed to load image: {e}")))?;
         // Family-scoped when the client picked a preset, auto otherwise.
         let decision = match family.as_deref() {
             Some(f) => patternstudio_core::smart::recommend_for(&image, f),
             None => patternstudio_core::smart::recommend(&image),
         };
-        decision.map_err(|e| format!("smart analysis failed: {e}"))
+        decision.map_err(|e| EngineError::Internal(format!("smart analysis failed: {e}")))
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| EngineError::Internal(e.to_string()))?
 }
 
 #[derive(Debug, Serialize)]
@@ -47,10 +48,10 @@ pub struct PatternInfo {
 }
 
 #[tauri::command]
-pub async fn trace_bytes(data: Vec<u8>, params: TraceParams) -> Result<TraceResult, String> {
+pub async fn trace_bytes(data: Vec<u8>, params: TraceParams) -> Result<TraceResult, EngineError> {
     tauri::async_runtime::spawn_blocking(move || trace_bytes_once(&data, &params))
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| EngineError::Internal(e.to_string()))?
 }
 
 /// How many (source, segmentation) sessions to keep around for instant
@@ -93,7 +94,7 @@ pub async fn trace_file(
     params: TraceParams,
     request_id: Option<String>,
     priority: Option<String>,
-) -> Result<TraceResult, String> {
+) -> Result<TraceResult, EngineError> {
     let request_id = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let is_background = priority.as_deref() == Some("background");
     let image_key = file_path.clone();
@@ -106,7 +107,7 @@ pub async fn trace_file(
     let result = tauri::async_runtime::spawn_blocking(move || {
         let path = Path::new(&file_path);
         if !path.exists() {
-            return Err(format!("image not found: {file_path}"));
+            return Err(EngineError::Io(format!("image not found: {file_path}")));
         }
         // Build the config up front so the session cache can be keyed by the
         // segmentation parameters (not just the file): each preset keeps its own
@@ -116,9 +117,11 @@ pub async fn trace_file(
         let session = {
             let mut cache = session_cache().lock().unwrap();
             let p: PathBuf = path.to_path_buf();
-            cache.get_or_create(&key, || {
-                load_image(&p).map_err(|e| format!("failed to decode image: {e}"))
-            })?
+            cache
+                .get_or_create(&key, || {
+                    load_image(&p).map_err(|e| format!("failed to decode image: {e}"))
+                })
+                .map_err(EngineError::Io)?
         };
         // A cancelled predecessor may still be finishing its current batch;
         // block until it drops the lock (cancellation is near-instant).
@@ -126,7 +129,7 @@ pub async fn trace_file(
         trace_with_session(&mut guard, &config, &params, &cancel)
     })
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| EngineError::Internal(e.to_string()))?;
 
     // Drop our registration only if we are still the current trace for this image.
     active_traces().finish(&image_key, &request_id);
@@ -142,7 +145,7 @@ pub async fn vectorize_file(
     params: TraceParams,
     request_id: Option<String>,
     priority: Option<String>,
-) -> Result<VectorizeResult, String> {
+) -> Result<VectorizeResult, EngineError> {
     let request_id = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let is_background = priority.as_deref() == Some("background");
     let image_key = file_path.clone();
@@ -153,16 +156,18 @@ pub async fn vectorize_file(
     let result = tauri::async_runtime::spawn_blocking(move || {
         let path = Path::new(&file_path);
         if !path.exists() {
-            return Err(format!("image not found: {file_path}"));
+            return Err(EngineError::Io(format!("image not found: {file_path}")));
         }
         let config = build_vtracer_config(&params)?;
         let key = key_for_source(path, &config.segment_key());
         let session = {
             let mut cache = session_cache().lock().unwrap();
             let p: PathBuf = path.to_path_buf();
-            cache.get_or_create(&key, || {
-                load_image(&p).map_err(|e| format!("failed to decode image: {e}"))
-            })?
+            cache
+                .get_or_create(&key, || {
+                    load_image(&p).map_err(|e| format!("failed to decode image: {e}"))
+                })
+                .map_err(EngineError::Io)?
         };
         let mut guard = lock_session(&session);
         let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
@@ -172,10 +177,10 @@ pub async fn vectorize_file(
             vectorize_signature(&params.split().0)
         );
         doc_cache().lock().unwrap().insert(doc_key, doc.clone());
-        Ok::<VectorizeResult, String>(vectorize_preview(&doc, params.line_art))
+        Ok::<VectorizeResult, EngineError>(vectorize_preview(&doc, params.line_art))
     })
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| EngineError::Internal(e.to_string()))?;
 
     active_traces().finish(&image_key, &request_id);
     result
@@ -189,7 +194,7 @@ pub async fn layer_file(
     params: TraceParams,
     request_id: Option<String>,
     priority: Option<String>,
-) -> Result<TraceResult, String> {
+) -> Result<TraceResult, EngineError> {
     let request_id = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let is_background = priority.as_deref() == Some("background");
     let image_key = file_path.clone();
@@ -205,16 +210,18 @@ pub async fn layer_file(
             None => {
                 let path = Path::new(&file_path);
                 if !path.exists() {
-                    return Err(format!("image not found: {file_path}"));
+                    return Err(EngineError::Io(format!("image not found: {file_path}")));
                 }
                 let config = build_vtracer_config(&params)?;
                 let key = key_for_source(path, &config.segment_key());
                 let session = {
                     let mut cache = session_cache().lock().unwrap();
                     let p: PathBuf = path.to_path_buf();
-                    cache.get_or_create(&key, || {
-                        load_image(&p).map_err(|e| format!("failed to decode image: {e}"))
-                    })?
+                    cache
+                        .get_or_create(&key, || {
+                            load_image(&p).map_err(|e| format!("failed to decode image: {e}"))
+                        })
+                        .map_err(EngineError::Io)?
                 };
                 let mut guard = lock_session(&session);
                 let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
@@ -225,7 +232,7 @@ pub async fn layer_file(
         layer_doc(&doc, &params, &cancel)
     })
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| EngineError::Internal(e.to_string()))?;
 
     active_traces().finish(&image_key, &request_id);
     result
@@ -424,16 +431,17 @@ pub async fn read_image(file_path: String) -> Result<Vec<u8>, String> {
 pub async fn preprocess_file(
     app: tauri::AppHandle,
     file_path: String,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, EngineError> {
     let resource_dir = app.path().resource_dir().ok();
     let out = tauri::async_runtime::spawn_blocking(move || {
         patternstudio_tracer::preprocess_image(
             std::path::Path::new(&file_path),
             resource_dir.as_deref(),
         )
+        .map_err(EngineError::from_preprocess_error)
     })
     .await
-    .map_err(|e| e.to_string())??;
+    .map_err(|e| EngineError::Internal(e.to_string()))??;
     Ok(serde_json::json!({
         "path": out.path,
         "width": out.width,
@@ -674,7 +682,7 @@ pub async fn batch_trace(
             let family_clone = family.clone();
             let result = tauri::async_runtime::spawn_blocking(move || {
                 let data = std::fs::read(&file_path)
-                    .map_err(|e| format!("failed to read {file_path}: {e}"))?;
+                    .map_err(|e| EngineError::Io(format!("failed to read {file_path}: {e}")))?;
                 if smart_clone {
                     trace_bytes_smart(&data, family_clone.as_deref()).map(|(out, d)| (out, Some(d)))
                 } else {
@@ -682,7 +690,7 @@ pub async fn batch_trace(
                 }
             })
             .await
-            .unwrap_or_else(|e| Err(e.to_string()));
+            .unwrap_or_else(|e| Err(EngineError::Internal(e.to_string())));
 
             let elapsed = start.elapsed().as_millis() as u64;
             match result {
@@ -722,7 +730,8 @@ pub async fn batch_trace(
                             "index": i,
                             "total": total,
                             "file": name,
-                            "error": e,
+                            "error": e.to_string(),
+                            "code": e.code(),
                             "elapsed_ms": elapsed,
                         }),
                     );

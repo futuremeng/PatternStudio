@@ -6,6 +6,17 @@ All notable changes to PatternStudio are documented in this file.
 
 ### Added
 
+**Error-code contract (WP1)**
+- Engine errors now carry a stable machine-readable `code`
+  (`cancelled` / `busy` / `dependency` / `invalid_input` / `io` / `internal`)
+  alongside the byte-identical message; HTTP error bodies and Tauri IPC
+  rejections use the `{ code, message }` shape
+- Web & desktop UIs classify failures by code before falling back to the raw
+  message: localized prefix sentences for the four displayable codes in all 7
+  locales, cancelled/busy stay silent control-flow signals
+- Preprocessing failures caused by a missing Real-ESRGAN binary or model
+  directory now surface as `dependency` instead of an opaque internal error
+
 **Context menus & drag import**
 - Right-click menus on project and image cards (Open / Remove) with
   keyboard-dismissable, focus-trapped popover

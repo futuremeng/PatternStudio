@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { prepareSource, preprocessSource, redrawSource, saveProjectImage } from "../api.js";
+import { errorText } from "../errorText.js";
 import CompareViewer from "./CompareViewer.jsx";
 import { IconMaximize, IconRestore } from "./icons.jsx";
 import { useI18n } from "../i18n/index.jsx";
@@ -192,7 +193,7 @@ export default function PreprocessModal({ open, onClose, projectId, filename, im
         if (persisted) parent = persisted.genName; // chain lineage from the persisted file
       }
     } catch (e) {
-      if (seq === runSeq.current) setError(t("preprocess.failed", { msg: errMsg(e) }));
+      if (seq === runSeq.current) setError(e?.code ? errorText(e, t) : t("preprocess.failed", { msg: errMsg(e) }));
     } finally {
       if (seq === runSeq.current) { setBusy(false); setProgress(null); }
     }

@@ -16,8 +16,8 @@ use patternstudio_core::smart::SmartDecision;
 use patternstudio_core::{generated_dir, key_for_source, LineageEntry, LineageFile, SessionCache};
 use patternstudio_engine::{
     build_vtracer_config, layer_doc, lock_session, trace_with_session, vectorize_preview,
-    vectorize_signature, vectorize_with_session, ActiveTraces, DocCache, TraceParams, TraceResult,
-    VectorizeResult,
+    vectorize_signature, vectorize_with_session, ActiveTraces, DocCache, EngineError, TraceParams,
+    TraceResult, VectorizeResult,
 };
 use patternstudio_tracer::load_image;
 use serde::{Deserialize, Serialize};
@@ -249,8 +249,12 @@ async fn trace(
     State(state): State<AppState>,
     Json(req): Json<TraceRequest>,
 ) -> Result<Json<TraceResult>, (StatusCode, Json<serde_json::Value>)> {
-    let img_path = resolve_source_path(&state, &req)
-        .map_err(|(s, e)| (s, Json(serde_json::json!({ "error": e }))))?;
+    let img_path = resolve_source_path(&state, &req).map_err(|(s, e)| {
+        (
+            s,
+            Json(serde_json::json!({ "error": e, "code": "invalid_input" })),
+        )
+    })?;
     let params = req.params.unwrap_or_default();
     let request_id = req
         .request_id
@@ -269,7 +273,7 @@ async fn trace(
         .map_err(|_| {
             (
                 StatusCode::CONFLICT,
-                Json(serde_json::json!({ "busy": true })),
+                Json(serde_json::json!({ "busy": true, "code": "busy" })),
             )
         })?;
 
@@ -282,9 +286,11 @@ async fn trace(
         let session = {
             let mut cache = sessions.lock().unwrap();
             let path = img_path.clone();
-            cache.get_or_create(&key, || {
-                load_image(&path).map_err(|e| format!("failed to load image: {e}"))
-            })?
+            cache
+                .get_or_create(&key, || {
+                    load_image(&path).map_err(|e| format!("failed to load image: {e}"))
+                })
+                .map_err(EngineError::Io)?
         };
         // A cancelled predecessor may still be finishing its current batch;
         // block until it drops the lock (cancellation is near-instant).
@@ -295,7 +301,7 @@ async fn trace(
     .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
+            Json(serde_json::json!({ "error": e.to_string(), "code": "internal" })),
         )
     })?;
 
@@ -304,13 +310,13 @@ async fn trace(
 
     match result {
         Ok(r) => Ok(Json(r)),
-        Err(e) if e == "cancelled" => Err((
+        Err(EngineError::Cancelled) => Err((
             StatusCode::CONFLICT,
-            Json(serde_json::json!({ "cancelled": true })),
+            Json(serde_json::json!({ "cancelled": true, "code": "cancelled" })),
         )),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e })),
+            Json(serde_json::json!({ "error": e.to_string(), "code": e.code() })),
         )),
     }
 }
@@ -322,8 +328,12 @@ async fn vectorize(
     State(state): State<AppState>,
     Json(req): Json<TraceRequest>,
 ) -> Result<Json<VectorizeResult>, (StatusCode, Json<serde_json::Value>)> {
-    let img_path = resolve_source_path(&state, &req)
-        .map_err(|(s, e)| (s, Json(serde_json::json!({ "error": e }))))?;
+    let img_path = resolve_source_path(&state, &req).map_err(|(s, e)| {
+        (
+            s,
+            Json(serde_json::json!({ "error": e, "code": "invalid_input" })),
+        )
+    })?;
     let params = req.params.unwrap_or_default();
     let request_id = req
         .request_id
@@ -341,7 +351,7 @@ async fn vectorize(
         .map_err(|_| {
             (
                 StatusCode::CONFLICT,
-                Json(serde_json::json!({ "busy": true })),
+                Json(serde_json::json!({ "busy": true, "code": "busy" })),
             )
         })?;
 
@@ -351,9 +361,11 @@ async fn vectorize(
         let session = {
             let mut cache = sessions.lock().unwrap();
             let path = img_path.clone();
-            cache.get_or_create(&key, || {
-                load_image(&path).map_err(|e| format!("failed to load image: {e}"))
-            })?
+            cache
+                .get_or_create(&key, || {
+                    load_image(&path).map_err(|e| format!("failed to load image: {e}"))
+                })
+                .map_err(EngineError::Io)?
         };
         let mut guard = lock_session(&session);
         let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
@@ -363,13 +375,13 @@ async fn vectorize(
             vectorize_signature(&params.split().0)
         );
         docs.lock().unwrap().insert(doc_key, doc.clone());
-        Ok::<VectorizeResult, String>(vectorize_preview(&doc, params.line_art))
+        Ok::<VectorizeResult, EngineError>(vectorize_preview(&doc, params.line_art))
     })
     .await
     .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
+            Json(serde_json::json!({ "error": e.to_string(), "code": "internal" })),
         )
     })?;
 
@@ -377,13 +389,13 @@ async fn vectorize(
 
     match result {
         Ok(r) => Ok(Json(r)),
-        Err(e) if e == "cancelled" => Err((
+        Err(EngineError::Cancelled) => Err((
             StatusCode::CONFLICT,
-            Json(serde_json::json!({ "cancelled": true })),
+            Json(serde_json::json!({ "cancelled": true, "code": "cancelled" })),
         )),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e })),
+            Json(serde_json::json!({ "error": e.to_string(), "code": e.code() })),
         )),
     }
 }
@@ -395,8 +407,12 @@ async fn layer(
     State(state): State<AppState>,
     Json(req): Json<TraceRequest>,
 ) -> Result<Json<TraceResult>, (StatusCode, Json<serde_json::Value>)> {
-    let img_path = resolve_source_path(&state, &req)
-        .map_err(|(s, e)| (s, Json(serde_json::json!({ "error": e }))))?;
+    let img_path = resolve_source_path(&state, &req).map_err(|(s, e)| {
+        (
+            s,
+            Json(serde_json::json!({ "error": e, "code": "invalid_input" })),
+        )
+    })?;
     let params = req.params.unwrap_or_default();
     let request_id = req
         .request_id
@@ -414,7 +430,7 @@ async fn layer(
         .map_err(|_| {
             (
                 StatusCode::CONFLICT,
-                Json(serde_json::json!({ "busy": true })),
+                Json(serde_json::json!({ "busy": true, "code": "busy" })),
             )
         })?;
 
@@ -435,9 +451,11 @@ async fn layer(
                 let session = {
                     let mut cache = sessions.lock().unwrap();
                     let path = img_path.clone();
-                    cache.get_or_create(&key, || {
-                        load_image(&path).map_err(|e| format!("failed to load image: {e}"))
-                    })?
+                    cache
+                        .get_or_create(&key, || {
+                            load_image(&path).map_err(|e| format!("failed to load image: {e}"))
+                        })
+                        .map_err(EngineError::Io)?
                 };
                 let mut guard = lock_session(&session);
                 let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
@@ -451,7 +469,7 @@ async fn layer(
     .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
+            Json(serde_json::json!({ "error": e.to_string(), "code": "internal" })),
         )
     })?;
 
@@ -459,13 +477,13 @@ async fn layer(
 
     match result {
         Ok(r) => Ok(Json(r)),
-        Err(e) if e == "cancelled" => Err((
+        Err(EngineError::Cancelled) => Err((
             StatusCode::CONFLICT,
-            Json(serde_json::json!({ "cancelled": true })),
+            Json(serde_json::json!({ "cancelled": true, "code": "cancelled" })),
         )),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e })),
+            Json(serde_json::json!({ "error": e.to_string(), "code": e.code() })),
         )),
     }
 }
@@ -488,22 +506,38 @@ async fn cancel_trace(
 async fn smart(
     State(state): State<AppState>,
     Json(req): Json<TraceRequest>,
-) -> Result<Json<SmartDecision>, (StatusCode, String)> {
-    let img_path = resolve_source_path(&state, &req)?;
+) -> Result<Json<SmartDecision>, (StatusCode, Json<serde_json::Value>)> {
+    let img_path = resolve_source_path(&state, &req).map_err(|(s, e)| {
+        (
+            s,
+            Json(serde_json::json!({ "error": e, "code": "invalid_input" })),
+        )
+    })?;
     let family = req.family;
     let result = tokio::task::spawn_blocking(move || {
-        let image = load_image(&img_path).map_err(|e| format!("failed to load image: {e}"))?;
+        let image = load_image(&img_path)
+            .map_err(|e| EngineError::Io(format!("failed to load image: {e}")))?;
         // Family-scoped when the client picked a preset, auto otherwise.
         let decision = match family.as_deref() {
             Some(f) => patternstudio_core::smart::recommend_for(&image, f),
             None => patternstudio_core::smart::recommend(&image),
         }
-        .map_err(|e| format!("smart analysis failed: {e}"))?;
-        Ok::<SmartDecision, String>(decision)
+        .map_err(|e| EngineError::Internal(format!("smart analysis failed: {e}")))?;
+        Ok::<SmartDecision, EngineError>(decision)
     })
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string(), "code": "internal" })),
+        )
+    })?
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string(), "code": e.code() })),
+        )
+    })?;
     Ok(Json(result))
 }
 
@@ -515,14 +549,30 @@ async fn smart(
 async fn preprocess(
     State(state): State<AppState>,
     Json(req): Json<TraceRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let img_path = resolve_source_path(&state, &req)?;
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let img_path = resolve_source_path(&state, &req).map_err(|(s, e)| {
+        (
+            s,
+            Json(serde_json::json!({ "error": e, "code": "invalid_input" })),
+        )
+    })?;
     let out = tokio::task::spawn_blocking(move || {
         patternstudio_tracer::preprocess_image(&img_path, None)
+            .map_err(EngineError::from_preprocess_error)
     })
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string(), "code": "internal" })),
+        )
+    })?
+    .map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e.to_string(), "code": e.code() })),
+        )
+    })?;
     let id = uuid::Uuid::new_v4().to_string();
     state
         .assets
@@ -1157,7 +1207,7 @@ async fn start_batch_trace(
                 }
             })
             .await
-            .unwrap_or_else(|e| Err(e.to_string()));
+            .unwrap_or_else(|e| Err(EngineError::Internal(e.to_string())));
             let elapsed = start.elapsed().as_millis() as u64;
             match result {
                 Ok((tr, decision)) => {
@@ -1196,7 +1246,8 @@ async fn start_batch_trace(
                             Event::default().event("progress").data(
                                 serde_json::json!({
                                     "index": i, "total": total, "file": file,
-                                    "status": "error", "error": e, "elapsed_ms": elapsed
+                                    "status": "error", "error": e.to_string(),
+                                    "code": e.code(), "elapsed_ms": elapsed
                                 })
                                 .to_string(),
                             ),

@@ -11,16 +11,48 @@ export const isTauri = () =>
 async function handle(res) {
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
+    let code;
     try {
       const body = await res.json();
       if (body.error) msg = body.error;
+      if (body.code) code = body.code;
     } catch {
       const text = await res.text().catch(() => "");
       if (text) msg = text;
     }
-    throw new Error(msg);
+    const err = new Error(msg);
+    if (code) err.code = code;
+    throw err;
   }
   return res.json();
+}
+
+/**
+ * Normalize a Tauri IPC rejection into a real Error carrying the same fields.
+ * Commands reject with `{ code, message }` (the engine's wire contract) or,
+ * for pre-contract commands, a plain string; both become `Error` objects with
+ * `.code` when a code is available, so callers can classify failures.
+ */
+function toError(e) {
+  if (e instanceof Error) return e;
+  if (e && typeof e === "object" && typeof e.message === "string") {
+    const err = new Error(e.message);
+    if (e.code) err.code = e.code;
+    return err;
+  }
+  return new Error(String(e));
+}
+
+/**
+ * Rethrow a trace-command rejection: control-flow outcomes (cancelled/busy)
+ * become TraceFlowError, everything else a plain Error with `.code` attached.
+ */
+function rethrowTraceError(e) {
+  const code = e && typeof e === "object" ? e.code : undefined;
+  const msg = typeof e === "string" ? e : (e?.message || String(e));
+  if (code === "cancelled" || msg === "cancelled") throw new TraceFlowError("cancelled", msg);
+  if (code === "busy" || msg === "busy") throw new TraceFlowError("busy", msg);
+  throw toError(e);
 }
 
 export async function health() {
@@ -87,10 +119,7 @@ export async function traceSource(source, params, opts = {}) {
         requestId: requestId ?? null, priority: priority ?? null,
       });
     } catch (e) {
-      const msg = typeof e === "string" ? e : (e?.message || String(e));
-      if (msg === "cancelled") throw new TraceFlowError("cancelled", msg);
-      if (msg === "busy") throw new TraceFlowError("busy", msg);
-      throw new Error(msg);
+      rethrowTraceError(e);
     }
   }
   const res = await fetch(`${BASE}/trace`, {
@@ -105,7 +134,8 @@ export async function traceSource(source, params, opts = {}) {
   if (res.status === 409) {
     let body = {};
     try { body = await res.json(); } catch { /* ignore */ }
-    throw new TraceFlowError(body.busy ? "busy" : "cancelled", body.busy ? "trace busy" : "trace cancelled");
+    const code = body.code ?? (body.busy ? "busy" : "cancelled");
+    throw new TraceFlowError(code, code === "busy" ? "trace busy" : "trace cancelled");
   }
   return handle(res);
 }
@@ -125,10 +155,7 @@ export async function vectorizeSource(source, params, opts = {}) {
         requestId: requestId ?? null, priority: priority ?? null,
       });
     } catch (e) {
-      const msg = typeof e === "string" ? e : (e?.message || String(e));
-      if (msg === "cancelled") throw new TraceFlowError("cancelled", msg);
-      if (msg === "busy") throw new TraceFlowError("busy", msg);
-      throw new Error(msg);
+      rethrowTraceError(e);
     }
   }
   const res = await fetch(`${BASE}/vectorize`, {
@@ -143,7 +170,8 @@ export async function vectorizeSource(source, params, opts = {}) {
   if (res.status === 409) {
     let body = {};
     try { body = await res.json(); } catch { /* ignore */ }
-    throw new TraceFlowError(body.busy ? "busy" : "cancelled", body.busy ? "trace busy" : "trace cancelled");
+    const code = body.code ?? (body.busy ? "busy" : "cancelled");
+    throw new TraceFlowError(code, code === "busy" ? "trace busy" : "trace cancelled");
   }
   return handle(res);
 }
@@ -163,10 +191,7 @@ export async function layerSource(source, params, opts = {}) {
         requestId: requestId ?? null, priority: priority ?? null,
       });
     } catch (e) {
-      const msg = typeof e === "string" ? e : (e?.message || String(e));
-      if (msg === "cancelled") throw new TraceFlowError("cancelled", msg);
-      if (msg === "busy") throw new TraceFlowError("busy", msg);
-      throw new Error(msg);
+      rethrowTraceError(e);
     }
   }
   const res = await fetch(`${BASE}/layer`, {
@@ -181,7 +206,8 @@ export async function layerSource(source, params, opts = {}) {
   if (res.status === 409) {
     let body = {};
     try { body = await res.json(); } catch { /* ignore */ }
-    throw new TraceFlowError(body.busy ? "busy" : "cancelled", body.busy ? "trace busy" : "trace cancelled");
+    const code = body.code ?? (body.busy ? "busy" : "cancelled");
+    throw new TraceFlowError(code, code === "busy" ? "trace busy" : "trace cancelled");
   }
   return handle(res);
 }
@@ -214,7 +240,8 @@ export function cancelTrace(source) {
  */
 export async function smartSource(source, family) {
   if (isTauri()) {
-    return tauriInvoke("smart_file", { path: source.path, family: family || null });
+    return tauriInvoke("smart_file", { path: source.path, family: family || null })
+      .catch((e) => { throw toError(e); });
   }
   const res = await fetch(`${BASE}/smart`, {
     method: "POST",
@@ -234,7 +261,12 @@ export async function smartSource(source, family) {
  */
 export async function preprocessSource(source) {
   if (isTauri()) {
-    const out = await tauriInvoke("preprocess_file", { filePath: source.path });
+    let out;
+    try {
+      out = await tauriInvoke("preprocess_file", { filePath: source.path });
+    } catch (e) {
+      throw toError(e);
+    }
     const bytes = await tauriInvoke("read_image", { filePath: out.path });
     const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
     return {

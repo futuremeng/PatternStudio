@@ -5,6 +5,7 @@ import { getCachedTrace, setCachedTrace, getCachedVectorize, setCachedVectorize,
 import { createTraceQueue } from "../traceQueue.js";
 import { loadSavedConfigs, saveConfig, deleteSavedConfig } from "../configStore.js";
 import { loadLastPreset, saveLastPreset, errMsg, buildDefaultConfigs, dominantFill, layerToStandaloneSvg } from "../editorUtils.js";
+import { errorText } from "../errorText.js";
 import { usePatchEditing } from "../hooks/usePatchEditing.js";
 import { useSmartPreset } from "../hooks/useSmartPreset.js";
 import ParameterPanel from "../components/ParameterPanel.jsx";
@@ -482,7 +483,7 @@ export default function ImageEditorPage() {
       } catch (e) {
         if (imageIdRef.current !== imageIdNow) return null;
         if (e?.code === "cancelled" || e?.code === "busy") return null; // superseded
-        if (isInteractive) { setError(t("editor.traceFailed", { msg: errMsg(e) })); setErrorKind("vectorize"); }
+        if (isInteractive) { setError(e?.code ? errorText(e, t) : t("editor.traceFailed", { msg: errMsg(e) })); setErrorKind("vectorize"); }
         return "error";
       }
       if (imageIdRef.current !== imageIdNow) return null;
@@ -503,7 +504,7 @@ export default function ImageEditorPage() {
       } catch (e) {
         if (imageIdRef.current !== imageIdNow) return null;
         if (e?.code === "cancelled" || e?.code === "busy") return null; // superseded
-        if (isInteractive) { setError(t("editor.traceFailed", { msg: errMsg(e) })); setErrorKind("layer"); }
+        if (isInteractive) { setError(e?.code ? errorText(e, t) : t("editor.traceFailed", { msg: errMsg(e) })); setErrorKind("layer"); }
         return "error";
       }
       if (imageIdRef.current !== imageIdNow) return null;
