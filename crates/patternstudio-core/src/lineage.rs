@@ -188,11 +188,11 @@ mod tests {
     #[test]
     fn parses_legacy_names() {
         assert_eq!(
-            parse_legacy_name("cat_enhanced_1.png").map(|(b, k)| (b, k)),
+            parse_legacy_name("cat_enhanced_1.png"),
             Some(("cat", KIND_ENHANCE))
         );
         assert_eq!(
-            parse_legacy_name("cat_redrawn_12.png").map(|(b, k)| (b, k)),
+            parse_legacy_name("cat_redrawn_12.png"),
             Some(("cat", KIND_REDRAW))
         );
         // Not a legacy name.
@@ -201,7 +201,7 @@ mod tests {
         assert_eq!(parse_legacy_name("cat_foo_1.png"), None);
         // Base may itself contain underscores.
         assert_eq!(
-            parse_legacy_name("my_enhanced_1.png").map(|(b, k)| (b, k)),
+            parse_legacy_name("my_enhanced_1.png"),
             Some(("my", KIND_ENHANCE))
         );
     }
