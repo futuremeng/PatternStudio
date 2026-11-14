@@ -298,8 +298,14 @@ crates/
 ├── patternstudio-server/     # REST API server (`patternstudio-server`)
 ├── patternstudio-py/         # Python bindings (PyO3)
 ├── patternstudio-wasm/       # WASM bindings (wasm-bindgen)
-└── desktop/                  # Tauri desktop app (in-process engine, same React UI)
+└── vtracer/                  # VTracer 1.0 core, vendored in-tree (MIT OR Apache-2.0)
+
+desktop/                      # Tauri desktop app (in-process engine, same React UI)
 ```
+
+`crates/vtracer` is a vendored copy of the [VTracer 1.0 core
+crate](https://github.com/visioncortex/vtracer) at version 1.0.0-alpha.4, so a
+plain `git clone` + `cargo build` works without a separate sibling checkout.
 
 The web server and the desktop app both drive the same `patternstudio-engine`
 crate, so the trace pipeline (parameter mapping, vtracer config, session

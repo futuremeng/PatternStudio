@@ -94,6 +94,9 @@ All notable changes to PatternStudio are documented in this file.
 - Accessibility: viewer and lineage controls label themselves in the active
   language instead of hardcoded English, lineage rows and nodes are reachable
   by keyboard, and every focusable element gets a visible focus ring
+- VTracer is vendored in-tree at `crates/vtracer` (fork commit `13435cf`) so a
+  plain clone + build works; CI no longer fetches and patches a sibling
+  checkout, and the server crate dropped its unused direct `vtracer` dep
 
 ### Fixed
 

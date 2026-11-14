@@ -1,0 +1,43 @@
+[package]
+name = "vtracer"
+description = "A vectorization framework that converts raster images into vector graphics: pluggable frontends, curve fitters, color fitting, and output optimization."
+version = "1.0.0-alpha.4"
+authors = ["Chris Tsang <chris.2y3@outlook.com>"]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+homepage = "http://www.visioncortex.org/vtracer"
+repository = "https://github.com/visioncortex/vtracer/"
+categories = ["graphics", "computer-vision"]
+keywords = ["svg", "vectorization", "computer-graphics"]
+publish = false
+
+# Vendored from the PatternStudio VTracer fork
+# (https://github.com/futuremeng/vtracer, commit 13435cf — adds the custom
+# Session / CancelToken / segment_key APIs the engine uses), based on upstream
+# vtracer 1.0.0-alpha.4 (MIT OR Apache-2.0, see LICENSE). Keeping it in-tree
+# means the workspace builds from a single checkout, so CI no longer fetches
+# and patches a sibling directory. Upstream's integration tests are
+# intentionally not vendored (they depend on sample assets and the resvg
+# dev-dependency outside the library's needs).
+
+# Vendored code is exempt from the workspace's clippy gate: the lint levels
+# below keep `cargo clippy --workspace -- -D warnings` green without requiring
+# edits to upstream sources. Revisit on re-vendor.
+[lints.clippy]
+approx_constant = "allow"
+collapsible_if = "allow"
+default_constructed_unit_structs = "allow"
+derivable_impls = "allow"
+manual_is_multiple_of = "allow"
+map_identity = "allow"
+needless_range_loop = "allow"
+needless_update = "allow"
+unnecessary_map_or = "allow"
+
+[lib]
+name = "vtracer"
+path = "src/lib.rs"
+
+[dependencies]
+visioncortex = { workspace = true }
+flo_curves = "0.8"
