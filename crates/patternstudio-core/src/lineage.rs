@@ -208,7 +208,12 @@ mod tests {
 
     #[test]
     fn infers_flat_entries() {
-        let images = names(&["cat.png", "cat_enhanced_1.png", "cat_redrawn_2.png", "dog.jpg"]);
+        let images = names(&[
+            "cat.png",
+            "cat_enhanced_1.png",
+            "cat_redrawn_2.png",
+            "dog.jpg",
+        ]);
         let entries = infer_entries(&images);
         assert_eq!(entries.len(), 2);
         let e = &entries["cat_enhanced_1.png"];

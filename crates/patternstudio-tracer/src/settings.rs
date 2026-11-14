@@ -81,7 +81,9 @@ fn settings_path() -> Result<PathBuf, String> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map_err(|_| "cannot resolve home directory".to_string())?;
-    Ok(PathBuf::from(home).join(".patternstudio").join("settings.json"))
+    Ok(PathBuf::from(home)
+        .join(".patternstudio")
+        .join("settings.json"))
 }
 
 /// Load the Qwen settings from an explicit path (missing/corrupt → defaults).
@@ -223,8 +225,7 @@ mod tests {
     fn save_load_roundtrip() {
         // Explicit temp path (no HOME mutation — other tests read settings
         // from the real home dir in parallel).
-        let dir = std::env::temp_dir()
-            .join(format!("ps-settings-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ps-settings-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("settings.json");
         let s = QwenSettings {

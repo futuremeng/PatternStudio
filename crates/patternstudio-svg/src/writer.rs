@@ -202,10 +202,8 @@ mod tests {
                 x: 10.0 + 20.0 * i as f64,
                 y: 10.0,
             }));
-            sub.commands.push(vtracer::ir::PathCmd::LineTo(PointF64 {
-                x: 10.0,
-                y: 30.0,
-            }));
+            sub.commands
+                .push(vtracer::ir::PathCmd::LineTo(PointF64 { x: 10.0, y: 30.0 }));
             sub.commands.push(vtracer::ir::PathCmd::Close);
             doc.shapes.push(Shape {
                 paint: Paint::Solid(Color::new(0, 0, 0)),

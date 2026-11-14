@@ -13,9 +13,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::stream::{Stream, StreamExt};
 use patternstudio_core::smart::SmartDecision;
-use patternstudio_core::{
-    generated_dir, key_for_source, LineageEntry, LineageFile, SessionCache,
-};
+use patternstudio_core::{generated_dir, key_for_source, LineageEntry, LineageFile, SessionCache};
 use patternstudio_engine::{
     build_vtracer_config, layer_doc, lock_session, trace_with_session, vectorize_preview,
     vectorize_signature, vectorize_with_session, ActiveTraces, DocCache, TraceParams, TraceResult,
@@ -359,7 +357,11 @@ async fn vectorize(
         };
         let mut guard = lock_session(&session);
         let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
-        let doc_key = format!("{}::{}", doc_image_key, vectorize_signature(&params.split().0));
+        let doc_key = format!(
+            "{}::{}",
+            doc_image_key,
+            vectorize_signature(&params.split().0)
+        );
         docs.lock().unwrap().insert(doc_key, doc.clone());
         Ok::<VectorizeResult, String>(vectorize_preview(&doc, params.line_art))
     })

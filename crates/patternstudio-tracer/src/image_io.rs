@@ -39,7 +39,8 @@ fn image_to_color_image(
         let scale = MAX_TRACE_DIMENSION as f64 / w.max(h);
         let new_w = (w * scale).round().max(1.0) as u32;
         let new_h = (h * scale).round().max(1.0) as u32;
-        img.resize(new_w, new_h, image::imageops::FilterType::Lanczos3).to_rgba8()
+        img.resize(new_w, new_h, image::imageops::FilterType::Lanczos3)
+            .to_rgba8()
     } else {
         img.to_rgba8()
     };

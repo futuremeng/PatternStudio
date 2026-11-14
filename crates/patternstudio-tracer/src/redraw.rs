@@ -99,10 +99,7 @@ impl RedrawConfig {
                     .to_string()
             })?;
         let (default_base, default_model) = match provider {
-            Provider::DashScope => (
-                "https://dashscope.aliyuncs.com/api/v1",
-                "qwen-image-2.0",
-            ),
+            Provider::DashScope => ("https://dashscope.aliyuncs.com/api/v1", "qwen-image-2.0"),
             Provider::OpenAICompat => ("http://127.0.0.1:8080/v1", "qwen-image-edit"),
         };
         Ok(Self {
@@ -155,11 +152,7 @@ impl RedrawConfig {
     /// then per-provider defaults.
     pub fn load() -> Result<Self, String> {
         let saved = crate::settings::load_qwen_settings();
-        let env = |name: &str| {
-            std::env::var(name)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-        };
+        let env = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
         let provider = match saved
             .provider
             .clone()
@@ -328,12 +321,14 @@ pub fn dashscope_task_id(resp: &serde_json::Value) -> Option<String> {
 /// Extract the result image URL from a succeeded DashScope task response.
 pub fn dashscope_task_image_url(resp: &serde_json::Value) -> Option<String> {
     let results = resp.pointer("/output/results")?.as_array()?;
-    results.iter().find_map(|r| {
-        r.get("url")
-            .and_then(|u| u.as_str())
-            .or_else(|| r.get("image").and_then(|i| i.as_str()))
-    })
-    .map(str::to_string)
+    results
+        .iter()
+        .find_map(|r| {
+            r.get("url")
+                .and_then(|u| u.as_str())
+                .or_else(|| r.get("image").and_then(|i| i.as_str()))
+        })
+        .map(str::to_string)
 }
 
 /// Extract `data[0].b64_json` (decoded) from an OpenAI-compatible response.
@@ -390,7 +385,6 @@ fn download_image(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u
         .map(|b| b.to_vec())
 }
 
-
 /// DashScope: submit the edit request, then either read the synchronous
 /// result or poll the async task until it finishes.
 fn dashscope_redraw(
@@ -400,7 +394,10 @@ fn dashscope_redraw(
     prompt: &str,
     seed: Option<u64>,
 ) -> Result<Vec<u8>, String> {
-    let url = format!("{}/services/aigc/multimodal-generation/generation", config.api_base);
+    let url = format!(
+        "{}/services/aigc/multimodal-generation/generation",
+        config.api_base
+    );
     let body = build_dashscope_body(&config.model, data_url, prompt, seed);
     let resp: serde_json::Value = client
         .post(&url)
@@ -481,7 +478,6 @@ fn poll_dashscope_task(
     }
 }
 
-
 /// OpenAI-compatible: `POST /images/edits` with the image as a multipart file.
 fn openai_redraw(
     client: &reqwest::blocking::Client,
@@ -492,7 +488,11 @@ fn openai_redraw(
     seed: Option<u64>,
 ) -> Result<Vec<u8>, String> {
     let url = format!("{}/images/edits", config.api_base);
-    let file_name = if mime == "image/jpeg" { "input.jpg" } else { "input.png" };
+    let file_name = if mime == "image/jpeg" {
+        "input.jpg"
+    } else {
+        "input.png"
+    };
     let mut form = reqwest::blocking::multipart::Form::new()
         .text("model", config.model.clone())
         .text("prompt", prompt.to_string())
@@ -576,7 +576,6 @@ pub fn redraw_image(input: &Path, prompt: &str, seed: Option<u64>) -> Result<Red
     })
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,7 +595,9 @@ mod tests {
         assert!(url.starts_with("data:image/png;base64,"));
         let b64 = url.strip_prefix("data:image/png;base64,").unwrap();
         assert_eq!(
-            base64::engine::general_purpose::STANDARD.decode(b64).unwrap(),
+            base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .unwrap(),
             vec![1, 2, 3]
         );
     }
@@ -684,7 +685,8 @@ mod tests {
 
     #[test]
     fn dashscope_async_result_parsing() {
-        let submit = serde_json::json!({ "output": { "task_id": "t-1", "task_status": "PENDING" } });
+        let submit =
+            serde_json::json!({ "output": { "task_id": "t-1", "task_status": "PENDING" } });
         assert_eq!(dashscope_task_id(&submit).as_deref(), Some("t-1"));
         assert!(dashscope_sync_image_url(&submit).is_none());
         let done = serde_json::json!({
@@ -699,7 +701,10 @@ mod tests {
     #[test]
     fn openai_result_parsing() {
         let url_resp = serde_json::json!({ "data": [ { "url": "https://x/a.png" } ] });
-        assert_eq!(openai_image_url(&url_resp).as_deref(), Some("https://x/a.png"));
+        assert_eq!(
+            openai_image_url(&url_resp).as_deref(),
+            Some("https://x/a.png")
+        );
         let b64 = base64::engine::general_purpose::STANDARD.encode([9u8, 8, 7]);
         let b64_resp = serde_json::json!({ "data": [ { "b64_json": b64 } ] });
         assert_eq!(
@@ -710,8 +715,8 @@ mod tests {
 
     #[test]
     fn config_defaults() {
-        let c = RedrawConfig::resolve(Provider::DashScope, Some("sk-test".into()), None, None)
-            .unwrap();
+        let c =
+            RedrawConfig::resolve(Provider::DashScope, Some("sk-test".into()), None, None).unwrap();
         assert_eq!(c.api_base, "https://dashscope.aliyuncs.com/api/v1");
         assert_eq!(c.model, "qwen-image-2.0");
         let c = RedrawConfig::resolve(
@@ -747,4 +752,3 @@ mod tests {
         assert_eq!(out.prompt, "clean black and white line art");
     }
 }
-

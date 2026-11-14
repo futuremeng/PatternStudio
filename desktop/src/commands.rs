@@ -166,7 +166,11 @@ pub async fn vectorize_file(
         };
         let mut guard = lock_session(&session);
         let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
-        let doc_key = format!("{}::{}", doc_image_key, vectorize_signature(&params.split().0));
+        let doc_key = format!(
+            "{}::{}",
+            doc_image_key,
+            vectorize_signature(&params.split().0)
+        );
         doc_cache().lock().unwrap().insert(doc_key, doc.clone());
         Ok::<VectorizeResult, String>(vectorize_preview(&doc, params.line_art))
     })

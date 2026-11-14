@@ -16,8 +16,8 @@ use patternstudio_core::smart::{SmartDecision, SmartParams};
 use patternstudio_svg::LayeredWriter;
 use serde::Serialize;
 use vtracer::config::{Clustering, FitMode, Hierarchical, Preset};
-use vtracer::progress::CancelToken;
 use vtracer::ir::VectorDoc;
+use vtracer::progress::CancelToken;
 use vtracer::{ColorImage, Config, Error, Session};
 
 /// Trace parameters accepted by the API / desktop commands.
