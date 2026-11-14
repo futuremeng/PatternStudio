@@ -6,6 +6,19 @@ All notable changes to PatternStudio are documented in this file.
 
 ### Added
 
+**Desktop integration & accessibility**
+- Native macOS menu bar in the Tauri app (About / Settings… / Open Folder… /
+  Undo / Redo / Toggle Appearance / Help); custom items bridge to the UI via a
+  `menu-command` event, predefined items stay native
+- Global shortcuts: ⌘, opens Settings anywhere, ⌘O opens a project; menu
+  Undo/Redo reach the SVG editor's undo stack
+- Settings dialog mounted app-wide (no longer owned by the header)
+- Desktop window geometry is remembered and restored; the window title names
+  the open project (Mac convention)
+- Dialogs (settings, confirm) trap Tab focus and expose role=dialog /
+  aria-modal; `prefers-reduced-motion` is honored globally; header and empty
+  states swap emoji for the app's 16px line icons
+
 **Smart Tracing**
 - Smart Preset: image analysis (color count, bimodality, texture, lighting) →
   trial-trace candidate families (line art / bw / color / gradient / low-poly)

@@ -440,6 +440,18 @@ const AdvancedSvgEditor = forwardRef(function AdvancedSvgEditor(
     return () => window.removeEventListener("keydown", onKey);
   }, [doUndo, doRedo, doGroup, doUngroup, doDelete, handleCancel]);
 
+  // Native menu-bar Edit ▸ Undo/Redo arrives as an app command (the menu
+  // lives in Rust; the undo stack lives here).
+  useEffect(() => {
+    const onCmd = (e) => {
+      const cmd = e.detail?.cmd;
+      if (cmd === "undo") doUndo();
+      else if (cmd === "redo") doRedo();
+    };
+    window.addEventListener("ps:command", onCmd);
+    return () => window.removeEventListener("ps:command", onCmd);
+  }, [doUndo, doRedo]);
+
   return (
     <div className="advanced-editor">
       <AdvancedToolbar

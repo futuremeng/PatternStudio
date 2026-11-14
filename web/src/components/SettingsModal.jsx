@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { getSettings, saveSettings } from "../api.js";
 import { useI18n } from "../i18n/index.jsx";
+import { trapTabKey } from "../focusTrap.js";
 
 /** Per-provider defaults, mirrored from the backend (redraw.rs) — used as
  *  input placeholders so the user can see what an empty field means. */
@@ -25,13 +26,15 @@ function errMsg(e) {
 }
 
 /**
- * Settings dialog (opened from the ⚙️ button in the app header). Currently
- * holds the Qwen-Image (redraw) API configuration: protocol, API key, base
- * URL and model. The API key is only ever shown masked; leaving the field
- * empty on save keeps the current key.
+ * Settings dialog, mounted once in App and driven by settingsStore — opened
+ * from the gear button in the app header, the ⌘, shortcut or the Settings…
+ * menu item. Currently holds the Qwen-Image (redraw) API configuration:
+ * protocol, API key, base URL and model. The API key is only ever shown
+ * masked; leaving the field empty on save keeps the current key.
  */
 export default function SettingsModal({ open, onClose }) {
   const { t } = useI18n();
+  const modalRef = useRef(null);
   const [provider, setProvider] = useState("dashscope");
   const [apiKey, setApiKey] = useState("");
   const [apiBase, setApiBase] = useState("");
@@ -56,9 +59,10 @@ export default function SettingsModal({ open, onClose }) {
       .catch((e) => setError(errMsg(e)));
   }, [open]);
 
-  // Close on Escape (when not saving).
+  // Close on Escape (when not saving); move focus into the dialog on open.
   useEffect(() => {
     if (!open) return;
+    modalRef.current?.focus();
     const onKey = (e) => {
       if (e.key === "Escape" && !saving) onClose();
     };
@@ -94,7 +98,15 @@ export default function SettingsModal({ open, onClose }) {
 
   return (
     <div className="modal-overlay settings-modal-overlay">
-      <div className="modal settings-modal">
+      <div
+        ref={modalRef}
+        className="modal settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("settings.title")}
+        tabIndex={-1}
+        onKeyDown={(e) => trapTabKey(modalRef.current, e)}
+      >
         <div className="modal-header">
           <h2>{t("settings.title")}</h2>
           <button

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { useI18n } from "../i18n/index.jsx";
+import { trapTabKey } from "../focusTrap.js";
 
 /**
  * A small confirmation dialog for destructive or state-replacing actions.
@@ -13,6 +14,7 @@ export default function ConfirmModal({
 }) {
   const { t } = useI18n();
   const confirmRef = useRef(null);
+  const modalRef = useRef(null);
 
   useEffect(() => {
     confirmRef.current?.focus();
@@ -23,7 +25,15 @@ export default function ConfirmModal({
 
   return (
     <div className="modal-overlay" onClick={() => onCancel?.()}>
-      <div className="modal confirm-modal" onClick={e => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        className="modal confirm-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={e => e.stopPropagation()}
+        onKeyDown={(e) => trapTabKey(modalRef.current, e)}
+      >
         <div className="modal-header">
           <h2>{title}</h2>
           <button className="icon-btn" onClick={() => onCancel?.()} aria-label={t("close")}>×</button>
