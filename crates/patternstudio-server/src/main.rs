@@ -939,6 +939,44 @@ struct SaveImageRequest {
     generated: bool,
 }
 
+/// Copy `src` onto `dst` atomically: content lands in a hidden tmp file in
+/// the destination directory first, then a same-volume rename swaps it in.
+/// A crash between the two leaves the old `dst` intact (plus a `.save-*.tmp`
+/// the server sweeps at startup); concurrent readers never observe a
+/// truncated file. An existing `dst` is overwritten.
+fn atomic_copy(src: &Path, dst: &Path) -> Result<(), String> {
+    let dir = dst
+        .parent()
+        .ok_or_else(|| "save target has no parent directory".to_string())?;
+    let tmp = dir.join(format!(".save-{}.tmp", uuid::Uuid::new_v4()));
+    if let Err(e) = std::fs::copy(src, &tmp) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("failed to stage copy: {e}"));
+    }
+    if let Err(e) = std::fs::rename(&tmp, dst) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("failed to activate copy: {e}"));
+    }
+    Ok(())
+}
+
+/// Remove tmp files a crashed `atomic_copy` left behind in known project
+/// folders. Only the exact `.save-<uuid>.tmp` shape is touched.
+fn sweep_tmp_files(projects: &HashMap<String, Project>) {
+    for p in projects.values() {
+        let Ok(entries) = std::fs::read_dir(&p.path) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with(".save-") && name.ends_with(".tmp") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+}
+
 /// Save a processed asset into the project folder. `generated = false`
 /// (default) copies into the project root and adds the file to the project's
 /// image list (the user's "save as new image" confirmation); `generated =
@@ -983,10 +1021,10 @@ async fn save_image(
         project.path.join(&req.filename)
     };
     let src_path = src.clone();
-    tokio::task::spawn_blocking(move || std::fs::copy(&src_path, &dst))
+    tokio::task::spawn_blocking(move || atomic_copy(&src_path, &dst))
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     if let Some(entry) = req.lineage {
         let key = req.lineage_key.unwrap_or_else(|| req.filename.clone());
         let folder = project.path.clone();
@@ -1235,6 +1273,7 @@ async fn main() {
     std::fs::create_dir_all(&upload_dir).ok();
     let projects_file = projects_file_path();
     let projects = load_projects(&projects_file);
+    sweep_tmp_files(&projects);
     let state = AppState {
         upload_dir,
         assets: Arc::new(Mutex::new(HashMap::new())),
@@ -1295,4 +1334,73 @@ async fn main() {
     }
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::atomic_copy;
+    use std::fs;
+
+    fn tmp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ps-atomic-{}-{}", tag, std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn leftovers(dir: &std::path::Path) -> Vec<String> {
+        fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with(".save-") && n.ends_with(".tmp"))
+            .collect()
+    }
+
+    #[test]
+    fn copy_writes_content_and_leaves_no_tmp() {
+        let dir = tmp_dir("ok");
+        let src = dir.join("src.bin");
+        let dst = dir.join("dst.bin");
+        fs::write(&src, b"new content").unwrap();
+        atomic_copy(&src, &dst).unwrap();
+        assert_eq!(fs::read(&dst).unwrap(), b"new content");
+        assert!(
+            leftovers(&dir).is_empty(),
+            "tmp leftovers: {:?}",
+            leftovers(&dir)
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copy_overwrites_existing_atomically() {
+        let dir = tmp_dir("overwrite");
+        let src = dir.join("src.bin");
+        let dst = dir.join("dst.bin");
+        fs::write(&src, b"v2").unwrap();
+        fs::write(&dst, b"v1").unwrap();
+        atomic_copy(&src, &dst).unwrap();
+        // A rename swap means every reader sees exactly one whole value.
+        for _ in 0..50 {
+            assert_eq!(fs::read(&dst).unwrap(), b"v2");
+        }
+        assert!(leftovers(&dir).is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failed_copy_preserves_destination_and_cleans_tmp() {
+        let dir = tmp_dir("fail");
+        let src = dir.join("missing.bin"); // does not exist -> copy fails
+        let dst = dir.join("dst.bin");
+        fs::write(&dst, b"original").unwrap();
+        assert!(atomic_copy(&src, &dst).is_err());
+        assert_eq!(fs::read(&dst).unwrap(), b"original");
+        assert!(
+            leftovers(&dir).is_empty(),
+            "tmp leftovers: {:?}",
+            leftovers(&dir)
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

@@ -119,6 +119,11 @@ All notable changes to PatternStudio are documented in this file.
 
 ### Fixed
 
+- `save-image` writes atomically (stage tmp file in the project folder +
+  rename): a crash mid-save can no longer leave a truncated PNG, and reads
+  running concurrently never observe partial content; tmp left by a crash is
+  swept at server startup
+
 - `refine_shape` no longer panics if an optimizer pass drops a shape (falls
   back to the pre-optimization geometry)
 - `projects.json` is written atomically (tmp file + rename)
