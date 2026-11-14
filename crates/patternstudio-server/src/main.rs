@@ -290,7 +290,7 @@ async fn trace(
                 .get_or_create(&key, || {
                     load_image(&path).map_err(|e| format!("failed to load image: {e}"))
                 })
-                .map_err(EngineError::Io)?
+                .map_err(EngineError::InvalidInput)?
         };
         // A cancelled predecessor may still be finishing its current batch;
         // block until it drops the lock (cancellation is near-instant).
@@ -365,7 +365,7 @@ async fn vectorize(
                 .get_or_create(&key, || {
                     load_image(&path).map_err(|e| format!("failed to load image: {e}"))
                 })
-                .map_err(EngineError::Io)?
+                .map_err(EngineError::InvalidInput)?
         };
         let mut guard = lock_session(&session);
         let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
@@ -455,7 +455,7 @@ async fn layer(
                         .get_or_create(&key, || {
                             load_image(&path).map_err(|e| format!("failed to load image: {e}"))
                         })
-                        .map_err(EngineError::Io)?
+                        .map_err(EngineError::InvalidInput)?
                 };
                 let mut guard = lock_session(&session);
                 let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
@@ -516,7 +516,7 @@ async fn smart(
     let family = req.family;
     let result = tokio::task::spawn_blocking(move || {
         let image = load_image(&img_path)
-            .map_err(|e| EngineError::Io(format!("failed to load image: {e}")))?;
+            .map_err(|e| EngineError::InvalidInput(format!("failed to load image: {e}")))?;
         // Family-scoped when the client picked a preset, auto otherwise.
         let decision = match family.as_deref() {
             Some(f) => patternstudio_core::smart::recommend_for(&image, f),

@@ -121,7 +121,7 @@ pub async fn trace_file(
                 .get_or_create(&key, || {
                     load_image(&p).map_err(|e| format!("failed to decode image: {e}"))
                 })
-                .map_err(EngineError::Io)?
+                .map_err(EngineError::InvalidInput)?
         };
         // A cancelled predecessor may still be finishing its current batch;
         // block until it drops the lock (cancellation is near-instant).
@@ -167,7 +167,7 @@ pub async fn vectorize_file(
                 .get_or_create(&key, || {
                     load_image(&p).map_err(|e| format!("failed to decode image: {e}"))
                 })
-                .map_err(EngineError::Io)?
+                .map_err(EngineError::InvalidInput)?
         };
         let mut guard = lock_session(&session);
         let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
@@ -221,7 +221,7 @@ pub async fn layer_file(
                         .get_or_create(&key, || {
                             load_image(&p).map_err(|e| format!("failed to decode image: {e}"))
                         })
-                        .map_err(EngineError::Io)?
+                        .map_err(EngineError::InvalidInput)?
                 };
                 let mut guard = lock_session(&session);
                 let doc = vectorize_with_session(&mut guard, &config, &cancel)?;
