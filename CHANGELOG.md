@@ -6,6 +6,17 @@ All notable changes to PatternStudio are documented in this file.
 
 ### Added
 
+**Quality baseline gate (WP4)**
+- `patternstudio trace --json` now reports a quality snapshot
+  (`shape_count`, `layer_count`, `color_count`, `svg_bytes`)
+- `--baseline <file> [--tolerance 0.05]` fails the run when any metric drifts
+  beyond the relative tolerance (flat snapshot or `{"samples": {…}}` files);
+  `--bless` refreshes the entry for the traced sample
+- Four deterministic fixture samples with a committed baseline live in
+  `crates/patternstudio-cli/tests/fixtures/quality/`; the integration test
+  checks both the passing gate and drift detection, running in the ubuntu CI
+  job via `cargo test --workspace` — baseline changes must be noted in the PR
+
 **Browser e2e regression suite (WP3)**
 - Playwright specs cover the full happy path (projects → detail → editor
   auto-trace → manual layer Process → visibility toggles → SVG download),

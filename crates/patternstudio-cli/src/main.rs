@@ -1,11 +1,12 @@
 //! PatternStudio CLI: trace images to layered SVG.
 
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use patternstudio_core::{
-    LayerAssignment, PatternStudioConfig, PatternStudioPipeline, Resolution, Simplify,
+    LayerAssignment, LayeredDoc, PatternStudioConfig, PatternStudioPipeline, Resolution, Simplify,
 };
 use patternstudio_svg::LayeredWriter;
 use patternstudio_tracer::load_image;
@@ -73,6 +74,19 @@ enum Command {
         /// Output JSON stats to stdout (for scripting)
         #[arg(long)]
         json: bool,
+        /// Compare quality metrics (shape/layer/color counts, svg_bytes)
+        /// against a baseline JSON file; non-zero exit on drift beyond
+        /// tolerance. The file is either a flat snapshot or
+        /// `{"samples": {"<input stem>": snapshot}}`.
+        #[arg(long)]
+        baseline: Option<PathBuf>,
+        /// Relative drift tolerance for --baseline (0.05 = 5%)
+        #[arg(long, default_value_t = 0.05)]
+        tolerance: f64,
+        /// Write this run's quality snapshot into the --baseline file
+        /// (maintainer tooling to refresh the quality gate)
+        #[arg(long, requires = "baseline")]
+        bless: bool,
         /// Suppress progress output
         #[arg(short, long)]
         quiet: bool,
@@ -160,6 +174,9 @@ fn main() -> ExitCode {
             optimize,
             open,
             json,
+            baseline,
+            tolerance,
+            bless,
             quiet,
             scale,
             rotate,
@@ -182,6 +199,9 @@ fn main() -> ExitCode {
                 optimize,
                 open,
                 json,
+                baseline,
+                tolerance,
+                bless,
                 quiet,
                 scale,
                 rotate,
@@ -244,6 +264,9 @@ struct TraceOptions {
     optimize: bool,
     open: bool,
     json: bool,
+    baseline: Option<PathBuf>,
+    tolerance: f64,
+    bless: bool,
     quiet: bool,
     scale: f64,
     rotate: f64,
@@ -281,6 +304,8 @@ fn cmd_trace(
             batch_opts.optimize = false;
             batch_opts.open = false;
             batch_opts.json = false;
+            batch_opts.baseline = None;
+            batch_opts.bless = false;
             batch_opts.quiet = true;
             batch_opts.scale = 1.0;
             batch_opts.rotate = 0.0;
@@ -323,6 +348,9 @@ fn trace_single(
         optimize,
         open,
         json,
+        baseline,
+        tolerance,
+        bless,
         quiet,
         scale,
         rotate,
@@ -472,14 +500,18 @@ fn trace_single(
         }
     }
 
+    let snapshot = quality_snapshot(&layered, output)?;
+
     if json {
         let stats = serde_json::json!({
             "input": input.display().to_string(),
             "output": output.display().to_string(),
             "width": layered.width,
             "height": layered.height,
-            "shape_count": layered.total_shapes(),
-            "layer_count": layered.layers.len(),
+            "shape_count": snapshot["shape_count"],
+            "layer_count": snapshot["layer_count"],
+            "color_count": snapshot["color_count"],
+            "svg_bytes": snapshot["svg_bytes"],
             "layers": layered.layers.iter().map(|l| serde_json::json!({
                 "name": l.name,
                 "role": l.role.to_string(),
@@ -487,6 +519,16 @@ fn trace_single(
             })).collect::<Vec<_>>(),
         });
         println!("{}", serde_json::to_string_pretty(&stats)?);
+    }
+
+    // Quality gate: bless refreshes the baseline file, baseline compares.
+    if bless {
+        bless_baseline(input, baseline.as_ref().unwrap(), &snapshot)?;
+    } else if let Some(path) = baseline.as_deref() {
+        check_baseline(path, input, &snapshot, tolerance)?;
+        if !quiet {
+            eprintln!("Quality baseline OK (tolerance {tolerance:.2})");
+        }
     }
 
     if open {
@@ -611,12 +653,139 @@ fn cmd_convert(
                 optimize: false,
                 open,
                 json: false,
+                baseline: None,
+                tolerance: 0.05,
+                bless: false,
                 quiet: false,
                 scale: 1.0,
                 rotate: 0.0,
                 flip: "none".to_string(),
             },
         )?;
+    }
+    Ok(())
+}
+
+/// Machine-readable quality snapshot of a trace run, used by the quality
+/// gate (`--baseline`). Counts are stable for a fixed engine + input; any
+/// drift beyond tolerance means engine behaviour changed.
+fn quality_snapshot(
+    layered: &LayeredDoc,
+    output: &Path,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let mut colors: HashSet<[u8; 3]> = HashSet::new();
+    for layer in &layered.layers {
+        for shape in &layer.shapes {
+            colors.insert(shape.paint.color().rgb_u8());
+        }
+    }
+    let svg_bytes = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
+    Ok(serde_json::json!({
+        "shape_count": layered.total_shapes(),
+        "layer_count": layered.layers.len(),
+        "color_count": colors.len(),
+        "svg_bytes": svg_bytes,
+    }))
+}
+
+/// The baseline key for an input file: its stem ("colors.png" -> "colors").
+fn baseline_key(input: &Path) -> String {
+    input
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+/// Resolve the snapshot entry inside a baseline document: either a flat
+/// snapshot itself or `{"samples": {"<stem>": snapshot}}`.
+fn baseline_entry(doc: &serde_json::Value, input: &Path) -> Option<serde_json::Value> {
+    match doc.get("samples") {
+        Some(samples) => samples.get(baseline_key(input)).cloned(),
+        None => Some(doc.clone()),
+    }
+}
+
+const QUALITY_METRICS: [&str; 4] = ["shape_count", "layer_count", "color_count", "svg_bytes"];
+
+/// Refresh the quality gate: merge this run's snapshot into the baseline
+/// file under `samples.<stem>` (maintainer tooling; changes must be noted
+/// in the PR).
+fn bless_baseline(
+    input: &Path,
+    path: &Path,
+    snapshot: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut doc: serde_json::Value = match std::fs::read(path) {
+        Ok(data) => serde_json::from_slice(&data)?,
+        Err(_) => serde_json::json!({ "samples": {} }),
+    };
+    if doc.get("samples").is_none() {
+        // A flat single-snapshot file becomes a keyed one on bless.
+        doc = serde_json::json!({ "samples": {} });
+    }
+    doc["samples"][baseline_key(input)] = snapshot.clone();
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).ok();
+        }
+    }
+    std::fs::write(path, serde_json::to_string_pretty(&doc)? + "\n")?;
+    eprintln!("Blessed {} into {}", baseline_key(input), path.display());
+    Ok(())
+}
+
+/// Compare the snapshot against the baseline; error if any metric drifted
+/// beyond the relative tolerance.
+fn check_baseline(
+    path: &Path,
+    input: &Path,
+    got: &serde_json::Value,
+    tolerance: f64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let data =
+        std::fs::read(path).map_err(|e| format!("cannot read baseline {}: {e}", path.display()))?;
+    let doc: serde_json::Value = serde_json::from_slice(&data)
+        .map_err(|e| format!("invalid baseline {}: {e}", path.display()))?;
+    let want = baseline_entry(&doc, input).ok_or_else(|| {
+        format!(
+            "baseline {} has no entry for {}",
+            path.display(),
+            baseline_key(input)
+        )
+    })?;
+    let mut drifts = Vec::new();
+    for key in QUALITY_METRICS {
+        let base = want
+            .get(key)
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| format!("baseline missing metric {key}"))?;
+        let cur = got
+            .get(key)
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| format!("snapshot missing metric {key}"))?;
+        let rel = if base == 0 {
+            if cur == 0 {
+                0.0
+            } else {
+                f64::INFINITY
+            }
+        } else {
+            cur.abs_diff(base) as f64 / base as f64
+        };
+        if rel > tolerance {
+            drifts.push(format!(
+                "{key}={cur} vs baseline {base} (Δ {:.1}%)",
+                rel * 100.0
+            ));
+        }
+    }
+    if !drifts.is_empty() {
+        return Err(format!(
+            "quality drift vs {}: {} (tolerance {tolerance:.2})",
+            path.display(),
+            drifts.join(", ")
+        )
+        .into());
     }
     Ok(())
 }
