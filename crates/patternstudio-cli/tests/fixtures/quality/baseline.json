@@ -1,5 +1,11 @@
 {
   "samples": {
+    "bands": {
+      "color_count": 8,
+      "layer_count": 1,
+      "shape_count": 8,
+      "svg_bytes": 1707
+    },
     "colors": {
       "color_count": 9,
       "layer_count": 1,
@@ -11,12 +17,6 @@
       "layer_count": 1,
       "shape_count": 2,
       "svg_bytes": 618
-    },
-    "gradient": {
-      "color_count": 1,
-      "layer_count": 1,
-      "shape_count": 1,
-      "svg_bytes": 438
     },
     "lineart": {
       "color_count": 2,

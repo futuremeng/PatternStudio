@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const SAMPLES: [&str; 4] = ["colors", "duo", "gradient", "lineart"];
+const SAMPLES: [&str; 4] = ["bands", "colors", "duo", "lineart"];
 
 fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/quality")
@@ -61,7 +61,8 @@ fn quality_gate_passes_against_committed_baseline() {
 fn quality_gate_detects_drift() {
     // Baseline whose "duo" entry is actually the "colors" snapshot: the duo
     // trace must fail with a drift report (this is the CI-red acceptance path
-    // for an engine change that moves the metrics).
+    // for an engine change that moves the metrics; "colors" was picked because
+    // it differs from duo on every metric).
     let committed: serde_json::Value =
         serde_json::from_slice(&fs::read(fixtures_dir().join("baseline.json")).unwrap()).unwrap();
     let mut tampered = committed.clone();
