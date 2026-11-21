@@ -1,0 +1,452 @@
+<!doctype html>
+<html>
+<head>
+<style>
+  body { margin: 0; font: 14px -apple-system, "Segoe UI", system-ui, sans-serif; color: #1c2330; background: #f4f6f9; }
+  .scr { height: 100vh; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+  .hdr { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px; background: #fff; border-bottom: 1px solid #e3e7ee; flex: none; }
+  .brand { width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(135deg, #4f7cff, #7a5cff); display: inline-grid; place-items: center; color: #fff; font-weight: 700; font-size: 11px; flex: none; }
+  .ttl { font-weight: 650; }
+  .meta { color: #7b8698; font-size: 12.5px; }
+  .spacer { flex: 1; }
+  .icons { display: flex; gap: 8px; align-items: center; }
+  .iconbtn { border: 1px solid #e3e7ee; background: #fff; border-radius: 8px; padding: 5px 9px; cursor: pointer; color: #475467; font: inherit; }
+  .body { flex: 1; padding: 20px; overflow: hidden; position: relative; }
+  .btn { border: 1px solid #d5dbe5; background: #fff; border-radius: 9px; padding: 8px 14px; cursor: pointer; font: inherit; }
+  .btn.primary { background: #3568e4; border-color: #3568e4; color: #fff; }
+  .btn.danger { background: #fff; border-color: #f3b4b4; color: #c62828; }
+  .btn.sm { padding: 5px 10px; font-size: 12.5px; }
+  select, input[type=text], input[type=number], textarea { border: 1px solid #d5dbe5; border-radius: 8px; padding: 7px 9px; font: inherit; background: #fff; }
+  .seg { display: inline-flex; border: 1px solid #d5dbe5; border-radius: 9px; overflow: hidden; }
+  .seg button { border: 0; background: #fff; padding: 7px 12px; cursor: pointer; font: inherit; }
+  .seg button.on { background: #eaf0ff; color: #274bba; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .card { background: #fff; border: 1px solid #e6eaf0; border-radius: 12px; overflow: hidden; cursor: pointer; }
+  .thumb { height: 122px; background: radial-gradient(circle at 30% 40%, #dfe7f5, #c9d6ec 60%, #eef2f9); position: relative; }
+  .thumb.ph { display: grid; place-items: center; color: #9aa7bd; background: #edf1f7; }
+  .card .x { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: rgba(255,255,255,.92); color: #c62828; cursor: pointer; }
+  .card .info { padding: 10px 12px; }
+  .card .info b { display: block; font-size: 13.5px; }
+  .card .info span { color: #8a94a6; font-size: 12px; }
+  .skel { height: 180px; border-radius: 12px; background: linear-gradient(90deg, #e9edf3 25%, #f3f6fa 50%, #e9edf3 75%); }
+  .empty { height: 100%; display: grid; place-items: center; text-align: center; color: #7b8698; }
+  .empty .big { font-size: 44px; margin-bottom: 6px; }
+  .bar { position: absolute; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid #e3e7ee; padding: 10px 20px; display: flex; gap: 14px; align-items: center; }
+  .track { flex: 1; height: 8px; border-radius: 999px; background: #e8ecf3; overflow: hidden; }
+  .fill { height: 100%; background: #3568e4; border-radius: 999px; }
+  .prog { color: #667085; font-size: 12.5px; }
+  .ovl { position: absolute; inset: 0; background: rgba(20,26,38,.42); display: grid; place-items: center; z-index: 5; }
+  .dlg { width: 470px; background: #fff; border-radius: 14px; box-shadow: 0 18px 50px rgba(15,23,42,.28); overflow: hidden; }
+  .dlg header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #eceff4; }
+  .dlg header h2 { margin: 0; font-size: 15.5px; }
+  .dlg .cbody { padding: 16px 18px; }
+  .dlg footer { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 18px; border-top: 1px solid #eceff4; }
+  .row { display: flex; gap: 10px; align-items: center; margin: 10px 0; }
+  .err { background: #fdf0ef; border: 1px solid #f2c1bd; color: #a33025; border-radius: 10px; padding: 12px 14px; display: flex; gap: 12px; align-items: center; }
+  .note { color: #8a94a6; font-size: 12px; }
+  .spin { width: 36px; height: 36px; border-radius: 50%; border: 4px solid #d8e2f6; border-top-color: #3568e4; }
+  .cols { display: grid; grid-template-columns: 252px 1fr 272px; gap: 14px; height: 100%; }
+  .panel { background: #fff; border: 1px solid #e6eaf0; border-radius: 12px; padding: 14px; overflow: hidden; }
+  .panel h4 { margin: 0 0 10px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: #8a94a6; }
+  .field { margin: 11px 0; }
+  .field label { display: block; font-size: 12px; color: #5b6577; margin-bottom: 4px; }
+  .view { background: #fff; border: 1px solid #e6eaf0; border-radius: 12px; display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; position: relative; height: 100%; }
+  .view .half { display: grid; place-items: center; color: #9aa7bd; position: relative; }
+  .view .half.orig { background: radial-gradient(circle at 45% 40%, #e7edf6, #cfd9e8 70%); }
+  .view .half.vec { background: #fbfcfe; border-left: 2px dashed #c9d3e2; }
+  .vlabel { position: absolute; bottom: 8px; left: 10px; font-size: 11.5px; color: #667085; background: rgba(255,255,255,.88); padding: 2px 8px; border-radius: 6px; }
+  .lay { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid #edf0f5; border-radius: 9px; margin: 6px 0; background: #fbfcfe; font-size: 12.5px; }
+  .swatch { width: 14px; height: 14px; border-radius: 4px; flex: none; }
+  .eye { border: 0; background: none; cursor: pointer; color: #667085; font-size: 13px; }
+  .strip { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+  .chip { border: 1px solid #d5dbe5; background: #fff; border-radius: 999px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; }
+  .chip.on { background: #eaf0ff; border-color: #b9ccf5; color: #274bba; font-weight: 600; }
+  .banner { margin: 14px 20px 0; background: #fff8e8; border: 1px solid #f0dcae; color: #7a5c14; border-radius: 10px; padding: 9px 14px; display: flex; gap: 12px; align-items: center; }
+  .tree { list-style: none; margin: 0; padding: 0 0 0 24px; border-left: 2px solid #dbe2ec; }
+  .tree li { margin: 12px 0; }
+  .node { display: inline-flex; gap: 10px; align-items: center; background: #fff; border: 1px solid #e2e7ef; border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+  .node .tag { font-size: 10.5px; border-radius: 6px; padding: 2px 7px; background: #eef2f8; color: #667085; }
+  .node .tag.auto { background: #f1ecfd; color: #6b4fd0; }
+  .node .tag.conf { background: #e8f6ee; color: #1d7a4c; }
+  .node .pic { width: 40px; height: 40px; border-radius: 8px; background: radial-gradient(circle at 35% 40%, #e3eaf6, #c7d3e7 75%); flex: none; }
+  .tabs { display: inline-flex; border: 1px solid #d5dbe5; border-radius: 9px; overflow: hidden; }
+  .tabs button { border: 0; padding: 7px 16px; background: #fff; cursor: pointer; font: inherit; }
+  .tabs button.on { background: #eaf0ff; color: #274bba; font-weight: 600; }
+  .stripimgs { display: flex; gap: 8px; }
+  .stripimgs .t { width: 54px; height: 54px; border-radius: 9px; background: radial-gradient(circle at 40% 40%, #e3eaf6, #c7d3e7 75%); border: 2px solid transparent; position: relative; flex: none; }
+  .stripimgs .t.on { border-color: #3568e4; }
+  .stripimgs .t input { position: absolute; top: 3px; left: 3px; }
+  .deadend { outline: 2px dashed #d98a80; outline-offset: -2px; }
+  .tagx { font-size: 11px; background: #fdf0ef; color: #b3423a; border: 1px solid #f2c1bd; border-radius: 999px; padding: 3px 10px; }
+  .zoombar { display: flex; gap: 6px; position: absolute; bottom: 12px; left: 12px; }
+  .switch { width: 38px; height: 22px; border-radius: 999px; background: #d5dbe5; display: inline-block; position: relative; vertical-align: middle; }
+  .switch.on { background: #3568e4; }
+  .switch .k { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; }
+  .switch.on .k { left: auto; right: 2px; }
+</style>
+<script>window.app = {};</script>
+</head>
+<body>
+
+<section data-screen="G01">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><span class="ttl">Projects</span><span class="spacer"></span>
+      <span class="icons"><button class="iconbtn" data-id="gear">⚙</button><button class="iconbtn">☾</button><select><option>EN</option><option>中文</option></select></span></div>
+    <div class="body"><div class="grid">
+      <div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div>
+      <div class="skel"></div><div class="skel"></div>
+    </div></div>
+  </div>
+</section>
+
+<section data-screen="P01">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><span class="ttl">Projects</span><span class="spacer"></span>
+      <button class="btn primary" data-id="open" data-to="D01">Open Project</button>
+      <span class="icons"><button class="iconbtn" data-id="gear">⚙</button><button class="iconbtn">☾</button><select><option>EN</option><option>中文</option></select></span></div>
+    <div class="body"><div class="grid">
+      <div class="card" data-id="card" data-to="D01"><div class="thumb"><button class="x" data-id="remove" data-to="P03">×</button></div><div class="info"><b>Silk Patterns</b><span>24 images</span></div></div>
+      <div class="card" data-id="card2" data-to="D01"><div class="thumb"><button class="x">×</button></div><div class="info"><b>Tang Brocade</b><span>8 images</span></div></div>
+      <div class="card" data-id="card3" data-to="D01"><div class="thumb ph">🖼<button class="x">×</button></div><div class="info"><b>Scratch</b><span>0 images</span></div></div>
+      <div class="card" data-id="card4" data-to="D01"><div class="thumb"><button class="x">×</button></div><div class="info"><b>Blue-and-white</b><span>41 images</span></div></div>
+    </div></div>
+  </div>
+</section>
+
+<section data-screen="P02">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><span class="ttl">Projects</span><span class="spacer"></span>
+      <button class="btn primary" data-id="open" data-to="D01">Open Project</button>
+      <span class="icons"><button class="iconbtn">⚙</button><button class="iconbtn">☾</button><select><option>EN</option></select></span></div>
+    <div class="body"><div class="empty"><div>
+      <div class="big">📁</div>
+      <p>No projects yet.<br>Open a folder to get started.</p>
+    </div></div></div>
+  </div>
+</section>
+
+<section data-screen="P03">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><span class="ttl">Projects</span><span class="spacer"></span></div>
+    <div class="body"><div class="grid" style="opacity:.45">
+      <div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div>
+    </div></div>
+    <div class="ovl"><div class="dlg" data-id="confirm-modal">
+      <header><h2>Remove project</h2><button class="iconbtn" data-to="P01">×</button></header>
+      <div class="cbody"><p>Remove <b>Silk Patterns</b> from the list? The folder on disk is not deleted.</p></div>
+      <footer><button class="btn" data-id="cancel" data-to="P01">Cancel</button><button class="btn danger" data-id="remove-ok" data-to="P01">Remove</button></footer>
+    </div></div>
+  </div>
+</section>
+
+<section data-screen="D01">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><button class="btn sm" data-id="back" data-to="P01">‹ Back</button><span class="ttl">Silk Patterns</span><span class="meta">24 images</span><span class="spacer"></span>
+      <span class="note">Split</span><span class="switch"><span class="k"></span></span>
+      <select data-id="preset"><option>Line art</option><option>Color</option></select>
+      <span class="seg"><button class="on">Fixed</button><button>Smart</button></span>
+      <button class="btn primary" data-id="batch-run" data-to="D02">Batch trace · Fixed</button>
+      <span class="icons"><button class="iconbtn">⚙</button></span></div>
+    <div class="body"><div class="grid">
+      <div class="card" data-id="imgcard" data-to="D04"><div class="thumb"></div><div class="info"><b>flower-01.png</b><span>original</span></div></div>
+      <div class="card" data-to="D04"><div class="thumb"></div><div class="info"><b>flower-02.png</b><span>original</span></div></div>
+      <div class="card" data-to="D04"><div class="thumb"></div><div class="info"><b>cloud-07.png</b><span>original</span></div></div>
+      <div class="card" data-to="D04"><div class="thumb ph">🖼</div><div class="info"><b>scroll-03.png</b><span>original</span></div></div>
+      <div class="card" data-to="D04"><div class="thumb"></div><div class="info"><b>scroll-04.png</b><span>original</span></div></div>
+      <div class="card" data-to="D04"><div class="thumb"></div><div class="info"><b>ice-11.png</b><span>original</span></div></div>
+      <div class="card" data-to="D04"><div class="thumb"></div><div class="info"><b>ice-12.png</b><span>original</span></div></div>
+      <div class="card" data-to="D04"><div class="thumb"></div><div class="info"><b>taotie-02.png</b><span>original</span></div></div>
+    </div></div>
+  </div>
+</section>
+
+<section data-screen="D02">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><span class="ttl">Silk Patterns</span><span class="meta">24 images</span><span class="spacer"></span>
+      <select disabled><option>Line art</option></select>
+      <span class="seg"><button class="on">Fixed</button><button>Smart</button></span>
+      <button class="btn danger" data-id="abort" data-to="D01">Abort</button>
+      <button class="btn primary" disabled>Processing…</button></div>
+    <div class="body"><div class="grid">
+      <div class="card"><div class="thumb"></div><div class="info"><b>flower-01.png</b></div></div>
+      <div class="card"><div class="thumb"></div><div class="info"><b>flower-02.png</b></div></div>
+      <div class="card"><div class="thumb"></div><div class="info"><b>cloud-07.png</b></div></div>
+      <div class="card"><div class="thumb ph">🖼</div><div class="info"><b>scroll-03.png</b></div></div>
+    </div></div>
+    <div class="bar"><span class="prog">14/24 current.png</span><div class="track"><div class="fill" style="width:58%"></div></div></div>
+  </div>
+</section>
+
+<section data-screen="D03">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><span class="ttl">Silk Patterns</span><span class="meta">24 images</span><span class="spacer"></span>
+      <select><option>Line art</option></select>
+      <span class="</select>seg"><button class="on">Fixed</button><button>Smart</button></span>
+      <button class="btn primary" data-id="retry-failed" data-to="D02">Retry failed (3)</button></div>
+    <div class="body"><div class="grid">
+      <div class="card"><div class="thumb"></div><div class="info"><b>flower-01.png</b></div></div>
+      <div class="card"><div class="thumb"></div><div class="info"><b>flower-02.png</b></div></div>
+      <div class="card"><div class="thumb"></div><div class="info"><b>cloud-07.png</b></div></div>
+      <div class="card"><div class="thumb" style="outline:2px solid #f2c1bd;outline-offset:-2px">?</div><div class="info"><b>scroll-03.png</b><span>failed</span></div></div>
+    </div></div>
+    <div class="bar"><span class="prog">24/24 · 3 failed</span><div class="track"><div class="fill" style="width:100%"></div></div></div>
+  </div>
+</section>
+
+<section data-screen="D04">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><button class="btn sm" data-id="back" data-to="D01">‹ Back</button><span class="ttl">flower-01.png</span><span class="meta">Silk Patterns</span><span class="spacer"></span>
+      <span class="seg"><button class="on">Confirmed</button><button>All</button></span>
+      <span class="icons"><button class="iconbtn">⚙</button></span></div>
+    <div class="body">
+      <ul class="tree">
+        <li><div class="node" data-id="node-orig" data-to="E01"><span class="pic"></span><b>flower-01.png</b><span class="tag">original</span></div>
+          <ul class="tree">
+            <li><div class="node" data-to="E01"><span class="pic"></span><b>flower-01_enhanced_1.png</b><span class="tag conf">confirmed</span></div>
+              <ul class="tree">
+                <li><div class="node" data-to="E01"><span class="pic"></span><b>flower-01_enhanced_2.png</b><span class="tag auto">auto</span></div></li>
+              </ul>
+            </li>
+            <li><div class="node" data-to="E01"><span class="pic"></span><b>flower-01_redrawn_1.png</b><span class="tag auto">auto</span></div></li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section data-screen="E01">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><button class="btn sm" data-id="back" data-to="D04">‹ Back</button><span class="ttl">flower-01.png</span><span class="meta">512 × 512 px</span><span class="spacer"></span>
+      <button class="btn sm">Download SVG</button>
+      <button class="iconbtn">▥</button><button class="iconbtn">⤢</button>
+      <button class="iconbtn" data-id="gear" data-to="S01">⚙</button></div>
+    <div class="body"><div class="cols">
+      <div class="panel"><h4>Trace parameters</h4>
+        <div class="field"><label>Preset</label><select data-id="preset" data-to="E02"><option>Line art</option><option>Color</option><option>Photo</option></select></div>
+        <div class="field"><label>Resolution</label><span class="seg"><button>coarse</button><button class="on">medium</button><button>fine</button></span></div>
+        <div class="field"><label>Simplify</label><span class="seg"><button>minimal</button><button class="on">low</button><button>medium</button></span></div>
+        <div class="field"><label>Layers</label><input type="number" value="5" style="width:70px"></div>
+        <div class="row"><button class="btn sm" data-id="smart" data-to="E05">✨ Smart</button><button class="btn sm" data-id="optimize" data-to="E06">Optimize…</button></div>
+      </div>
+      <div class="view">
+        <div class="half orig">original<span class="vlabel">Original</span></div>
+        <div class="half vec"><svg width="150" height="150" viewBox="0 0 100 100"><g fill="none" stroke="#5b74b8" stroke-width="1.4"><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="22"/><circle cx="50" cy="50" r="11"/><path d="M50 16v-10M50 94v10M16 50H6M94 50h10"/></g></svg><span class="vlabel">Vector</span></div>
+        <div style="position:absolute;top:10px;right:10px;display:flex;gap:6px">
+          <button class="iconbtn" data-id="select-tool" data-to="E03">▣</button>
+          <button class="iconbtn" data-id="advanced" data-to="E04" title="Advanced mode">✎</button>
+        </div>
+      </div>
+      <div class="panel"><h4>Layers · color strategy</h4>
+        <div class="lay"><button class="eye">👁</button><span class="swatch" style="background:#e8ecf3"></span>background<span class="spacer"></span><span class="note">1 204 shapes</span></div>
+        <div class="lay"><button class="eye">👁</button><span class="swatch" style="background:#5b74b8"></span>color-5b74b8<span class="spacer"></span><span class="note">612 shapes</span></div>
+        <div class="lay"><button class="eye">👁</button><span class="swatch" style="background:#b98a4a"></span>color-b98a4a<span class="spacer"></span><span class="note">233 shapes</span></div>
+        <h4 style="margin-top:14px">Layer processing</h4>
+        <div class="row"><button class="btn sm">Process</button><span class="note">pending params</span></div>
+        <h4 style="margin-top:14px">Exported layers</h4>
+        <div class="lay"><span class="swatch" style="background:#5b74b8"></span>layer-2<span class="spacer"></span>
+          <button class="btn sm" data-id="use-layer" data-to="E08">Use as editing object</button></div>
+      </div>
+    </div>
+    <div class="strip"><span class="note">Configs</span><span class="chip on" data-id="cfg-default">Default</span><span class="chip" data-id="cfg-line">Line</span><button class="btn sm" data-id="cfg-save">＋ Save current</button></div>
+    </div>
+  </div>
+</section>
+
+<section data-screen="E02">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><button class="btn sm">‹ Back</button><span class="ttl">flower-01.png</span><span class="spacer"></span><span class="icons"><button class="iconbtn">⚙</button></span></div>
+    <div class="body"><div class="cols">
+      <div class="panel"><h4>Trace parameters</h4><div class="field"><label>Preset</label><select><option>Line art</option></select></select></div><div class="field"><label>Resolution</label><span class="seg"><button class="on">medium</button></span></div></div>
+      <div class="view">
+        <div class="half orig">original<span class="vlabel">Original</span></div>
+        <div class="half vec"><span class="vlabel">Vector</span></div>
+        <div style="position:absolute;inset:0;display:grid;place-items:center;background:rgba(251,252,254,.75);gap:12px">
+          <div style="display:grid;place-items:center;gap:12px"><div class="spin"></div><span class="note">Processing…</span></div>
+        </div>
+      </div>
+      <div class="panel"><h4>Layers</h4><div class="lay"><span class="swatch" style="background:#dfe5ef"></span>…</div></div>
+    </div></div>
+  </div>
+</section>
+
+<section data-screen="E03">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><button class="btn sm">‹ Back</button><span class="ttl">flower-01.png</span><span class="spacer"></span><span class="icons"><button class="iconbtn">⚙</button></span></div>
+    <div class="body"><div class="view">
+      <div class="half orig">original<span class="vlabel">Original</span></div>
+      <div class="half vec" style="border-left:2px dashed #c9d3e2">
+        <svg width="170" height="170" viewBox="0 0 100 100"><g fill="none" stroke="#5b74b8" stroke-width="1.4">
+          <circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="22"/>
+          <rect x="28" y="28" width="26" height="26" fill="rgba(53,104,228,.12)" stroke="#3568e4" stroke-dasharray="2 2"/></g></svg>
+        <span class="vlabel">2 patches selected</span>
+      </div>
+    </div>
+    <div class="bar"><span class="prog">Unapplied patch edits</span>
+      <button class="btn primary sm" data-id="apply-edits" data-to="E01">Apply</button>
+      <button class="btn sm" data-id="discard-edits" data-to="E01">Discard</button>
+      <button class="btn sm" data-id="undo-edit">Undo edit</button></div>
+    </div>
+  </div>
+</section>
+
+<section data-screen="E04">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><button class="btn sm">‹ Back</button><span class="ttl">flower-01.png</span><span class="meta">Advanced SVG editor</span><span class="spacer"></span>
+      <button class="btn sm" data-id="adv-done" data-to="E01">Done</button>
+      <button class="btn sm" data-id="adv-cancel" data-to="E01">Cancel</button>
+      <button class="btn sm" data-id="adv-layer">Save as layer</button></div>
+    <div class="body"><div class="view" style="grid-template-columns:1fr">
+      <div class="half vec" style="border:0"><svg width="380" height="380" viewBox="0 0 100 100"><g fill="none" stroke-width="1.2">
+        <circle cx="50" cy="50" r="34" stroke="#5b74b8"/><circle cx="50" cy="50" r="22" stroke="#3568e4" stroke-width="2.2"/>
+        <path d="M50 16v-10M50 94v10M16 50H6M94 50h10" stroke="#b98a4a"/>
+        <circle cx="50" cy="28" r="2" fill="#3568e4"/><circle cx="72" cy="50" r="2" fill="#3568e4"/><circle cx="28" cy="50" r="2" fill="#3568e4"/></g></svg></div>
+      <div class="zoombar"><button class="iconbtn">＋</button><button class="iconbtn">－</button><button class="iconbtn">⤢</button></div>
+    </div></div>
+  </div>
+</section>
+
+<section data-screen="E05">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><button class="btn sm">‹ Back</button><span class="ttl">flower-01.png</span><span class="spacer"></span><span class="icons"><button class="iconbtn">⚙</button></span></div>
+    <div class="banner"><span>✨</span><span>Smart: <b>Line art</b> — analyzed 3 colors, searched 6 candidates, winner fidelity 0.93</span>
+      <button class="btn sm" data-id="use-preset" data-to="E01">Use preset result</button>
+      <button class="iconbtn" data-id="banner-close" data-to="E01">×</button></div>
+    <div class="body"><div class="view">
+      <div class="half orig">original<span class="vlabel">Original</span></div>
+      <div class="half vec"><svg width="150" height="150" viewBox="0 0 100 100"><g fill="none" stroke="#5b74b8" stroke-width="1.4"><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="22"/></g></svg><span class="vlabel">Vector</span></div>
+    </div></div>
+  </div>
+</section>
+
+<section data-screen="E06">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><span class="ttl">Optimize image</span><span class="spacer"></span><button class="iconbtn" data-id="pm-close" data-to="E01">×</button></div>
+    <div class="body"><div class="panel" style="height:100%;display:flex;flex-direction:column">
+      <div class="row"><span class="tabs"><button class="on" data-id="tab-enhance">Enhance</button><button data-id="tab-redraw" data-to="E07">Redraw</button></span>
+        <span class="note">Real-ESRGAN · each round branches from the selected thumbnail</span></div>
+      <div class="view" style="flex:1">
+        <div class="half orig">original<span class="vlabel">Original</span></div>
+        <div class="half vec"><svg width="150" height="150" viewBox="0 0 100 100"><g fill="none" stroke="#7c5cff" stroke-width="1.1"><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="22"/><circle cx="50" cy="50" r="11"/></g></svg><span class="vlabel">Enhanced · iter 1</span></div>
+      </div>
+      <div class="row"><label>Rounds</label><input type="number" value="1" style="width:64px"><button class="btn primary sm" data-id="enhance-run">Enhance</button></div>
+      <div class="row" style="align-items:flex-end"><span class="note">Iterations (auto-saved to project · check to confirm)</span><div class="stripimgs">
+        <div class="t"><input type="checkbox"></div><div class="t on"><input type="checkbox" checked></div></div></div>
+      <div class="row" style="justify-content:flex-end"><button class="btn" data-id="pm-close2" data-to="E01">Close</button><button class="btn primary" data-id="pm-save" data-to="E01">Save as new image</button></div>
+    </div></div>
+  </div>
+</section>
+
+<section data-screen="E07">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><span class="ttl">Optimize image</span><span class="spacer"></span><button class="iconbtn" data-to="E01">×</button></div>
+    <div class="body"><div class="panel" style="height:100%;display:flex;flex-direction:column">
+      <div class="row"><span class="tabs"><button data-id="tab-enhance2" data-to="E06">Enhance</button><button class="on">Redraw</button></span>
+        <span class="note">Qwen-Image · always restyles the original</span></div>
+      <div class="view" style="flex:1;max-height:220px">
+        <div class="half orig">original<span class="vlabel">Original</span></div>
+        <div class="half vec"><svg width="140" height="140" viewBox="0 0 100 100"><g fill="none" stroke="#b98a4a" stroke-width="1.2"><path d="M20 70c10-30 50-30 60 0"/><circle cx="38" cy="42" r="5"/><circle cx="62" cy="42" r="5"/></g></svg><span class="vlabel">Redrawn · iter 1</span></div>
+      </div>
+      <div class="row"><select data-id="redraw-preset"><option>Line art</option><option>Watercolor</option><option>Custom</option></select>
+        <input type="text" style="flex:1" value="ink line art, clean contours, white background">
+        <input type="number" placeholder="seed" style="width:84px">
+        <button class="btn primary sm">Restyle</button></div>
+      <div class="row" style="align-items:flex-end"><div class="stripimgs"><div class="t"></div><div class="t on"><input type="checkbox" checked></div></div></div>
+      <div class="row" style="justify-content:flex-end"><button class="btn" data-to="E01">Close</button><button class="btn primary" data-to="E01">Save as new image</button></div>
+    </div></div>
+  </div>
+</section>
+
+<section data-screen="E08">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><button class="btn sm">‹ Back</button><span class="ttl">flower-01.png</span><span class="spacer"></span></div>
+    <div class="body"><div class="view" style="opacity:.5"><div class="half orig">original</div><div class="half vec"></div></div></div>
+    <div class="ovl"><div class="dlg">
+      <header><h2>Use layer as editing object</h2><button class="iconbtn" data-to="E01">×</button></header>
+      <div class="cbody"><div style="width:110px;height:110px;border-radius:10px;border:1px solid #e2e7ef;margin:0 auto 12px;background:radial-gradient(circle at 40% 40%, #eef2f9, #c7d3e7)"></div>
+      <p style="text-align:center">Edit only <b>color-5b74b8</b>? The full result stays available to restore at any time.</p></div>
+      <footer><button class="btn" data-id="layer-cancel" data-to="E01">Cancel</button><button class="btn primary" data-id="layer-ok" data-to="E01">Use this layer</button></footer>
+    </div></div>
+  </div>
+</section>
+
+<section data-screen="S01">
+  <div class="scr">
+    <div class="body"><div class="grid" style="opacity:.45"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></div>
+    <div class="ovl"><div class="dlg" style="width:520px">
+      <header><h2>Settings</h2><button class="iconbtn" data-to="E01">×</button></header>
+      <div class="cbody">
+        <div class="field"><label>Provider</label><select><option>DashScope (Qwen-Image)</option><option>OpenAI-compatible</option></select></div>
+        <div class="field"><label>API key</label><input type="text" style="width:100%" placeholder="sk-••••••7f3a (leave empty to keep)"></div>
+        <div class="field"><label>API base URL</label><input type="text" style="width:100%" placeholder="https://dashscope.aliyuncs.com/api/v1"></div>
+        <div class="field"><label>Model</label><input type="text" style="width:100%" placeholder="qwen-image-2.0"></div>
+        <p class="note">Stored in the app config file, never in the project folder.</p>
+      </div>
+      <footer><button class="btn" data-id="set-cancel" data-to="E01">Cancel</button><button class="btn primary" data-id="set-save" data-to="E01">Save</button></footer>
+    </div></div>
+  </div>
+</section>
+
+<section data-screen="X01">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><span class="ttl">Projects</span><span class="spacer"></span><span class="icons"><button class="iconbtn">⚙</button><button class="iconbtn">☾</button><select><option>EN</option></select></span></div>
+    <div class="body">
+      <div class="err" data-id="list-error">Failed to load projects: connect ECONNREFUSED 127.0.0.1:8000
+        <button class="btn sm" data-id="retry-list" data-to="G01">Retry</button></div>
+      <p class="note" style="margin-top:12px">Fixed: no empty-state fallback on load failure; Retry re-fetches the list.</p>
+    </div>
+  </div>
+</section>
+
+<section data-screen="X02">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><span class="ttl">Projects</span><span class="spacer"></span><button class="btn primary" disabled>Open Project</button></div>
+    <div class="body">
+      <div class="err" data-id="open-error">Failed to open project: folder is not readable</div>
+      <div class="grid" style="margin-top:14px">
+        <div class="card"><div class="thumb"></div><div class="info"><b>Silk Patterns</b><span>24 images</span></div></div>
+        <div class="card"><div class="thumb"></div><div class="info"><b>Tang Brocade</b><span>8 images</span></div></div>
+      </div>
+      <p class="note" style="margin-top:10px">Error sits above the still-usable grid; the list page itself never broke.</p>
+    </div>
+  </div>
+</section>
+
+<section data-screen="X03">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><button class="btn sm" data-id="back" data-to="P01">‹ Back</button><span class="ttl">Silk Patterns</span><span class="spacer"></span></div>
+    <div class="body" style="display:grid;place-items:center">
+      <div class="err" data-id="project-error">Project no longer exists.
+        <button class="btn sm" data-id="retry-proj" data-to="D01">Retry</button></div>
+    </div>
+  </div>
+</section>
+
+<section data-screen="X04">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><button class="btn sm">‹ Back</button><span class="ttl">flower-01.png</span><span class="spacer"></span><span class="icons"><button class="iconbtn">⚙</button></span></div>
+    <div class="body"><div class="view" style="height:calc(100% - 64px)">
+      <div class="half orig">original<span class="vlabel">Original</span></div>
+      <div class="half vec"><span class="vlabel">Vector</span></div>
+    </div>
+    <div class="bar"><div class="err" style="flex:1" data-id="trace-error">Trace failed: image decode error
+      <button class="btn sm" data-id="retry" data-to="E01">Retry</button></div></div>
+    </div>
+  </div>
+</section>
+
+<section data-screen="X05">
+  <div class="scr">
+    <div class="hdr"><span class="brand">PS</span><button class="btn sm">‹ Back</button><span class="ttl">flower-01.png</span><span class="spacer"></span><span class="icons"><button class="iconbtn">⚙</button></span></div>
+    <div class="body"><div class="view" style="height:calc(100% - 64px)">
+      <div class="half orig" style="background:#f6f2f2;color:#b3423a">🖼 ?<span class="vlabel">Original</span></div>
+      <div class="half vec"><span class="vlabel">Vector</span></div>
+    </div>
+    <div class="bar"><div class="err" style="flex:1" data-id="load-error">Image failed to load: HTTP 404
+      <button class="btn sm" data-id="retry-load" data-to="E01">Retry</button></div></div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

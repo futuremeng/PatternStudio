@@ -1,0 +1,243 @@
+version: 1
+title: PatternStudio — current app flow (audit)
+subtitle: Web / Tauri frontend · reverse-engineered from web/src
+viewport: { width: 1280, height: 800 }
+style: |
+  <style>
+    body { margin: 0; font: 14px -apple-system, "Segoe UI", system-ui, sans-serif; color: #1c2330; background: #f4f6f9; }
+    .scr { height: 100vh; display: flex; flex-direction: column; }
+    .hdr { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px; background: #fff; border-bottom: 1px solid #e3e7ee; flex: none; }
+    .brand { width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(135deg, #4f7cff, #7a5cff); display: inline-grid; place-items: center; color: #fff; font-weight: 700; font-size: 12px; }
+    .ttl { font-weight: 650; }
+    .meta { color: #7b8698; font-size: 12.5px; }
+    .spacer { flex: 1; }
+    .icons { display: flex; gap: 8px; color: #667085; }
+    .iconbtn { border: 1px solid #e3e7ee; background: #fff; border-radius: 8px; padding: 5px 9px; cursor: pointer; color: #475467; }
+    .body { flex: 1; padding: 20px; overflow: hidden; }
+    .btn { border: 1px solid #d5dbe5; background: #fff; border-radius: 9px; padding: 8px 14px; cursor: pointer; font: inherit; }
+    .btn.primary { background: #3568e4; border-color: #3568e4; color: #fff; }
+    .btn.danger { background: #fff; border-color: #f3b4b4; color: #c62828; }
+    .btn.ghost { border: 0; background: transparent; color: #475467; }
+    .btn:disabled { opacity: .55; }
+    .seg { display: inline-flex; border: 1px solid #d5dbe5; border-radius: 9px; overflow: hidden; }
+    .seg button { border: 0; background: #fff; padding: 7px 12px; cursor: pointer; font: inherit; }
+    .seg button.on { background: #eaf0ff; color: #274bba; font-weight: 600; }
+    select, input[type=text], input[type=number], textarea { border: 1px solid #d5dbe5; border-radius: 8px; padding: 7px 9px; font: inherit; background: #fff; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+    .card { background: #fff; border: 1px solid #e6eaf0; border-radius: 12px; overflow: hidden; cursor: pointer; }
+    .thumb { height: 120px; background: radial-gradient(circle at 30% 40%, #dfe7f5, #c9d6ec 60%, #eef2f9); position: relative; }
+    .thumb.ph { display: grid; place-items: center; color: #9aa7bd; background: #edf1f7; }
+    .card .x { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: rgba(255,255,255,.92); color: #c62828; cursor: pointer; }
+    .card .info { padding: 10px 12px; }
+    .card .info b { display: block; font-size: 13.5px; }
+    .card .info span { color: #8a94a6; font-size: 12px; }
+    .skel { height: 178px; border-radius: 12px; background: linear-gradient(90deg, #e9edf3 25%, #f3f6fa 50%, #e9edf3 75%); }
+    .empty { height: 100%; display: grid; place-items: center; text-align: center; color: #7b8698; }
+    .empty .big { font-size: 44px; margin-bottom: 8px; }
+    .bar { position: absolute; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid #e3e7ee; padding: 10px 20px; display: flex; gap: 14px; align-items: center; }
+    .track { flex: 1; height: 8px; border-radius: 999px; background: #e8ecf3; overflow: hidden; }
+    .fill { height: 100%; background: #3568e4; border-radius: 999px; }
+    .prog { color: #667085; font-size: 12.5px; }
+    .ovl { position: absolute; inset: 0; background: rgba(20, 26, 38, .42); display: grid; place-items: center; }
+    .dlg { width: 460px; background: #fff; border-radius: 14px; box-shadow: 0 18px 50px rgba(15,23,42,.28); overflow: hidden; }
+    .dlg header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #eceff4; }
+    .dlg header h2 { margin: 0; font-size: 15.5px; }
+    .dlg .cbody { padding: 16px 18px; }
+    .dlg footer { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 18px; border-top: 1px solid #eceff4; }
+    .row { display: flex; gap: 10px; align-items: center; margin: 10px 0; }
+    .err { background: #fdf0ef; border: 1px solid #f2c1bd; color: #a33025; border-radius: 10px; padding: 12px 14px; display: flex; gap: 12px; align-items: center; }
+    .note { color: #8a94a6; font-size: 12px; }
+    .spin { width: 34px; height: 34px; border-radius: 50%; border: 4px solid #d8e2f6; border-top-color: #3568e4; }
+    .center { height: 100%; display: grid; place-items: center; }
+    .cols { display: grid; grid-template-columns: 250px 1fr 270px; gap: 14px; height: 100%; }
+    .panel { background: #fff; border: 1px solid #e6eaf0; border-radius: 12px; padding: 14px; overflow: hidden; }
+    .panel h4 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #8a94a6; }
+    .field { margin: 10px 0; }
+    .field label { display: block; font-size: 12px; color: #5b6577; margin-bottom: 4px; }
+    .view { background: #fff; border: 1px solid #e6eaf0; border-radius: 12px; display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; position: relative; }
+    .view .half { display: grid; place-items: center; color: #9aa7bd; position: relative; }
+    .view .half.orig { background: radial-gradient(circle at 45% 40%, #e7edf6, #cfd9e8 70%); }
+    .view .half.vec { background: #fbfcfe; border-left: 2px dashed #c9d3e2; }
+    .vlabel { position: absolute; bottom: 8px; left: 10px; font-size: 11.5px; color: #667085; background: rgba(255,255,255,.85); padding: 2px 8px; border-radius: 6px; }
+    .lay { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid #edf0f5; border-radius: 9px; margin: 6px 0; background: #fbfcfe; }
+    .swatch { width: 14px; height: 14px; border-radius: 4px; }
+    .strip { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+    .chip { border: 1px solid #d5dbe5; background: #fff; border-radius: 999px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; }
+    .chip.on { background: #eaf0ff; border-color: #b9ccf5; color: #274bba; font-weight: 600; }
+    .banner { margin: 0 20px 0; background: #fff8e8; border: 1px solid #f0dcae; color: #7a5c14; border-radius: 10px; padding: 9px 14px; display: flex; gap: 12px; align-items: center; }
+    .tree { list-style: none; margin: 0; padding: 0 0 0 22px; border-left: 2px solid #dbe2ec; }
+    .tree li { margin: 10px 0; position: relative; }
+    .node { display: inline-flex; gap: 10px; align-items: center; background: #fff; border: 1px solid #e2e7ef; border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+    .node .tag { font-size: 10.5px; border-radius: 6px; padding: 2px 7px; background: #eef2f8; color: #667085; }
+    .node .tag.auto { background: #f1ecfd; color: #6b4fd0; }
+    .node .pic { width: 40px; height: 40px; border-radius: 8px; background: radial-gradient(circle at 35% 40%, #e3eaf6, #c7d3e7 75%); }
+    .tabs { display: inline-flex; gap: 0; border: 1px solid #d5dbe5; border-radius: 9px; overflow: hidden; }
+    .tabs button { border: 0; padding: 7px 16px; background: #fff; cursor: pointer; font: inherit; }
+    .tabs button.on { background: #eaf0ff; color: #274bba; font-weight: 600; }
+    .stripimgs { display: flex; gap: 8px; overflow: hidden; }
+    .stripimgs .t { width: 52px; height: 52px; border-radius: 9px; background: radial-gradient(circle at 40% 40%, #e3eaf6, #c7d3e7 75%); border: 2px solid transparent; position: relative; }
+    .stripimgs .t.on { border-color: #3568e4; }
+    .stripimgs .t input { position: absolute; top: 2px; left: 2px; }
+    .deadend { border: 1.5px dashed #d98a80; }
+    .deadend .tagx { position: absolute; top: 10px; right: 12px; }
+    .tagx { font-size: 11px; background: #fdf0ef; color: #b3423a; border: 1px solid #f2c1bd; border-radius: 999px; padding: 3px 10px; }
+    .zoombar { display: flex; gap: 6px; position: absolute; bottom: 12px; left: 12px; }
+  </style>
+lanes:
+  - id: projects
+    title: Project library
+    tone: info
+  - id: detail
+    title: Project detail & batch trace
+    tone: info
+  - id: editor
+    title: Image editor
+    tone: success
+  - id: global
+    title: Global overlays
+    tone: neutral
+    enter: any
+    note: Reachable from every screen — gear in the header, ⌘, or the Settings… menu item.
+  - id: errors
+    title: Errors and interruptions
+    tone: danger
+    note: No dead ends. The two former dead ends, X01 and X03, gained exits in this pass; every error state now has a documented way out.
+screens:
+  - id: G01
+    title: Boot — loading project list
+    note: App opens here (route /). Skeleton cards distinguish "loading" from "empty".
+    badges: [home]
+  - id: P01
+    lane: projects
+    title: Project list — cards
+    note: Card click or × (remove). Right-click gives Open / Remove context menu.
+  - id: P02
+    lane: projects
+    title: No projects yet (empty)
+    note: Empty state after first load when no project folders are registered.
+  - id: P03
+    lane: projects
+    title: Confirm remove project
+    note: Modal; removes the project from the list only (folder on disk untouched). Escape or outside-click cancels.
+  - id: D01
+    lane: detail
+    title: Project detail — original images
+    note: The header carries the Split toggle, preset family select, Fixed/Smart segment and the Batch run button. Confirmed derived images are excluded (they live in the lineage tree).
+  - id: D02
+    lane: detail
+    title: Batch running
+    note: Progress bar shows current file; Abort button appears; leaving the page auto-cancels the batch.
+  - id: D03
+    lane: detail
+    title: Batch finished
+    note: Done; button becomes "Retry failed (n)" when some files errored, "Resume" when aborted.
+  - id: D04
+    lane: detail
+    title: Lineage tree of one original
+    note: Filter Confirmed/All; any node (original, confirmed derived, auto-generated) opens the editor.
+  - id: E01
+    lane: editor
+    title: Image editor — idle
+    note: Left params panel, center compare (original vs vector), right layer panel, bottom config strip. The header carries Download SVG, panels and maximize buttons, and the gear.
+  - id: E02
+    lane: editor
+    title: Editor — tracing
+    note: Any parameter change auto-runs a trace; preview shows a busy overlay. Smart tuning shows busy too and can take longer.
+  - id: E03
+    lane: editor
+    title: Patch edits pending
+    note: Select-tool edits on the preview stay pending until Apply / Discard / Undo from this bar.
+  - id: E04
+    lane: editor
+    title: Advanced SVG editor
+    note: Full-canvas editing with zoom in/out/fit; Done commits edits (to the exported layer or the result), Cancel discards, Save as layer snapshots.
+  - id: E05
+    lane: editor
+    title: Smart preset result
+    note: Banner explains the winning candidate and reason; "Use preset result" falls back to the preset baseline; × dismisses.
+  - id: E06
+    lane: editor
+    title: Optimize modal — Enhance
+    note: Real-ESRGAN iterations; each run branches from the selected thumbnail; rounds chain; every iteration auto-persisted into the project.
+  - id: E07
+    lane: editor
+    title: Optimize modal — Redraw
+    note: Qwen-Image prompt restyle; always restyles the original; preset fills an editable prompt; optional seed.
+  - id: E08
+    lane: editor
+    title: Confirm — use layer as editing object
+    note: Same ConfirmModal chrome also guards removing a layer snapshot and removing a project.
+  - id: S01
+    lane: global
+    title: Settings modal
+    note: Qwen-Image provider/key/base/model; key stays masked; Escape disabled while saving.
+  - id: X01
+    lane: errors
+    title: Project list failed to load
+    note: Fixed — the grid no longer falls back to the empty state on load failure; the error offers Retry, which reloads the list.
+  - id: X02
+    lane: errors
+    title: Open project failed
+    note: Error shown inline on the list page; the grid stays usable.
+  - id: X03
+    lane: errors
+    title: Project detail failed to load
+    note: Fixed — the header stays visible so Back returns to the previous page, and Retry re-reads the folder; shared by the detail and lineage-tree pages.
+  - id: X04
+    lane: errors
+    title: Trace failed
+    note: Error bar with Retry; retry re-runs the right task for the kind of failure (trace / layer / smart / load).
+  - id: X05
+    lane: errors
+    title: Source image failed to load
+    note: Error bar; Retry re-fetches the image URL.
+edges:
+  - { from: G01, to: P01, label: projects loaded }
+  - { from: G01, to: P02, label: no projects }
+  - { from: P02, to: D01, label: Open Project (folder picker) }
+  - { from: P01, to: D01, label: Open project (⌘O / folder picker) }
+  - { from: P01, to: D01, label: click project card }
+  - { from: P01, to: P03, label: × on card }
+  - { from: P03, to: P01, label: cancel / confirm, kind: back }
+  - { from: P01, to: X02, label: open error, kind: error }
+  - { from: G01, to: X01, label: list request failed, kind: error }
+  - { from: X01, to: G01, label: Retry reloads }
+  - { from: D01, to: X03, label: project load failed, kind: error }
+  - { from: D04, to: X03, label: load failed, kind: error }
+  - { from: X03, to: P01, label: Back, kind: back }
+  - { from: X03, to: D01, label: Retry succeeds }
+  - { from: D01, to: P01, label: Back, kind: back }
+  - { from: D01, to: D02, label: Batch trace (fixed or smart) }
+  - { from: D02, to: D03, label: batch done }
+  - { from: D02, to: D01, label: Abort, kind: back }
+  - { from: D03, to: D02, label: Retry failed / Resume }
+  - { from: D01, to: D04, label: click image card }
+  - { from: D04, to: D01, label: Back, kind: back }
+  - { from: D04, to: E01, label: open any node }
+  - { from: E01, to: D04, label: Back to lineage tree, kind: back }
+  - { from: E01, to: E02, label: change any parameter }
+  - { from: E02, to: E01, label: result }
+  - { from: E02, to: X04, label: trace error, kind: error }
+  - { from: X04, to: E01, label: Retry }
+  - { from: E01, to: E05, label: ✨ Smart tuning }
+  - { from: E05, to: E01, label: use preset / close, kind: back }
+  - { from: E01, to: E03, label: select tool + edit patches }
+  - { from: E03, to: E01, label: apply / discard, kind: back }
+  - { from: E01, to: E04, label: Advanced mode }
+  - { from: E04, to: E01, label: Done / Cancel, kind: back }
+  - { from: E01, to: E06, label: Optimize… }
+  - { from: E06, to: E07, label: Redraw tab }
+  - { from: E07, to: E06, label: Enhance tab, kind: back }
+  - { from: E06, to: E01, label: Close / Save → derived image, kind: back }
+  - { from: E07, to: E01, label: Close / Save → derived image, kind: back }
+  - { from: E01, to: E08, label: Use exported layer as editing object }
+  - { from: E08, to: E01, label: cancel / confirm, kind: back }
+  - { from: E01, to: X05, label: image load failed, kind: error }
+  - { from: X05, to: E01, label: Retry }
+  - { from: E01, to: S01, label: Gear / ⌘, }
+  - { from: S01, to: E01, label: save / cancel / Esc, kind: back }
+notes:
+  - "Audit result: X01 and X03 previously had no way out. Both are now fixed in web/src (ProjectListPage error + Retry; ProjectDetailPage and LineageTreePage keep AppHeader on failure and Retry re-reads). Every arrow below reflects the code as it now stands."
+  - "Global: AppHeader carries gear (Settings), theme toggle and language on every page; ⌘O opens a project, ⌘, opens Settings, Esc closes modals; desktop drag-and-drop imports images into the open project."
+  - Tracing is automatic on parameter change; the server preempts in-flight traces for the newest request and a background-priority job yields (409) while an interactive trace runs.
+  - "Batch leaves cache-first: only images without a same-params result are sent; results persist to cache so the editor opens instant."
