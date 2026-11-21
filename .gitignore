@@ -15,3 +15,7 @@ resources/models/
 # Playwright
 web/test-results/
 web/playwright-report/
+
+# design-flow canvas internal files (flow.yaml/prototype.html/approval.json stay tracked)
+.design-flow/**/.last-valid.yaml
+.design-flow/**/layout.json
