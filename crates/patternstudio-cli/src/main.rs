@@ -102,6 +102,10 @@ enum Command {
         /// Flip: none/h/v/both
         #[arg(long, default_value = "none")]
         flip: String,
+        /// Symmetry-aware assembly: trace one sector and rebuild the whole
+        /// by rotation/mirror <use> copies. off|auto (QWP7)
+        #[arg(long, default_value = "off")]
+        symmetry: String,
     },
     /// Generate a pattern SVG
     Pattern {
@@ -192,6 +196,7 @@ fn main() -> ExitCode {
             scale,
             rotate,
             flip,
+            symmetry,
         } => cmd_trace(
             &input,
             &output,
@@ -217,6 +222,7 @@ fn main() -> ExitCode {
                 scale,
                 rotate,
                 flip,
+                symmetry,
             },
         ),
         Command::Pattern {
@@ -283,6 +289,7 @@ struct TraceOptions {
     scale: f64,
     rotate: f64,
     flip: String,
+    symmetry: String,
 }
 
 fn cmd_trace(
@@ -367,6 +374,7 @@ fn trace_single(
         scale,
         rotate,
         flip,
+        symmetry,
     } = opts;
     if !quiet {
         eprintln!("Loading: {}", input.display());
@@ -427,6 +435,63 @@ fn trace_single(
         eprintln!("Tracing...");
     }
     let pipeline = PatternStudioPipeline::new(&config)?;
+
+    // QWP7 symmetry-aware assembly path: one sector traced, copies placed by
+    // exact rotation/mirror transforms. Falls through to the plain trace
+    // when auto finds no rotation or mirror symmetry.
+    if symmetry == "auto" {
+        if let Some(plan) = patternstudio_core::assembly::plan_for(&img) {
+            if !quiet {
+                eprintln!(
+                    "Symmetry: {} (order {}, mirror {}, axis {:.1}°)",
+                    plan.kind(),
+                    plan.n,
+                    plan.mirror,
+                    plan.base_deg
+                );
+            }
+            let sector = patternstudio_core::assembly::sector_image(&img, &plan);
+            let layered = if layers > 1 {
+                pipeline.trace_layered_auto(&sector, layers)?
+            } else {
+                pipeline.trace_layered(&sector, &LayerAssignment::single_layer())?
+            };
+            let svg = LayeredWriter::write_symmetric(&layered, &plan);
+            std::fs::write(output, &svg)?;
+            let copies = plan.n.max(1) as usize * if plan.mirror { 2 } else { 1 };
+            if !quiet {
+                eprintln!(
+                    "Done: {} sector shape(s) x {copies} cop(y/ies) via <use>",
+                    layered.total_shapes()
+                );
+                eprintln!("Saved: {}", output.display());
+            }
+            if json {
+                let stats = serde_json::json!({
+                    "input": input.display().to_string(),
+                    "output": output.display().to_string(),
+                    "mode": "symmetry-assembly",
+                    "width": layered.width,
+                    "height": layered.height,
+                    "sector_shapes": layered.total_shapes(),
+                    "copies": copies,
+                    "svg_bytes": svg.len(),
+                    "symmetry": {
+                        "kind": plan.kind(),
+                        "n": plan.n,
+                        "mirror": plan.mirror,
+                        "angle_deg": plan.base_deg,
+                        "center": [plan.center.0, plan.center.1],
+                        "fold_f1": plan.fold_f1,
+                    },
+                });
+                println!("{}", serde_json::to_string_pretty(&stats)?);
+            }
+            return Ok(());
+        } else if !quiet {
+            eprintln!("Symmetry: none detected, plain trace");
+        }
+    }
 
     let layered = if layers > 1 {
         pipeline.trace_layered_auto(&img, layers)?
@@ -674,6 +739,7 @@ fn cmd_convert(
                 scale: 1.0,
                 rotate: 0.0,
                 flip: "none".to_string(),
+                symmetry: "off".to_string(),
             },
         )?;
     }

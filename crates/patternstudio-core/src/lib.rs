@@ -1,5 +1,6 @@
 //! PatternStudio core: layered IR, pipeline driver, and configuration.
 
+pub mod assembly;
 pub mod config;
 pub mod error;
 pub mod ir;

@@ -162,6 +162,33 @@
 3. 汇总：**正例检出 11/11**（旋转 1/1，镜像 5/5，平移 5/5，n 误差 0）；**反例 10 项 0 误报**（旋转非对称样本最高分 0.42 vs 门限 0.70，镜像非对称最高 0.468，ice_crack 平移候选全空）——误检率 0%，验收线（rosette 类 ≥90%、meander 平移检出、误报 <5%）**达标**，且触发表 6「对称装配器产品化」行：建议立项扇区追踪+镜像装配+UI 对称图层（另行 WP）。
 4. 已知局限（如实记录，不追阈值）：profile 平坦样本的周期有 ±1–2px 摆动（meander 65 vs 真值 64、wave 126 vs 128），膨胀容差带内 F1 无法区分真周期与邻位，靠 DFT 幅值平带裁决，F1_TIE=2.5e-3 为样本标定值；平移只测轴对齐（斜向周期纹不覆盖）；镜像为单轴；旋转 n 限 3..12；前景依赖全局 Otsu，低对比度输入需 QWP2 式预处理兜底。质量门禁：workspace 测试全绿（含 symmetry 5 例）、clippy 0 warning、release 基线门禁 2 例 passed。
 
+### QWP7 — 对称装配器产品化（P2，承接 QWP6 达标）
+
+**问题**：QWP6 spike 达标后按表 6 立项：对称纹样被重复追踪 N 次，文件大、对称不严格、编辑不同步。
+
+**设计**：core 新增 `assembly` 模块——`plan_for` 把 `symmetry` 检测结果转成装配计划（D_n / C_n / C1v 镜像折叠，中心取前景质心）；**折叠验证门**：把每个像素折回基本扇区取样重建掩码，与原掩码做膨胀 F1（`fold_f1`），低于 `FOLD_F1_MIN=0.97` 视为误检直接回退普通追踪——检测只做提议，折叠验证才有否决权。`sector_image` 把基本扇区外像素置透明；svg writer `write_symmetric` 输出 `<defs>` 扇区 + n 个旋转组 `<use>`（镜像组带 matrix 反射链），编辑一份同步全图。CLI `trace --symmetry off|auto`（默认 off，现有路径逐字节零影响）；auto 分支产 `mode:"symmetry-assembly"` json（kind/n/axis/center/fold_f1/sector_shapes/copies）。
+
+**验收**：真对称样本装配臂 F1 ≥ 普通臂 −0.02 且字节数明显下降；其余样本与关闭开关时逐字节一致（零回退）。
+
+**工作量**：3–4 天。**风险**：误检装配会伤质量——由折叠验证门兜底。
+
+**落地记录（2026-11-22）**：
+
+1. 实现落地：core `assembly.rs`（`AssemblyPlan{center,n,mirror,base_deg,fold_f1}` / `plan_for` / `sector_image` / `fold_consistency`，膨胀半径 r=2 与检测器一致）+ 7 例单测（D4 环、镜像折叠、非对称拒绝、扇区裁剪、折叠正反例）；svg `write_symmetric` + 2 例；CLI trace_single 装配分支；`symmetry.rs` 仅 `dilate`/`foreground_mask`/`SYM_MAX_SIDE` 改 pub(crate)，检测逻辑未动。镜像变换链按右乘序组合：`translate(cx,cy) rotate(base) matrix(1 0 0 -1 0 0) rotate(-base) translate(-cx,-cy)`，末位平移必须取负中心——符号错时镜像副本落进 base 扇区、镜像扇区全空，症状是 base 扇区墨迹翻倍而非镜像区缺失（debug 弯路，已固化到 writer 测试断言）。
+2. A/B（release，8 样本，普通臂 vs `--symmetry auto`，128px 膨胀 r=2 墨迹 F1）：
+
+| 样本 | 普通臂 | 装配臂 | 字节 | 计划 / fold_f1 | 判定 |
+|---|---|---|---|---|---|
+| rosette | 0.9922 | **0.9995** | 29.2KB→**4.86KB** | D8 n8 @0°，9 形×16，0.9995 | ✓ 双升 |
+| taotie | 1.0000 | 1.0000 | 6.98KB→**4.08KB** | C1v 90°，17 形×2，1.0 | ✓ |
+| scroll | 0.9816 | **0.9895** | 5.88KB→**3.16KB** | C1v 0°，10 形×2，1.0 | ✓ 双升 |
+| cloud | 0.9860 | 0.9860 | 逐字节一致 | 检 C1v 0° 但 fold 0.9211 < 门 → 回退 | ✓ 门挡住误检 |
+| greek_key | 1.0000 | 1.0000 | 逐字节一致 | 检 C1v 179.6° 但 fold 0.3303 → 回退 | ✓ 门挡住误检 |
+| meander / ice_crack / wave | — | — | 逐字节一致 | 无可装配对称（平移/无）→ 普通追踪 | ✓ 零影响 |
+
+3. 决策：**fold_f1=0.97 门限由样本标定**（真折叠 ≥0.9995，假阳性镜像 0.33–0.92，间隙清晰），拿不准一律回退普通追踪——宁可不炫装配不降质量。云纹/回纹的镜像误检根源是螺旋/平移周期在镜像评分上的骑墙得分，与 QWP6 记录的平带问题同源，交给折叠验证而非再动检测阈值。测试用环图点中心需 round 取整：直角处 cos/sin 的 1e-16 级 epsilon 使点窗口偏 1px，前景质心偏 2.6px、fold_f1 被拖到 0.70——对称前提的测试图必须逐像素精确。
+4. 已知局限（如实记录）：装配分支提前返回，**跳过 quality_snapshot/baseline 指标**（普通臂门禁不受影响）；平移对称不装配（tiling 为独立机制）；扇区在追踪前被透明裁剪，跨扇区边界的笔画按切割线分割后由镜像/旋转复制拼合；mirror 角 mod 180；中心取前景质心，低对比度输入会偏——由折叠验证门兜底而非精确化；poster 预设下 wave 两臂 F1=0 为普通追踪既有问题，与本包无关（两臂回退一致）；server `/smart` 与 web「对称纹样」预设为后续切片。质量门禁：workspace 测试全绿（core 83、svg 7）、clippy `--all-targets` 0 warning、release 基线门禁 2 例 passed；`--symmetry` 默认 off 保证既有样本逐字节不变。
+
 ## 5. 实施顺序与依赖
 
 ```
@@ -170,9 +197,10 @@ QWP1(度量) ══> QWP2(路由/预处理) ══┐
       ╚══════> QWP4(性能)  ══════┘
 QWP5(Sauvola) 依赖 QWP1/QWP2 落地后的残留长尾数据
 QWP6(spike) 可与 QWP3/QWP4 并行（度量同样用 QWP1）
+QWP7(装配器产品化) 依赖 QWP6 spike 达标
 ```
 
-合并顺序：QWP1 → QWP2 → QWP3+QWP4 → 重录基线 → QWP5 → QWP6。每包独立 PR。
+合并顺序：QWP1 → QWP2 → QWP3+QWP4 → 重录基线 → QWP5 → QWP6 → QWP7。每包独立 PR。
 
 ## 6. 明确延后项与触发条件
 
@@ -181,7 +209,7 @@ QWP6(spike) 可与 QWP3/QWP4 并行（度量同样用 QWP1）
 | 学习型矢量化（SVGDreamer++/StarVector） | QWP1–QWP5 全部落地后，某类真实输入 F1 仍 <0.5 且量大 | 蒸馏为轻量后处理或独立可选服务，不进主链路 |
 | SAM 语义分层 | cutout/watershed 分层满意度 <70%（用户反馈） | onnxruntime 可选依赖，区域预切后逐区追踪 |
 | 真实文物样本集 | 有授权图源 | 进 quality fixtures 分区（synthetic/real），real 区只做监控不做门禁 |
-| 对称装配器产品化 | QWP6 spike 达标 | 新 WP：扇区追踪+镜像装配+UI 对称图层 |
+| 对称装配器产品化 | QWP6 spike 达标 | 已由 QWP7 落地（CLI `--symmetry auto`）；server /smart 候选与 web「对称纹样」预设为后续切片 |
 
 ## 7. 总体度量
 

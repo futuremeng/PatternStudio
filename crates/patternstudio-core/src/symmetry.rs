@@ -17,7 +17,7 @@ use crate::smart::downsample;
 /// Analysis resolution cap: the generated samples are 512 px, so keeping
 /// full detail means no resample at all and thin strokes stay above the
 /// foreground cut. Warps cost ~4x vs 256 but the spike is offline.
-const SYM_MAX_SIDE: u32 = 512;
+pub(crate) const SYM_MAX_SIDE: u32 = 512;
 /// Box dilation radius used as point-set tolerance when comparing masks.
 const DILATE_R: usize = 2;
 /// Rotational orders to try, per the plan (n in 3..=12).
@@ -256,7 +256,7 @@ pub fn analyze_symmetry(img: &ColorImage) -> SymmetryReport {
 /// Foreground = pixels darker than an Otsu threshold of the luminance
 /// histogram (ink on paper). Falls back to the 128 cut when the split is
 /// degenerate, and to nothing when even that leaves a near-empty mask.
-fn foreground_mask(img: &ColorImage) -> Vec<bool> {
+pub(crate) fn foreground_mask(img: &ColorImage) -> Vec<bool> {
     let n = img.width * img.height;
     let mut lum = vec![0u8; n];
     let mut hist = [0f64; 256];
@@ -447,7 +447,7 @@ fn warp_mirror(m: &Mask, cx: f64, cy: f64, a: f64) -> Mask {
 }
 
 /// Box dilation (two separable 1D sliding ORs).
-fn dilate(w: usize, h: usize, px: &[bool], r: usize) -> Vec<bool> {
+pub(crate) fn dilate(w: usize, h: usize, px: &[bool], r: usize) -> Vec<bool> {
     let mut tmp = vec![false; w * h];
     for y in 0..h {
         for x in 0..w {
@@ -550,11 +550,11 @@ mod tests {
     fn detects_vertical_mirror_axis() {
         // Asymmetric blobs on the left, mirrored on the right.
         let img = make_image(128, 128, |x, y| {
-            let left = (x < 44 && x >= 20 && y >= 40 && y < 52)
-                || (x < 36 && x >= 28 && y >= 60 && y < 92);
+            let left = ((20..44).contains(&x) && (40..52).contains(&y))
+                || ((28..36).contains(&x) && (60..92).contains(&y));
             let mx = 127 - x;
-            let right = (mx < 44 && mx >= 20 && y >= 40 && y < 52)
-                || (mx < 36 && mx >= 28 && y >= 60 && y < 92);
+            let right = ((20..44).contains(&mx) && (40..52).contains(&y))
+                || ((28..36).contains(&mx) && (60..92).contains(&y));
             left || right
         });
         let r = analyze_symmetry(&img);
