@@ -155,6 +155,14 @@ enum Command {
         #[arg(long)]
         open: bool,
     },
+    /// Analyze pattern symmetry: rotation / mirror / translation (QWP6 spike)
+    Symmetry {
+        /// Input image path(s)
+        input: Vec<PathBuf>,
+        /// Output one JSON report per line
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -240,6 +248,7 @@ fn main() -> ExitCode {
             layers,
             open,
         } => cmd_convert(&input, &output, &simplify, &mode, max_colors, layers, open),
+        Command::Symmetry { input, json } => cmd_symmetry(&input, json),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -974,6 +983,41 @@ fn open_in_browser(path: &PathBuf) {
             .arg(path)
             .spawn();
     }
+}
+
+/// Report symmetry structure of pattern images (QWP6 spike): the
+/// rotational / mirror / translational self-similarity of the ink mask.
+fn cmd_symmetry(input: &[PathBuf], json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    for path in input {
+        let img = load_image(path)?;
+        let report = patternstudio_core::symmetry::analyze_symmetry(&img);
+        let stem = path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        if json {
+            println!("{}", serde_json::json!({"file": stem, "report": report}));
+        } else {
+            let rot = match &report.rotation {
+                Some(r) => format!("rotation {}-fold @{}", r.n, r.score),
+                None => "rotation: none".to_string(),
+            };
+            let mir = match &report.mirror {
+                Some(m) => format!("mirror @{}deg/{}", m.angle_deg, m.score),
+                None => "mirror: none".to_string(),
+            };
+            let tra = match &report.translation {
+                Some(t) => format!(
+                    "translation {} p={}px/{}c@prof{}/@f1{}",
+                    t.axis, t.period, t.cycles, t.profile, t.f1
+                ),
+                None => "translation: none".to_string(),
+            };
+            println!("{stem}: {rot} | {mir} | {tra}");
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

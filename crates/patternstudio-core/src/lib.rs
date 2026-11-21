@@ -8,6 +8,7 @@ pub mod pipeline;
 pub mod profiles;
 pub mod session_cache;
 pub mod smart;
+pub mod symmetry;
 
 pub use config::{PatternStudioConfig, Resolution, Simplify};
 pub use error::Error;
