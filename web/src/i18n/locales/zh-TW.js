@@ -74,6 +74,10 @@ export default {
   "candidate.photo": "照片",
   "candidate.flat": "扁平色塊",
   "candidate.presetDefault": "預設值",
+  "candidate.cutout": "拼鑲色塊",
+  "candidate.palette4": "調色盤 ≤4",
+  "candidate.palette8": "調色盤 ≤8",
+  "candidate.watershed64": "分水嶺·細",
 
   // Image editor
   "editor.downloadSvg": "下載 SVG",

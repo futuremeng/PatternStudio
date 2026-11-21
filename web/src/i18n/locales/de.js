@@ -74,6 +74,10 @@ export default {
   "candidate.photo": "Foto",
   "candidate.flat": "Flache Farbflächen",
   "candidate.presetDefault": "Preset-Standard",
+  "candidate.cutout": "Cutout-Flächen",
+  "candidate.palette4": "Palette ≤4",
+  "candidate.palette8": "Palette ≤8",
+  "candidate.watershed64": "Watershed fein",
 
   // Image editor
   "editor.downloadSvg": "SVG herunterladen",

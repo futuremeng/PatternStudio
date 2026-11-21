@@ -89,6 +89,13 @@
 
 **工作量**：2 天（含基线重录）。**风险**：候选翻倍→延迟翻倍，由预算与缓存兜住；cutout 与分层 layers>0 的交互——首期候选固定 layers=0。
 
+**落地记录（2026-11-21）**：
+
+1. 第 1 条按设计落地：色块分支加 `cutout`/`palette4`/`palette8`（+ texture<0.1 时 `watershed64`）、混合分支加 `cutout`/`palette4`/`palette8`；fork 原生支持这些参数，未动 fork。第 2 条候选预算未做（留给 QWP4，session 缓存天然复用分割）。cutout 候选固定 layers=0。
+2. **A/B 落地附带修复**：逐候选往返扫描证实试评选择与往返 F1 强相关（ice_crack：lowPoly 试评 0.622↔往返 0.617，bw 0.932↔0.849），但原实现只在 `stroke_dominant` 时用 stroke F1，scan 类 `stroke_like` 源上 lowPoly/photo 等非线稿族仍按 color RMSE 打分——wave 上 color 族 RMSE 0.9197 而往返 F1=0.000 的盲区在选型端复现。修正为 `stroke_basis = stroke_dominant || stroke_like` 时**所有非 ink 族**按 stroke_fidelity 打分（ink_aware 的 lineArt 保持 ink 召回）。
+3. **确定性 tie-break**：color RMSE 饱和使 taotie 上 watershed64/palette4/lowPoly 分差 ~9e-5，原排序由试跑噪声决定（QWP2 A/B 曾因此选 watershed64，0.949）。`decision_from` 在距最优分 <1e-3 的候选中选 svg_bytes 最小者升至首位（remove+insert，保持其余降序），taotie 稳定回 lowPoly。
+4. 最终 A/B（8 干净原图 + 4 干净 scan + 4 scan2，dev 构建）：**ice_crack 原图 lowPoly→bw，F1 0.617→0.849**（第 2 条打分修正生效）；taotie 回 0.962（第 3 条）；其余样本选型与 F1 与 QWP2 基线一致，scan 两组数值集合与 QWP2 完全相同（0.918–0.997 / 0.909–0.970），无回退。新候选 cutout/palette4/palette8/watershed64 **在 16 样本中 0 次胜出**，无一例 svg_bytes 降 ≥30%——**验收标准（≥2 样本改善）未达**。新候选作为更多试评数据落地（UI 可选展示），是否调评分或展示由后续数据决定，本轮不回调阈值凑验收。smart 延迟因候选 11→13 升至 2.9–10.0s（dev 构建，交由 QWP4 压回）。
+
 ### QWP4 — smart 性能与工程项（P1）
 
 1. release 构建跑通全部质量脚本，测得真实延迟基线；profile 试追踪热点（预期在多次 `segment`），利用现有 session 缓存跨候选共享分割（同 segmentation 键的参数组合合并候选，如 palette4/palette8 共享一次 segment）。

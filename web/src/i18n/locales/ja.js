@@ -74,6 +74,10 @@ export default {
   "candidate.photo": "写真",
   "candidate.flat": "フラット色面",
   "candidate.presetDefault": "プリセット既定",
+  "candidate.cutout": "カットアウト",
+  "candidate.palette4": "パレット ≤4",
+  "candidate.palette8": "パレット ≤8",
+  "candidate.watershed64": "ウォータシェード（細）",
 
   // Image editor
   "editor.downloadSvg": "SVG をダウンロード",

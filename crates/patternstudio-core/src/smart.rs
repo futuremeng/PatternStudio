@@ -39,6 +39,11 @@ const COMPLEXITY_REF_BPP: f64 = 32.0;
 /// replace it — otherwise the (known-good) preset is kept.
 const BASELINE_MARGIN: f64 = 0.02;
 
+/// Score gap within which two candidates are considered indistinguishable
+/// for winner selection (color RMSE saturates and ties near-exactly);
+/// ties prefer the lighter vector output.
+const SCORE_TIE_EPS: f64 = 1e-3;
+
 /// Per-family evaluation criteria — what "good" means for each preset style.
 ///
 /// Different presets optimize for different things, so a single
@@ -54,10 +59,6 @@ struct Criteria {
     /// Measure fidelity as ink recall/precision (binary styles) instead of
     /// plain color RMSE.
     ink_aware: bool,
-    /// On line-art-like sources (`stroke_dominant`) judge by dilated stroke
-    /// F1 instead of color RMSE, so candidates that drop thin strokes are
-    /// penalized (a lost stroke barely moves RMSE; see `stroke_fidelity`).
-    stroke_aware: bool,
 }
 
 /// The evaluation criteria for a preset family.
@@ -70,49 +71,40 @@ fn criteria_for(family: &str) -> Criteria {
         "lineArt" => Criteria {
             lambda: 0.15,
             ink_aware: true,
-            stroke_aware: false,
         },
-        // Black & white: whole-image binarization (filled regions), so judge
-        // by overall color fidelity rather than stroke capture.
+        // Black & white: whole-image binarization (filled regions).
         "bw" => Criteria {
             lambda: 0.2,
             ink_aware: false,
-            stroke_aware: true,
         },
         // Color poster: faithful, clean quantization.
         "color" => Criteria {
             lambda: 0.25,
             ink_aware: false,
-            stroke_aware: true,
         },
         // Gradient: needs many colors to avoid banding — barely penalize
         // complexity so detail is preserved.
         "gradient" => Criteria {
             lambda: 0.08,
             ink_aware: false,
-            stroke_aware: false,
         },
         // Low-poly: should stay simple — heavy complexity penalty.
         "lowPoly" => Criteria {
             lambda: 0.5,
             ink_aware: false,
-            stroke_aware: false,
         },
         // Auto-mode families (not user-selectable presets).
         "photo" => Criteria {
             lambda: 0.1,
             ink_aware: false,
-            stroke_aware: true,
         },
         "flat" => Criteria {
             lambda: 0.3,
             ink_aware: false,
-            stroke_aware: true,
         },
         _ => Criteria {
             lambda: 0.25,
             ink_aware: false,
-            stroke_aware: true,
         },
     }
 }
@@ -605,6 +597,16 @@ pub fn candidate_params(stats: &ImageStats) -> Vec<SmartCandidate> {
         out.push(poster_candidate(speckle(4)));
         out.push(flat_candidate(speckle(4)));
         out.push(low_poly_candidate(speckle(4)));
+        // Flat color-block patterns: cutout removes the stacked-layer seams,
+        // the palette caps halve the file, and a finer watershed cut keeps
+        // small regions whole (only for calm images where 64 does not
+        // over-segment the field).
+        out.push(cutout_candidate(speckle(4)));
+        out.push(palette_candidate(speckle(4), 4));
+        out.push(palette_candidate(speckle(4), 8));
+        if stats.texture < 0.1 {
+            out.push(watershed_candidate(speckle(4), 64));
+        }
     } else if stats.effective_colors >= 48 || stats.texture >= 0.35 {
         out.push(photo_candidate(speckle(8)));
         out.push(gradient_candidate(speckle(8)));
@@ -614,6 +616,12 @@ pub fn candidate_params(stats: &ImageStats) -> Vec<SmartCandidate> {
         out.push(photo_candidate(speckle(8)));
         out.push(low_poly_candidate(speckle(4)));
         out.push(flat_candidate(speckle(4)));
+        // Mixed mid-palette sources (multi-color patterns included): the
+        // palette-capped color trials often win on complexity without
+        // losing pattern colors; scoring decides.
+        out.push(cutout_candidate(speckle(4)));
+        out.push(palette_candidate(speckle(4), 4));
+        out.push(palette_candidate(speckle(4), 8));
     }
     // Stroke-like sources deserve binarization trials regardless of how the
     // branch above routed: a scanned pattern's JPEG noise smears the
@@ -825,6 +833,61 @@ fn poster_candidate(speckle: u32) -> SmartCandidate {
     SmartCandidate {
         family: "color",
         label: "color",
+        params: p,
+        is_baseline: false,
+    }
+}
+
+/// Cutout color hierarchy: the color graph is cut instead of stacked, so
+/// color regions share borders with no seams — the best ink consistency
+/// for flat color-block patterns (stacked layers leave hairline gaps).
+fn cutout_candidate(speckle: u32) -> SmartCandidate {
+    let p = SmartParams {
+        filter_speckle: speckle,
+        hierarchical: "cutout".into(),
+        ..Default::default()
+    };
+    SmartCandidate {
+        family: "color",
+        label: "cutout",
+        params: p,
+        is_baseline: false,
+    }
+}
+
+/// Color family capped at a fixed palette size: pattern colors converge and
+/// the SVG roughly halves in size (fewer layers → fewer path groups).
+fn palette_candidate(speckle: u32, max_colors: usize) -> SmartCandidate {
+    let p = SmartParams {
+        filter_speckle: speckle,
+        max_colors: Some(max_colors),
+        ..Default::default()
+    };
+    SmartCandidate {
+        family: "color",
+        label: if max_colors == 4 {
+            "palette4"
+        } else {
+            "palette8"
+        },
+        params: p,
+        is_baseline: false,
+    }
+}
+
+/// Watershed segmentation at a finer cut (`detail` is a merge threshold,
+/// not a pixel size, so it is scale-invariant): more regions for
+/// fine-grained color-block patterns than the default-128 flat candidate.
+fn watershed_candidate(speckle: u32, detail: u32) -> SmartCandidate {
+    let p = SmartParams {
+        clustering: "watershed".into(),
+        filter_speckle: speckle,
+        watershed_detail: detail,
+        ..Default::default()
+    };
+    SmartCandidate {
+        family: "flat",
+        label: "watershed64",
         params: p,
         is_baseline: false,
     }
@@ -1215,11 +1278,15 @@ fn trial_candidates(
         // Score with this candidate's own family criteria (per-style λ and
         // fidelity metric), so each style is judged by what makes *it* good.
         let criteria = criteria_for(c.family);
+        // On stroke-like sources the white field dominates color RMSE, so it
+        // would crown stroke-losing candidates (measured: an F1 = 0 color
+        // blob traced from wave scored 0.92 RMSE) — score every non-ink
+        // family by dilated stroke F1 instead, keeping the score aligned
+        // with round-trip reality.
+        let stroke_basis = stroke_dominant(stats) || stroke_like(stats);
         let fidelity = if criteria.ink_aware {
             ink_fidelity(&seg, &test_img)
-        } else if criteria.stroke_aware && stroke_dominant(stats) {
-            // Line-art-like source: RMSE would call a stroke-losing
-            // candidate faithful; score the dilated stroke F1 instead.
+        } else if stroke_basis {
             stroke_fidelity(&seg, &test_img)
         } else {
             color_fidelity(&seg, &test_img)
@@ -1227,8 +1294,7 @@ fn trial_candidates(
         // On stroke-like sources (dominant or noise-routed), report the stroke
         // F1 for *every* candidate (even ones scored by other metrics) so the
         // report shows which candidates actually kept the strokes.
-        let stroke = (stroke_dominant(stats) || stroke_like(stats))
-            .then(|| stroke_fidelity(&seg, &test_img));
+        let stroke = stroke_basis.then(|| stroke_fidelity(&seg, &test_img));
         let (shape_count, command_count) = doc_stats(&doc);
         let svg = pipeline.writer.write(&doc);
         let complexity = complexity_of(svg.len(), test_img.width, test_img.height);
@@ -1264,6 +1330,25 @@ fn decision_from(
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+
+    // Deterministic tie-break: color RMSE saturates, so near-equal scores
+    // (e.g. fine-watershed vs low-poly on a 2-color pattern) would order
+    // by trial noise alone. Among candidates within the tie epsilon of the
+    // best score, promote the lightest vector output — it renders the same
+    // content for fewer bytes, and stability beats a coin flip.
+    if let Some(best) = reports.first().map(|r| r.score) {
+        let tie = reports
+            .iter()
+            .take_while(|r| best - r.score < SCORE_TIE_EPS)
+            .enumerate()
+            .min_by_key(|(i, r)| (r.svg_bytes, *i))
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        if tie > 0 {
+            let chosen = reports.remove(tie);
+            reports.insert(0, chosen);
+        }
+    }
 
     // The preset baseline report (for the UI comparison), if present.
     let baseline_idx = reports.iter().position(|r| r.is_baseline);
@@ -1582,8 +1667,10 @@ mod tests {
         let decision = recommend(&poster(256, 256)).expect("recommend");
         assert_eq!(decision.params.clustering, "color");
         assert!(decision.candidates.len() >= 3);
-        // Best score first.
-        for pair in decision.candidates.windows(2) {
+        // Best score first, up to the deterministic tie-break: the head may
+        // be the lightest candidate within SCORE_TIE_EPS of the best score.
+        assert!(decision.candidates[0].score + SCORE_TIE_EPS >= decision.candidates[1].score);
+        for pair in decision.candidates[1..].windows(2) {
             assert!(pair[0].score >= pair[1].score);
         }
     }
@@ -1895,6 +1982,111 @@ mod tests {
             !stroke_like(&analyze_image(&photo_like(256, 256))),
             "photo should not be stroke-like"
         );
+    }
+
+    /// QWP3: the new color-graph candidates reach color-block and mixed
+    /// routes, with the right parameter payloads, and never photo routes.
+    #[test]
+    fn colorblock_and_mixed_sources_get_new_color_trials() {
+        let poster_stats = analyze_image(&poster(256, 256));
+        let cands = candidate_params(&poster_stats);
+        for label in ["cutout", "palette4", "palette8", "watershed64"] {
+            assert!(
+                cands.iter().any(|c| c.label == label),
+                "calm color-block source must get the {label} trial (stats: colors {} texture {:.3})",
+                poster_stats.effective_colors,
+                poster_stats.texture
+            );
+        }
+        let cutout = cands.iter().find(|c| c.label == "cutout").unwrap();
+        assert_eq!(cutout.params.hierarchical, "cutout");
+        assert_eq!(cutout.params.max_colors, None);
+        let p4 = cands.iter().find(|c| c.label == "palette4").unwrap();
+        assert_eq!(p4.params.max_colors, Some(4));
+        let ws = cands.iter().find(|c| c.label == "watershed64").unwrap();
+        assert_eq!(
+            (ws.params.clustering.as_str(), ws.params.watershed_detail),
+            ("watershed", 64)
+        );
+    }
+
+    #[test]
+    fn photo_and_active_watershed_sources_skip_the_new_trials_where_wrong() {
+        let photo_stats = analyze_image(&photo_like(256, 256));
+        let cands = candidate_params(&photo_stats);
+        for label in ["cutout", "palette4", "palette8", "watershed64"] {
+            assert!(
+                !cands.iter().any(|c| c.label == label),
+                "photo route must not trial {label}"
+            );
+        }
+    }
+
+    /// QWP3: on stroke-like sources every non-ink family is scored by stroke
+    /// F1 (color RMSE on the white field would crown stroke-losing output).
+    #[test]
+    fn stroke_like_sources_score_all_non_ink_families_by_stroke_f1() {
+        let img = noisy_scan(256, 256);
+        let stats = analyze_image(&img);
+        let cands = candidate_params(&stats);
+        let reports = trial_candidates(&img, &stats, &cands).expect("trials");
+        assert!(reports.iter().any(|r| r.family != "lineArt"));
+        for r in reports.iter().filter(|r| r.family != "lineArt") {
+            assert!(
+                r.stroke_fidelity.is_some()
+                    && (r.fidelity - r.stroke_fidelity.unwrap()).abs() < 1e-12,
+                "{} on a stroke-like source should score by stroke F1: fid {} sf {:?}",
+                r.label,
+                r.fidelity,
+                r.stroke_fidelity
+            );
+        }
+        // The ink-aware lineArt trial is judged by ink recall but still
+        // reports stroke F1 for the UI.
+        if let Some(r) = reports.iter().find(|r| r.family == "lineArt") {
+            assert!(r.stroke_fidelity.is_some(), "lineArt should report sf");
+        }
+    }
+
+    #[test]
+    fn near_equal_scores_break_ties_toward_lighter_output() {
+        let stats = analyze_image(&poster(64, 64));
+        let mk = |family: &str, score: f64, svg_bytes: usize| CandidateReport {
+            family: family.into(),
+            label: family.into(),
+            params: SmartParams::default(),
+            fidelity: score,
+            complexity: 0.0,
+            score,
+            stroke_fidelity: None,
+            is_baseline: false,
+            shape_count: 1,
+            command_count: 1,
+            svg_bytes,
+            elapsed_ms: 1,
+        };
+        let d = decision_from(
+            stats.clone(),
+            vec![
+                mk("a", 0.9, 5000),
+                mk("b", 0.899_95, 1000),
+                mk("c", 0.89, 10),
+            ],
+            None,
+            Instant::now(),
+        );
+        assert_eq!(
+            d.family, "b",
+            "tie within eps should pick the lighter output"
+        );
+        // A clear gap must not be overridden by the tie rule.
+        let d = decision_from(
+            stats,
+            vec![mk("a", 0.9, 5000), mk("c", 0.89, 10)],
+            None,
+            Instant::now(),
+        );
+        assert_eq!(d.family, "a");
     }
 
     #[test]
