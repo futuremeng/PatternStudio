@@ -515,14 +515,30 @@ async fn smart(
     })?;
     let family = req.family;
     let result = tokio::task::spawn_blocking(move || {
-        let image = load_image(&img_path)
+        let mut image = load_image(&img_path)
             .map_err(|e| EngineError::InvalidInput(format!("failed to load image: {e}")))?;
+        // Automatic enhancement: noisy / unevenly-lit stroke sources (paper
+        // scans) analyze and trace better after the Real-ESRGAN pass. Any
+        // failure (missing model, decode) silently keeps the original image
+        // so smart never regresses because of this step.
+        let mut preprocessed = false;
+        if patternstudio_core::smart::needs_preprocess(&patternstudio_core::smart::analyze_image(
+            &image,
+        )) {
+            if let Ok(out) = patternstudio_tracer::preprocess_image(&img_path, None) {
+                if let Ok(enhanced) = load_image(&out.path) {
+                    image = enhanced;
+                    preprocessed = true;
+                }
+            }
+        }
         // Family-scoped when the client picked a preset, auto otherwise.
-        let decision = match family.as_deref() {
+        let mut decision = match family.as_deref() {
             Some(f) => patternstudio_core::smart::recommend_for(&image, f),
             None => patternstudio_core::smart::recommend(&image),
         }
         .map_err(|e| EngineError::Internal(format!("smart analysis failed: {e}")))?;
+        decision.preprocessed = preprocessed;
         Ok::<SmartDecision, EngineError>(decision)
     })
     .await
@@ -1220,6 +1236,7 @@ async fn start_batch_trace(
                             "family": d.family,
                             "reasonKey": d.reason_key,
                             "params": d.params,
+                            "preprocessed": d.preprocessed,
                         })
                     });
                     let _ = tx

@@ -67,6 +67,8 @@ export default {
   // Smart tuning reason (backend SmartDecision.reasonKey)
   "smart.reasonScoped": "圖像分析：{colors} 色 · 色彩度 {colorfulness} · 雙峰度 {bimodality} · 紋理 {texture}% → 在「{family}」內試算 {n} 組參數（含預設基線），「{winner}」勝出（保真 {fidelity}，複雜度 {complexity}，{shapes} 形狀）",
   "smart.reasonAuto": "圖像分析：{colors} 色 · 色彩度 {colorfulness} · 雙峰度 {bimodality} · 紋理 {texture}% → 試算 {n} 組參數，「{winner}」勝出（保真 {fidelity}，複雜度 {complexity}，{shapes} 形狀）",
+  "smart.preprocessed": "已先增強再分析",
+  "smart.preprocessedTitle": "源圖有噪點或光照不均，分析前已用增強模型降噪修復。",
 
   // Smart candidate labels (backend SmartCandidate.label)
   "candidate.photo": "照片",

@@ -67,6 +67,8 @@ export default {
   // Smart tuning reason (backend SmartDecision.reasonKey)
   "smart.reasonScoped": "Image analysis: {colors} colors · colorfulness {colorfulness} · bimodality {bimodality} · texture {texture}% → tried {n} parameter sets within \"{family}\" (incl. preset baseline), \"{winner}\" won (fidelity {fidelity}, complexity {complexity}, {shapes} shapes)",
   "smart.reasonAuto": "Image analysis: {colors} colors · colorfulness {colorfulness} · bimodality {bimodality} · texture {texture}% → tried {n} parameter sets, \"{winner}\" won (fidelity {fidelity}, complexity {complexity}, {shapes} shapes)",
+  "smart.preprocessed": "Enhanced before tracing",
+  "smart.preprocessedTitle": "The source looked noisy or unevenly lit, so it was cleaned up with the enhance model before analysis.",
 
   // Smart candidate labels (backend SmartCandidate.label)
   "candidate.photo": "Photo",

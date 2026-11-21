@@ -69,6 +69,12 @@
 
 **工作量**：2–3 天。**风险**：自动预处理使 512px 延迟 +1~2s——仅高噪触发且 release 复测；彩噪误判 photo 族 → QWP1 度量兜底 A/B。
 
+**落地记录（2026-11-21）**：
+
+1. 第 1 条按实测数据落地为 `stroke_like = texture ≥ 0.025 && effective_colors ≤ 24 && colorfulness − 2·noise < 60`。与提案差异：真实根因是 scan 的 bimodality 塌缩为 0（稀疏墨量），而样本是灰度 JPEG、colorfulness 实测恒为 0——彩噪假设与噪修正项在真实数据上不起作用，命中靠 texture 与 colors；texture 阈值由 0.05 降至 0.025（云纹类 scan 的 texture 落在 0.025–0.045 区间；poster/photo 族合成样本验证不误触发）。第 3 条触发条件加 stroke 前提 `(stroke_dominant || stroke_like) && (noise > 12 || illumination_var > 20)`，防止照片/色块图用自身色块的照度方差误触发预处理。
+2. **度量 bug**：A/B 脚本把 435×435 的 scan 样本与 512×512 光栅按公共 n×n 前缀截断对齐，每行错位 77px——评估报告 §2.4 中干净 scan 的 ink F1（0.00–0.08）系该错位产物，非管线真实损失。修复（按源图原始尺寸光栅化）后，干净 scan 在既有选型下即得 0.918–0.997。
+3. 最终 A/B（验收线 scan 组 F1 ≥0.6，全部通过）：干净 scan ice_crack 0.918 / cloud 0.954 / meander 0.997 / rosette 0.946；scan2 组 ice_crack 0.909 / cloud 0.952 / meander 0.970 / rosette 0.933（自动预处理较基线 0.625–0.903 的提升真实有效）；干净 8 样本 preprocess 触发率 0/8、有噪 4/4 触发；F1 0.617–1.000（含 ±2px 膨胀的往返度量口径，与报告 §2.3 表不直接可比），其中两处选型因新增候选参与试评而改变：ice_crack photo→lowPoly（0.372→0.617）、wave flat→bw（0.562→0.903），其余六处选型不变，无回退。
+
 ### QWP3 — fork 1.0 开关进候选集（P1）
 
 **问题**：F4，cutout/palette/watershed/simplify 从未被评估。

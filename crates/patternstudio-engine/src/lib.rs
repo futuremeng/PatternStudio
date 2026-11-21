@@ -717,9 +717,23 @@ pub fn trace_file_smart(
     img_path: &Path,
     family: Option<&str>,
 ) -> Result<(TraceResult, SmartDecision), EngineError> {
-    let img = patternstudio_tracer::load_image(img_path)
+    let mut img = patternstudio_tracer::load_image(img_path)
         .map_err(|e| EngineError::Io(format!("failed to load image: {e}")))?;
-    smart_trace_image(img, family)
+    // Same automatic-enhancement hook as the server's /smart endpoint (see
+    // `needs_preprocess`); any failure keeps the original image.
+    let mut preprocessed = false;
+    if patternstudio_core::smart::needs_preprocess(&patternstudio_core::smart::analyze_image(&img))
+    {
+        if let Ok(out) = patternstudio_tracer::preprocess_image(img_path, None) {
+            if let Ok(enhanced) = patternstudio_tracer::load_image(&out.path) {
+                img = enhanced;
+                preprocessed = true;
+            }
+        }
+    }
+    let (tr, mut decision) = smart_trace_image(img, family)?;
+    decision.preprocessed = preprocessed;
+    Ok((tr, decision))
 }
 
 /// Smart one-shot trace of in-memory image bytes (see [`trace_file_smart`]).

@@ -133,6 +133,34 @@ pub fn stroke_dominant(stats: &ImageStats) -> bool {
     stats.ink_coverage < 0.15 && stats.texture >= 0.05
 }
 
+/// Stroke-like *routing* test: this image should get line-art / black-and-
+/// white candidates even when the two-tone bimodality gate misses it.
+///
+/// The failure it fixes: a paper scan's JPEG noise smears the grayscale
+/// histogram so bimodality collapses toward 0 (measured: clean scans and
+/// their originals alike report bimodality 0 for sparse ink), the two-tone
+/// gate misses them, and no binarization is ever trialed. Line-art-like
+/// content — fine strokes over a light field, hence at least a faint
+/// texture (`texture ≥ 0.025`) — with a small effective palette qualifies;
+/// the colorfulness ceiling only keeps vivid photos out (measured grayscale
+/// scans sit at 0, so the noise correction there is belt-and-braces).
+pub fn stroke_like(stats: &ImageStats) -> bool {
+    stats.texture >= 0.025
+        && stats.effective_colors <= 24
+        && stats.colorfulness - 2.0 * stats.noise < 60.0
+}
+
+/// Whether the source is degraded enough (pixel noise or uneven lighting)
+/// that enhancing it before analysis is worth the latency. Only meaningful
+/// for stroke-like content: photo and flat color-field images inflate
+/// `illumination_var` with their own color blocks and must not be taken for
+/// unevenly-lit scans. Callers run the Real-ESRGAN preprocess step and fall
+/// back to the original on failure.
+pub fn needs_preprocess(stats: &ImageStats) -> bool {
+    (stroke_dominant(stats) || stroke_like(stats))
+        && (stats.noise > 12.0 || stats.illumination_var > 20.0)
+}
+
 /// Statistics computed from a downsampled copy of the source image.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -567,8 +595,9 @@ pub fn candidate_params(stats: &ImageStats) -> Vec<SmartCandidate> {
     let speckle = |base: u32| (base as f64 + stats.noise / 6.0).round().clamp(0.0, 20.0) as u32;
     let adaptive = stats.illumination_var > 20.0;
 
+    let two_tone = stats.bimodality >= 0.45 && stats.colorfulness < 20.0;
     let mut out = Vec::new();
-    if stats.bimodality >= 0.45 && stats.colorfulness < 20.0 {
+    if two_tone {
         out.push(line_art_candidate(stats, adaptive, speckle(4)));
         out.push(bw_candidate(stats, adaptive, speckle(4)));
         out.push(poster_candidate(speckle(4)));
@@ -585,6 +614,19 @@ pub fn candidate_params(stats: &ImageStats) -> Vec<SmartCandidate> {
         out.push(photo_candidate(speckle(8)));
         out.push(low_poly_candidate(speckle(4)));
         out.push(flat_candidate(speckle(4)));
+    }
+    // Stroke-like sources deserve binarization trials regardless of how the
+    // branch above routed: a scanned pattern's JPEG noise smears the
+    // grayscale histogram so bimodality collapses and the two-tone gate
+    // misses it, and even when the gate does hit, the Bradley–Roth pairs
+    // survive uneven paper lighting better than global-Otsu variants.
+    // Additive: nothing from the branch above is dropped, trial scoring
+    // decides.
+    if stroke_like(stats) {
+        for t in [15.0, 25.0] {
+            out.push(bradley_line_art_candidate(stats, speckle(4), t));
+            out.push(bradley_bw_candidate(stats, speckle(4), t));
+        }
     }
     out
 }
@@ -663,6 +705,12 @@ pub fn family_candidates(stats: &ImageStats, family: &str) -> Vec<SmartCandidate
                 c.params.binary_threshold = (stats.otsu_threshold as i32 - 20).clamp(0, 255) as u8;
                 out.push(c);
             }
+            // Bradley–Roth adaptive pairs: local-mean thresholding keeps
+            // faint strokes on unevenly lit scans regardless of the global
+            // lighting statistic that gates `adaptive` above.
+            for t in [15.0, 25.0] {
+                out.push(bradley_line_art_candidate(stats, speckle(4), t));
+            }
         }
         "bw" => {
             out.push(bw_candidate(stats, adaptive, speckle(4)));
@@ -671,6 +719,9 @@ pub fn family_candidates(stats: &ImageStats, family: &str) -> Vec<SmartCandidate
                 let mut c = bw_candidate(stats, false, speckle(4));
                 c.params.binary_threshold = (stats.otsu_threshold as i32 + 20).clamp(0, 255) as u8;
                 out.push(c);
+            }
+            for t in [15.0, 25.0] {
+                out.push(bradley_bw_candidate(stats, speckle(4), t));
             }
         }
         "color" => {
@@ -730,6 +781,23 @@ fn line_art_candidate(stats: &ImageStats, adaptive: bool, speckle: u32) -> Smart
         params: p,
         is_baseline: false,
     }
+}
+
+/// Line art with Bradley–Roth adaptive thresholding: `t` percent below the
+/// local mean, auto window (`binary_adaptive_window = 0`).
+fn bradley_line_art_candidate(stats: &ImageStats, speckle: u32, t: f64) -> SmartCandidate {
+    let mut c = line_art_candidate(stats, true, speckle);
+    c.params.binary_adaptive_window = 0;
+    c.params.binary_adaptive_t = t;
+    c
+}
+
+/// Black & white with Bradley–Roth adaptive thresholding (see above).
+fn bradley_bw_candidate(stats: &ImageStats, speckle: u32, t: f64) -> SmartCandidate {
+    let mut c = bw_candidate(stats, true, speckle);
+    c.params.binary_adaptive_window = 0;
+    c.params.binary_adaptive_t = t;
+    c
 }
 
 fn bw_candidate(stats: &ImageStats, adaptive: bool, speckle: u32) -> SmartCandidate {
@@ -861,6 +929,10 @@ pub struct CandidateReport {
     pub complexity: f64,
     /// `fidelity − λ·complexity` (per-family λ); higher is better.
     pub score: f64,
+    /// Stroke-recall F1 (see `stroke_fidelity`) for this candidate, present
+    /// only when the source is stroke-dominant — the case where plain
+    /// fidelity can hide a lost stroke. Surfaces *why* a candidate won.
+    pub stroke_fidelity: Option<f64>,
     /// True for the preset-default baseline candidate.
     pub is_baseline: bool,
     pub shape_count: usize,
@@ -886,8 +958,12 @@ pub struct SmartDecision {
     /// All trial candidates, best score first.
     pub candidates: Vec<CandidateReport>,
     /// The preset-default baseline report (for comparison), when the search
-    /// was scoped to a preset family.
+    /// was restricted to a preset family.
     pub preset: Option<CandidateReport>,
+    /// True when a noisy / unevenly-lit source was run through the enhance
+    /// step before analysis (see `needs_preprocess`); the callers that can
+    /// preprocess set it, the core never does on its own.
+    pub preprocessed: bool,
     /// Total elapsed time (ms).
     pub elapsed_ms: u64,
 }
@@ -1148,6 +1224,11 @@ fn trial_candidates(
         } else {
             color_fidelity(&seg, &test_img)
         };
+        // On stroke-like sources (dominant or noise-routed), report the stroke
+        // F1 for *every* candidate (even ones scored by other metrics) so the
+        // report shows which candidates actually kept the strokes.
+        let stroke = (stroke_dominant(stats) || stroke_like(stats))
+            .then(|| stroke_fidelity(&seg, &test_img));
         let (shape_count, command_count) = doc_stats(&doc);
         let svg = pipeline.writer.write(&doc);
         let complexity = complexity_of(svg.len(), test_img.width, test_img.height);
@@ -1159,6 +1240,7 @@ fn trial_candidates(
             fidelity,
             complexity,
             score,
+            stroke_fidelity: stroke,
             is_baseline: c.is_baseline,
             shape_count,
             command_count,
@@ -1216,6 +1298,7 @@ fn decision_from(
         stats,
         candidates: reports,
         preset,
+        preprocessed: false,
         elapsed_ms: t0.elapsed().as_millis() as u64,
     }
 }
@@ -1329,6 +1412,33 @@ mod tests {
             let n = ((state >> 33) % 25) as i16 - 12;
             let adj = |v: u8| (v as i16 + n).clamp(0, 255) as u8;
             (adj(r), adj(g), adj(b))
+        })
+    }
+
+    /// White ground + thin dark strokes + JPEG-like degradation: 2×2-block
+    /// chroma wobble (as in 4:2:0 chroma subsampling) and per-pixel
+    /// luminance grain. Matches the measured profile of the real scans:
+    /// tiny palette, low colorfulness, and a smeared grayscale histogram
+    /// whose bimodality collapses to ~0.
+    fn noisy_scan(w: usize, h: usize) -> ColorImage {
+        let mut state: u64 = 0xBF58476D1CE4E5B9;
+        let mut rnd = move |span: i16| {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((state >> 33) % (2 * span as u64 + 1)) as i16 - span
+        };
+        // Chroma wobble: fresh value per 2×2 block, opposite in R and B.
+        let mut cr = 0i16;
+        make_image(w, h, |x, y| {
+            if x % 2 == 0 && y % 2 == 0 {
+                cr = rnd(8);
+            }
+            let base = if x % 48 < 2 || y % 48 < 2 { 20i16 } else { 242 };
+            // Triangular pseudo-Gaussian grain, roughly ±12.
+            let l = base + rnd(12) + rnd(12);
+            let cl = |v: i16| v.clamp(0, 255) as u8;
+            (cl(l + cr), cl(l), cl(l - cr))
         })
     }
 
@@ -1756,6 +1866,140 @@ mod tests {
             "stroke metric should dominate: sfΔ {} vs cfΔ {}",
             sf_kept - sf_lost,
             cf_kept - cf_lost
+        );
+    }
+
+    #[test]
+    fn stroke_like_routes_noisy_scans_but_not_clean_images() {
+        let scan = analyze_image(&noisy_scan(256, 256));
+        assert!(
+            stroke_like(&scan),
+            "noisy scan should route as stroke-like (colors {}, cf {}, noise {}, texture {})",
+            scan.effective_colors,
+            scan.colorfulness,
+            scan.noise,
+            scan.texture
+        );
+        // Bimodality alone would route a scan to color families; stroke_like
+        // is what puts binarization into the trial set.
+        println!(
+            "scan stats: bimodality {} cf {} noise {} texture {}",
+            scan.bimodality, scan.colorfulness, scan.noise, scan.texture
+        );
+        // Clean flat-color and photo images must not hit it.
+        assert!(
+            !stroke_like(&analyze_image(&poster(256, 256))),
+            "flat poster should not be stroke-like"
+        );
+        assert!(
+            !stroke_like(&analyze_image(&photo_like(256, 256))),
+            "photo should not be stroke-like"
+        );
+    }
+
+    #[test]
+    fn stroke_like_branch_adds_binary_and_bradley_candidates() {
+        let scan = analyze_image(&noisy_scan(256, 256));
+        let cands = candidate_params(&scan);
+        assert!(
+            cands.iter().any(|c| c.family == "lineArt"),
+            "stroke-like scan must get lineArt trials"
+        );
+        assert!(
+            cands.iter().any(|c| c.family == "bw"),
+            "stroke-like scan must get bw trials"
+        );
+        assert!(
+            cands
+                .iter()
+                .any(|c| c.params.binary_adaptive
+                    && (c.params.binary_adaptive_t - 25.0).abs() < 1e-9),
+            "stroke-like scan must get the Bradley–Roth t=25 pair"
+        );
+        // Clean color routes keep their candidates untouched.
+        let poster_cands = candidate_params(&analyze_image(&poster(256, 256)));
+        assert!(
+            !poster_cands.iter().any(|c| c.family == "lineArt"),
+            "clean poster route must not grow lineArt candidates"
+        );
+    }
+
+    #[test]
+    fn family_candidates_include_bradley_pairs_for_binary_families() {
+        let stats = analyze_image(&poster(256, 256));
+        for family in ["lineArt", "bw"] {
+            let cands = family_candidates(&stats, family);
+            let br = cands
+                .iter()
+                .filter(|c| c.params.binary_adaptive && c.params.binary_adaptive_window == 0)
+                .count();
+            assert!(
+                br >= 2,
+                "{family} should trial both Bradley–Roth t values, got {br}"
+            );
+            assert!(
+                cands
+                    .iter()
+                    .any(|c| (c.params.binary_adaptive_t - 25.0).abs() < 1e-9),
+                "{family} should trial the more tolerant t=25"
+            );
+        }
+    }
+
+    #[test]
+    fn trial_reports_carry_stroke_fidelity_on_stroke_dominant_sources() {
+        let decision = recommend_for(&stroke_art(256, 256, 32), "bw").expect("recommend_for");
+        assert!(
+            stroke_dominant(&decision.stats),
+            "premise: stroke art is stroke-dominant"
+        );
+        assert!(
+            decision
+                .candidates
+                .iter()
+                .all(|c| c.stroke_fidelity.is_some()),
+            "every candidate should report strokeFidelity on a stroke-dominant source"
+        );
+        // And omit it when the source is not stroke-dominant.
+        let poster_decision = recommend(&poster(256, 256)).expect("recommend");
+        assert!(
+            poster_decision
+                .candidates
+                .iter()
+                .all(|c| c.stroke_fidelity.is_none()),
+            "non-stroke sources should not report strokeFidelity"
+        );
+    }
+
+    #[test]
+    fn needs_preprocess_fires_on_degraded_stroke_sources_only() {
+        // A clean stroke source never preprocesses, however lit.
+        let clean = analyze_image(&stroke_art(256, 256, 32));
+        assert!(
+            !needs_preprocess(&clean),
+            "clean line art must not preprocess"
+        );
+        // The same source degrades either way and then must.
+        let mut noisy = clean.clone();
+        noisy.noise = 15.0;
+        assert!(needs_preprocess(&noisy), "noisy line art should preprocess");
+        let mut uneven = clean.clone();
+        uneven.illumination_var = 25.0;
+        assert!(
+            needs_preprocess(&uneven),
+            "unevenly-lit line art should preprocess"
+        );
+        // Color-field images have large illumination_var from their own
+        // blocks, yet must not be taken for scans.
+        let poster_stats = analyze_image(&poster(256, 256));
+        assert!(
+            !needs_preprocess(&poster_stats),
+            "clean poster should not preprocess (illumination_var {})",
+            poster_stats.illumination_var
+        );
+        assert!(
+            !needs_preprocess(&analyze_image(&photo_like(256, 256))),
+            "clean photo should not preprocess"
         );
     }
 }

@@ -67,6 +67,8 @@ export default {
   // Smart tuning reason (backend SmartDecision.reasonKey)
   "smart.reasonScoped": "画像分析：{colors} 色 · 彩度 {colorfulness} · 二峰性 {bimodality} · 質感 {texture}% → 「{family}」内で {n} 組のパラメータを試算（プリセット基準を含む）、「{winner}」が最適（忠実度 {fidelity}、複雑度 {complexity}、{shapes} 形状）",
   "smart.reasonAuto": "画像分析：{colors} 色 · 彩度 {colorfulness} · 二峰性 {bimodality} · 質感 {texture}% → {n} 組のパラメータを試算、「{winner}」が最適（忠実度 {fidelity}、複雑度 {complexity}、{shapes} 形状）",
+  "smart.preprocessed": "解析前に補正済み",
+  "smart.preprocessedTitle": "ソースにノイズまたは光ムラがあるため、解析前に補正モデルで整備しました。",
 
   // Smart candidate labels (backend SmartCandidate.label)
   "candidate.photo": "写真",

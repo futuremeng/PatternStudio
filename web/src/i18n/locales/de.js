@@ -67,6 +67,8 @@ export default {
   // Smart tuning reason (backend SmartDecision.reasonKey)
   "smart.reasonScoped": "Bildanalyse: {colors} Farben · Farbigkeit {colorfulness} · Bimodalität {bimodality} · Textur {texture}% → {n} Parametersätze in „{family}“ getestet (inkl. Preset-Referenz), „{winner}“ gewann (Treue {fidelity}, Komplexität {complexity}, {shapes} Formen)",
   "smart.reasonAuto": "Bildanalyse: {colors} Farben · Farbigkeit {colorfulness} · Bimodalität {bimodality} · Textur {texture}% → {n} Parametersätze getestet, „{winner}“ gewann (Treue {fidelity}, Komplexität {complexity}, {shapes} Formen)",
+  "smart.preprocessed": "Vor Analyse verbessert",
+  "smart.preprocessedTitle": "Die Quelle wirkte verrauscht oder ungleichmäßig ausgeleuchtet und wurde vor der Analyse aufbereitet.",
 
   // Smart candidate labels (backend SmartCandidate.label)
   "candidate.photo": "Foto",

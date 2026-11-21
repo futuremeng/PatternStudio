@@ -50,6 +50,9 @@ export default function SmartBanner({ smartInfo, t, presetLabel, onApplyPreset, 
       <span className="smart-banner-text">
         {t("editor.smartLabel")}<strong>{candidateLabel(smartWinner?.label || smartInfo.family)}</strong>
         {smartReason ? ` — ${smartReason}` : ""}
+        {smartInfo.preprocessed && (
+          <span title={t("smart.preprocessedTitle")}> · {t("smart.preprocessed")}</span>
+        )}
       </span>
       {smartInfo.preset && (
         <span
