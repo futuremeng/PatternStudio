@@ -191,6 +191,15 @@ struct TraceRequest {
     priority: Option<String>,
 }
 
+/// Cache key for the sector session of a symmetry plan: the source key plus
+/// the fold's identifying geometry, so /trace and /layer share one entry.
+fn sector_key(source_key: &str, plan: &patternstudio_core::assembly::AssemblyPlan) -> String {
+    format!(
+        "{source_key}::sector::{}:{}:{:.1},{:.1},{:.1}",
+        plan.n, plan.mirror, plan.base_deg, plan.center.0, plan.center.1
+    )
+}
+
 /// Resolve the source image path from whichever identifier the client sent.
 /// `project_id` + `filename` lets the web UI trace straight from the project
 /// folder without re-uploading the image on every parameter change.
@@ -300,6 +309,28 @@ async fn trace(
         };
         // A cancelled predecessor may still be finishing its current batch;
         // block until it drops the lock (cancellation is near-instant).
+        // QWP7 follow-up: symmetry-assembly trace. When asked for "auto",
+        // probe the source for an exact fold; on a hit trace only the
+        // fundamental sector (cached as its own session) and assemble the
+        // artwork from `<use>` copies. No symmetry found → plain path below.
+        if params.symmetry.as_deref() == Some("auto") {
+            let full = lock_session(&session);
+            let plan = patternstudio_core::assembly::plan_for(full.image());
+            if let Some(plan) = plan {
+                let sector = patternstudio_core::assembly::sector_image(full.image(), &plan);
+                drop(full);
+                let skey = sector_key(&key, &plan);
+                let sector_session = {
+                    let mut cache = sessions.lock().unwrap();
+                    cache
+                        .get_or_create(&skey, move || Ok::<_, String>(sector))
+                        .map_err(EngineError::InvalidInput)?
+                };
+                let mut sguard = lock_session(&sector_session);
+                let doc = vectorize_with_session(&mut sguard, &config, &cancel)?;
+                return patternstudio_engine::layer_doc_symmetric(&doc, &params, &plan, &cancel);
+            }
+        }
         let mut guard = lock_session(&session);
         trace_with_session(&mut guard, &config, &params, &cancel)
     })
@@ -442,6 +473,50 @@ async fn layer(
 
     let result = tokio::task::spawn_blocking(move || {
         let (v, _l) = params.split();
+        // QWP7 follow-up: symmetry-assembly layering. The layer stage is the
+        // editor's trace path, so "auto" is resolved here as well: probe the
+        // source, and on a hit layer/assemble the SECTOR doc (cached under
+        // the sector-session key) instead of the plain one.
+        if params.symmetry.as_deref() == Some("auto") {
+            let config = build_vtracer_config(&params)?;
+            let key = key_for_source(&img_path, &config.segment_key());
+            let full = {
+                let mut cache = sessions.lock().unwrap();
+                let path = img_path.clone();
+                cache
+                    .get_or_create(&key, || {
+                        load_image(&path).map_err(|e| format!("failed to load image: {e}"))
+                    })
+                    .map_err(EngineError::InvalidInput)?
+            };
+            let full_guard = lock_session(&full);
+            if let Some(plan) = patternstudio_core::assembly::plan_for(full_guard.image()) {
+                let sector = patternstudio_core::assembly::sector_image(full_guard.image(), &plan);
+                drop(full_guard);
+                let skey = sector_key(&key, &plan);
+                let sector_session = {
+                    let mut cache = sessions.lock().unwrap();
+                    cache
+                        .get_or_create(&skey, move || Ok::<_, String>(sector))
+                        .map_err(EngineError::InvalidInput)?
+                };
+                let sdoc_key = format!("{skey}::{}", vectorize_signature(&v));
+                let sdoc = {
+                    let mut cache = docs.lock().unwrap();
+                    cache.get(&sdoc_key)
+                };
+                let sdoc = match sdoc {
+                    Some(doc) => doc,
+                    None => {
+                        let mut sguard = lock_session(&sector_session);
+                        let doc = vectorize_with_session(&mut sguard, &config, &cancel)?;
+                        docs.lock().unwrap().insert(sdoc_key, doc.clone());
+                        Arc::new(doc)
+                    }
+                };
+                return patternstudio_engine::layer_doc_symmetric(&sdoc, &params, &plan, &cancel);
+            }
+        }
         let doc_key = format!("{}::{}", doc_image_key, vectorize_signature(&v));
         let cached = {
             let mut cache = docs.lock().unwrap();

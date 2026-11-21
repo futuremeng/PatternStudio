@@ -19,7 +19,12 @@ describe("param key groups", () => {
   });
 
   it("layer keys are exactly the layering-stage params", () => {
-    expect(LAYER_PARAM_KEYS).toEqual(["layers", "layerStrategy", "complexityThreshold"]);
+    expect(LAYER_PARAM_KEYS).toEqual([
+      "layers",
+      "layerStrategy",
+      "complexityThreshold",
+      "symmetry",
+    ]);
   });
 
   it("vectorize and layer key sets are disjoint", () => {

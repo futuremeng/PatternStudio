@@ -176,6 +176,11 @@ pub struct TraceParams {
     pub layer_strategy: Option<String>,
     #[serde(default)]
     pub complexity_threshold: Option<u8>,
+    /// QWP7 follow-up output-assembly param: "auto" traces one symmetry
+    /// sector and assembles the artwork from `<use>` copies when the fold
+    /// gate passes (server /trace only; the plain path is untouched).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symmetry: Option<String>,
 }
 
 fn default_preset() -> String {
@@ -249,6 +254,8 @@ pub struct LayerParams {
     pub layer_strategy: Option<String>,
     #[serde(default)]
     pub complexity_threshold: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symmetry: Option<String>,
 }
 
 impl TraceParams {
@@ -285,6 +292,7 @@ impl TraceParams {
                 layers: self.layers,
                 layer_strategy: self.layer_strategy.clone(),
                 complexity_threshold: self.complexity_threshold,
+                symmetry: self.symmetry.clone(),
             },
         )
     }
@@ -318,6 +326,7 @@ impl TraceParams {
             binary_sauvola_k: v.binary_sauvola_k,
             layer_strategy: l.layer_strategy.clone(),
             complexity_threshold: l.complexity_threshold,
+            symmetry: l.symmetry.clone(),
         }
     }
 }
@@ -518,6 +527,85 @@ pub fn layer_doc(
     params: &TraceParams,
     cancel: &CancelToken,
 ) -> Result<TraceResult, EngineError> {
+    let (layered, decision, profile_ms) = layer_assign(doc, params, cancel)?;
+
+    let svg = if params.line_art {
+        LayeredWriter::write_line_art(&layered)
+    } else {
+        LayeredWriter::write(&layered)
+    };
+
+    // Per-layer previews re-serialize each layer: worth one more abort check
+    // before the loop on large documents.
+    if cancel.is_cancelled() {
+        return Err(EngineError::Cancelled);
+    }
+    let layers = layer_infos(&layered);
+
+    Ok(TraceResult {
+        svg,
+        width: layered.width,
+        height: layered.height,
+        shape_count: layered.total_shapes(),
+        layer_count: layered.layers.len(),
+        layers,
+        strategy_info: decision,
+        profile_ms,
+    })
+}
+
+/// Symmetry-assembled variant of [`layer_doc`] (QWP7 follow-up): the document
+/// is layered exactly as usual (so layer stats stay meaningful), but the SVG
+/// is written by [`LayeredWriter::write_symmetric`] — the sector appears once
+/// in `<defs>` and the artwork is rebuilt by rotated/mirrored `<use>` copies.
+/// `shape_count` reports the assembled total (sector shapes × copies).
+pub fn layer_doc_symmetric(
+    doc: &VectorDoc,
+    params: &TraceParams,
+    plan: &patternstudio_core::assembly::AssemblyPlan,
+    cancel: &CancelToken,
+) -> Result<TraceResult, EngineError> {
+    let (layered, decision, profile_ms) = layer_assign(doc, params, cancel)?;
+    let svg = LayeredWriter::write_symmetric(&layered, plan);
+    if cancel.is_cancelled() {
+        return Err(EngineError::Cancelled);
+    }
+    let copies = plan.n.max(1) as usize * if plan.mirror { 2 } else { 1 };
+    let layers = layer_infos(&layered);
+    Ok(TraceResult {
+        svg,
+        width: layered.width,
+        height: layered.height,
+        shape_count: layered.total_shapes() * copies,
+        layer_count: layered.layers.len(),
+        layers,
+        strategy_info: decision,
+        profile_ms,
+    })
+}
+
+fn layer_infos(layered: &LayeredDoc) -> Vec<LayerInfo> {
+    layered
+        .layers
+        .iter()
+        .enumerate()
+        .map(|(i, layer)| LayerInfo {
+            name: layer.name.clone(),
+            role: layer.role.to_string(),
+            shape_count: layer.shapes.len(),
+            dominant_color: LayeredWriter::layer_dominant_color(layer),
+            preview_svg: LayeredWriter::layer_preview_svg(layered, i),
+            profile: layer.profile.as_str().into(),
+        })
+        .collect()
+}
+
+/// Shared layering stage: assignment + profiles, before any SVG is written.
+fn layer_assign(
+    doc: &VectorDoc,
+    params: &TraceParams,
+    cancel: &CancelToken,
+) -> Result<(LayeredDoc, Option<AutoDecision>, Option<u64>), EngineError> {
     if cancel.is_cancelled() {
         return Err(EngineError::Cancelled);
     }
@@ -580,42 +668,7 @@ pub fn layer_doc(
     if cancel.is_cancelled() {
         return Err(EngineError::Cancelled);
     }
-
-    let svg = if params.line_art {
-        LayeredWriter::write_line_art(&layered)
-    } else {
-        LayeredWriter::write(&layered)
-    };
-
-    // Per-layer previews re-serialize each layer: worth one more abort check
-    // before the loop on large documents.
-    if cancel.is_cancelled() {
-        return Err(EngineError::Cancelled);
-    }
-    let layers: Vec<LayerInfo> = layered
-        .layers
-        .iter()
-        .enumerate()
-        .map(|(i, layer)| LayerInfo {
-            name: layer.name.clone(),
-            role: layer.role.to_string(),
-            shape_count: layer.shapes.len(),
-            dominant_color: LayeredWriter::layer_dominant_color(layer),
-            preview_svg: LayeredWriter::layer_preview_svg(&layered, i),
-            profile: layer.profile.as_str().into(),
-        })
-        .collect();
-
-    Ok(TraceResult {
-        svg,
-        width: layered.width,
-        height: layered.height,
-        shape_count: layered.total_shapes(),
-        layer_count: layered.layers.len(),
-        layers,
-        strategy_info: decision,
-        profile_ms,
-    })
+    Ok((layered, decision, profile_ms))
 }
 
 /// Full pipeline over a [`Session`]: vectorization + layering in one call.
@@ -918,6 +971,48 @@ mod tests {
         );
     }
 
+    /// QWP7 follow-up: symmetry is an optional output param — absent from
+    /// old client payloads, absent from serializations when unset (existing
+    /// byte-exact baselines depend on that), and carried through split().
+    #[test]
+    fn symmetry_param_is_optional_and_skip_serialized() {
+        let p: TraceParams = serde_json::from_str("{}").unwrap();
+        assert!(p.symmetry.is_none());
+        let p: TraceParams = serde_json::from_str(r#"{"symmetry":"auto"}"#).unwrap();
+        assert_eq!(p.symmetry.as_deref(), Some("auto"));
+        assert!(
+            !serde_json::to_string(&TraceParams::default())
+                .unwrap()
+                .contains("symmetry"),
+            "unset symmetry must not appear in serialized params"
+        );
+        let (v, l) = p.split();
+        assert_eq!(l.symmetry.as_deref(), Some("auto"));
+        let back = TraceParams::from_parts(&v, &l);
+        assert_eq!(back.symmetry.as_deref(), Some("auto"));
+    }
+
+    /// The symmetric layering writes the sector once and tiles it with
+    /// `<use>` copies, reporting the assembled total shape count.
+    #[test]
+    fn layer_doc_symmetric_emits_assembled_svg() {
+        let doc = VectorDoc::new(100, 100);
+        let params = TraceParams::default();
+        let plan = patternstudio_core::assembly::AssemblyPlan {
+            center: (50.0, 50.0),
+            n: 4,
+            mirror: true,
+            base_deg: 90.0,
+            fold_f1: 1.0,
+        };
+        let cancel = CancelToken::new();
+        let r = layer_doc_symmetric(&doc, &params, &plan, &cancel).unwrap();
+        assert!(r.svg.contains("<defs>") && r.svg.contains("<use href=\"#sector-0\""));
+        // Empty sector doc: assembled total stays 0 either way.
+        assert_eq!(r.shape_count, 0);
+        assert_eq!(r.width, 100);
+    }
+
     #[test]
     fn default_params_build_config() {
         let params = TraceParams::default();
@@ -947,6 +1042,7 @@ mod tests {
             layers: 6,
             layer_strategy: Some("hybrid".into()),
             complexity_threshold: Some(55),
+            symmetry: Some("auto".into()),
             ..Default::default()
         };
         let (v, l) = params.split();

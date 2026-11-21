@@ -704,6 +704,7 @@ export const DEFAULT_PARAMS = {
   layers: 0,
   layerStrategy: "none",
   complexityThreshold: 70,
+  symmetry: null,
   cornerThreshold: 60,
   lengthThreshold: 4,
   optimize: 1,
@@ -735,7 +736,7 @@ export const VECTORIZE_PARAM_KEYS = [
  * groups with vectorization for UX while the engine keeps it here for the
  * doc cache key).
  */
-export const LAYER_PARAM_KEYS = ["layers", "layerStrategy", "complexityThreshold"];
+export const LAYER_PARAM_KEYS = ["layers", "layerStrategy", "complexityThreshold", "symmetry"];
 
 /**
  * Split a full param set into { trace, layer } parts (both complete objects
@@ -767,6 +768,10 @@ export const MODE_PRESETS = {
   bw: { params: { preset: "bw", clustering: "binary", binaryAdaptive: true, mode: "spline", filterSpeckle: 4 } },
   gradient: { params: { preset: "photo", clustering: "color", colorPrecision: 8, layerDifference: 4, mode: "spline", simplify: 0.2 } },
   lowPoly: { params: { preset: "poster", clustering: "color", colorPrecision: 4, layerDifference: 32, mode: "polygon" } },
+  // QWP7 follow-up: exact-symmetry assembly — one sector traced, copies
+  // placed by rotation/mirror `<use>` transforms. Falls back to the plain
+  // trace when the source has no fold that passes the consistency gate.
+  symmetry: { params: { preset: "bw", clustering: "binary", mode: "spline", symmetry: "auto" } },
 };
 
 /** Full param set for a preset (DEFAULT_PARAMS + preset overrides). */

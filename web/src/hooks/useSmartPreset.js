@@ -26,7 +26,11 @@ export function useSmartPreset({
       const family = familyFromParams(params);
       const decision = await smartSource(source, family);
       setSmartInfo(decision);
-      if (decision?.params) applyParams(decision.params);
+      // QWP7 follow-up: when the smart probe found an exact fold, keep the
+      // sector-assembly trace on for the tuned params (server falls back to
+      // the plain path if the fold gate rejects at trace time).
+      if (decision?.params)
+        applyParams({ ...decision.params, symmetry: decision.symmetry ? "auto" : null });
     } catch (e) {
       setError(t("editor.smartFailed", { msg: errMsg(e) }));
       setErrorKind("smart");

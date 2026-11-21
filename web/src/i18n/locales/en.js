@@ -54,6 +54,7 @@ export default {
   "preset.bw": "Black & white",
   "preset.gradient": "Gradient",
   "preset.lowPoly": "Low poly",
+    "preset.symmetry": "Symmetry",
 
   // Strategy reasons (backend AutoDecision.reasonKey)
   "reason.binaryComplexity": "Binary/line art + high detail budget ({budget}) → complexity layers",

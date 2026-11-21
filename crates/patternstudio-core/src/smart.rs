@@ -1052,6 +1052,29 @@ pub struct SmartDecision {
     /// Where the wall-clock time went (QWP4). analyze/trials are measured by
     /// core; preprocess is filled in by the caller that runs the enhance step.
     pub elapsed_breakdown: ElapsedBreakdown,
+    /// QWP7 follow-up: exact symmetry detected in the source (rotation and/or
+    /// mirror) whose fold-consistency gate passed. When present the caller may
+    /// trace a single sector and assemble the artwork by `<use>` copies
+    /// (`params.symmetry: "auto"` on /trace); absent = no assembly advice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symmetry: Option<SymmetryAdvice>,
+}
+
+/// Symmetry assembly advice attached to a smart recommendation: the fold the
+/// source is reproduced by exactly enough to trace one sector and tile copies.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SymmetryAdvice {
+    /// Point-group kind, e.g. "C8", "D8", "C1v" (see [`crate::assembly::AssemblyPlan::kind`]).
+    pub kind: String,
+    /// Rotation order; 1 for the mirror-only fold.
+    pub n: u32,
+    /// Whether the sector is also mirrored.
+    pub mirror: bool,
+    /// Mirror-axis angle (degrees, image coordinate system) when mirrored, 0 otherwise.
+    pub angle_deg: f64,
+    /// Dilated-F1 between the source foreground and the fold projection.
+    pub fold_f1: f64,
 }
 
 /// Wall-clock split of a smart call in ms.
@@ -1426,6 +1449,7 @@ fn decision_from(
         preprocessed: false,
         elapsed_ms: t0.elapsed().as_millis() as u64,
         elapsed_breakdown,
+        symmetry: None,
     }
 }
 
@@ -1583,7 +1607,7 @@ fn recommend_inner(
     }
     let tt = Instant::now();
     let reports = trial_candidates(img, &stats, &candidates)?;
-    Ok(decision_from(
+    let mut decision = decision_from(
         stats,
         reports,
         scope,
@@ -1593,7 +1617,19 @@ fn recommend_inner(
             trials_ms: tt.elapsed().as_millis() as u64,
             preprocess_ms: None,
         },
-    ))
+    );
+    // QWP7 follow-up: probe for exact symmetry so the caller can offer the
+    // sector-assembly trace. Cheap relative to the trials; gated by the fold
+    // consistency inside plan_for, so a false positive is impossible by
+    // construction (a rejected fold yields None and the plain path).
+    decision.symmetry = crate::assembly::plan_for(img).map(|p| SymmetryAdvice {
+        kind: p.kind(),
+        n: p.n,
+        mirror: p.mirror,
+        angle_deg: p.base_deg,
+        fold_f1: p.fold_f1,
+    });
+    Ok(decision)
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -2259,6 +2295,52 @@ mod tests {
         if let Some(r) = reports.iter().find(|r| r.family == "lineArt") {
             assert!(r.stroke_fidelity.is_some(), "lineArt should report sf");
         }
+    }
+
+    /// QWP7 follow-up: the recommend probe reports an exact mirror fold so
+    /// the caller can offer the sector-assembly trace.
+    #[test]
+    fn recommend_reports_mirror_symmetry_for_symmetric_source() {
+        // Three blobs arranged mirror-symmetrically across x=50 (odd width
+        // keeps the axis on a pixel center, so the fold is exact to the bit)
+        // but not under 180° rotation: the fold is mirror-only.
+        let img = make_image(101, 101, |x, y| {
+            let blobs = [
+                (25.0f64, 30.0f64, 10.0f64),
+                (75.0f64, 30.0f64, 10.0f64),
+                (50.0f64, 80.0f64, 8.0f64),
+            ];
+            let hit = blobs
+                .iter()
+                .any(|&(bx, by, r)| ((x as f64 - bx).powi(2) + (y as f64 - by).powi(2)).sqrt() < r);
+            if hit {
+                (0, 0, 0)
+            } else {
+                (255, 255, 255)
+            }
+        });
+        let decision = recommend(&img).expect("recommend");
+        let sym = decision.symmetry.expect("mirror fold advice");
+        assert_eq!(sym.kind, "C1v");
+        assert_eq!(sym.n, 1);
+        assert!(sym.mirror);
+        assert!(sym.fold_f1 > 0.97, "fold_f1 {}", sym.fold_f1);
+    }
+
+    /// No exact fold → no assembly advice (the plain path stays implied).
+    #[test]
+    fn recommend_omits_symmetry_for_asymmetric_source() {
+        // Unequal-armed L: fails the vertical/horizontal/diagonal mirrors
+        // and every rotation fold.
+        let img = make_image(128, 128, |x, y| {
+            if y < 32 || x < 16 {
+                (0, 0, 0)
+            } else {
+                (255, 255, 255)
+            }
+        });
+        let decision = recommend(&img).expect("recommend");
+        assert!(decision.symmetry.is_none(), "L-shape has no exact fold");
     }
 
     #[test]

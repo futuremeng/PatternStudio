@@ -54,6 +54,7 @@ export default {
   "preset.bw": "Bianco e nero",
   "preset.gradient": "Gradiente",
   "preset.lowPoly": "Low poly",
+    "preset.symmetry": "Simmetria",
 
   // Strategy reasons (backend AutoDecision.reasonKey)
   "reason.binaryComplexity": "Binario/tratti + budget di dettaglio alto ({budget}) → livelli per complessità",

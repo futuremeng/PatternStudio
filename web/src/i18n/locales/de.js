@@ -54,6 +54,7 @@ export default {
   "preset.bw": "Schwarz-Weiß",
   "preset.gradient": "Verlauf",
   "preset.lowPoly": "Low-Poly",
+    "preset.symmetry": "Symmetrie",
 
   // Strategy reasons (backend AutoDecision.reasonKey)
   "reason.binaryComplexity": "Binär/Linienkunst + hohes Detailbudget ({budget}) → Komplexitätsebenen",

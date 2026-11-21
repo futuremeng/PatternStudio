@@ -54,6 +54,7 @@ export default {
   "preset.bw": "黑白",
   "preset.gradient": "漸變",
   "preset.lowPoly": "低多邊形",
+    "preset.symmetry": "對稱紋樣",
 
   // Strategy reasons (backend AutoDecision.reasonKey)
   "reason.binaryComplexity": "二值/線稿 + 高細節預算({budget}) → 複雜度分層",

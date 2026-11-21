@@ -54,6 +54,7 @@ export default {
   "preset.bw": "白黒",
   "preset.gradient": "グラデーション",
   "preset.lowPoly": "ローポリ",
+    "preset.symmetry": "対称",
 
   // Strategy reasons (backend AutoDecision.reasonKey)
   "reason.binaryComplexity": "バイナリ/線画 + 高詳細予算({budget}) → 複雑度レイヤー",

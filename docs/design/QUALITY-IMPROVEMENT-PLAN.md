@@ -187,7 +187,14 @@
 | meander / ice_crack / wave | — | — | 逐字节一致 | 无可装配对称（平移/无）→ 普通追踪 | ✓ 零影响 |
 
 3. 决策：**fold_f1=0.97 门限由样本标定**（真折叠 ≥0.9995，假阳性镜像 0.33–0.92，间隙清晰），拿不准一律回退普通追踪——宁可不炫装配不降质量。云纹/回纹的镜像误检根源是螺旋/平移周期在镜像评分上的骑墙得分，与 QWP6 记录的平带问题同源，交给折叠验证而非再动检测阈值。测试用环图点中心需 round 取整：直角处 cos/sin 的 1e-16 级 epsilon 使点窗口偏 1px，前景质心偏 2.6px、fold_f1 被拖到 0.70——对称前提的测试图必须逐像素精确。
-4. 已知局限（如实记录）：装配分支提前返回，**跳过 quality_snapshot/baseline 指标**（普通臂门禁不受影响）；平移对称不装配（tiling 为独立机制）；扇区在追踪前被透明裁剪，跨扇区边界的笔画按切割线分割后由镜像/旋转复制拼合；mirror 角 mod 180；中心取前景质心，低对比度输入会偏——由折叠验证门兜底而非精确化；poster 预设下 wave 两臂 F1=0 为普通追踪既有问题，与本包无关（两臂回退一致）；server `/smart` 与 web「对称纹样」预设为后续切片。质量门禁：workspace 测试全绿（core 83、svg 7）、clippy `--all-targets` 0 warning、release 基线门禁 2 例 passed；`--symmetry` 默认 off 保证既有样本逐字节不变。
+4. 已知局限（如实记录）：装配分支提前返回，**跳过 quality_snapshot/baseline 指标**（普通臂门禁不受影响）；平移对称不装配（tiling 为独立机制）；扇区在追踪前被透明裁剪，跨扇区边界的笔画按切割线分割后由镜像/旋转复制拼合；mirror 角 mod 180；中心取前景质心，低对比度输入会偏——由折叠验证门兜底而非精确化；poster 预设下 wave 两臂 F1=0 为普通追踪既有问题，与本包无关（两臂回退一致）；server `/smart` 与 web「对称纹样」预设为后续切片（已落地，见下方后续切片落地记录）。质量门禁：workspace 测试全绿（core 83、svg 7）、clippy `--all-targets` 0 warning、release 基线门禁 2 例 passed；`--symmetry` 默认 off 保证既有样本逐字节不变。
+
+**落地记录（2026-11-22，后续切片：server /smart + web「对称纹样」预设）**：
+
+1. 实现落地：vtracer fork `Session::image()` 只读访问器（无行为变化）；core `SmartDecision.symmetry: Option<SymmetryAdvice{kind,n,mirror,angleDeg,foldF1}>`（skip-serialize，缺省时 /smart JSON 逐字节不变），探测挂在 `recommend_inner`（即所有 /smart 调用）；engine `TraceParams/LayerParams` 新增可选 `symmetry`（skip-serialize，split/from_parts 无损往返）并把 `layer_doc` 拆出共享的 `layer_assign`，新增 `layer_doc_symmetric`（同一分层 + `write_symmetric` 装配输出，shapeCount=扇区形数×副本数）；server `/trace` 与 `/layer` 两路由均接 `symmetry:"auto"`：对全图 `plan_for`，命中则扇区图作为同一 LRU 会话缓存的独立条目（key=`源key::sector::n:mirror:角,中心`，两路由共享）追踪装配，未命中/无可装配对称→原普通路径；web 新增「对称纹样」预设（`preset:bw + binary + spline + symmetry:auto`）并加入 LAYER_PARAM_KEYS/DEFAULT_PARAMS（symmetry 变化会令分层结果缓存失效），SmartBanner 决策带 `symmetry` 时自动并入 `symmetry:"auto"`，无则显式置 null（smart 路径确定化）。
+2. 探测成本：/smart 在 512px rosette release 实测总 482ms（预算 ≤2s，无需把探测门控在 two_tone/flats 统计之后）；`/trace symmetry:auto` 装配臂 0.26s。rosette /smart 返回 `{kind:"D8",n:8,mirror:true,foldF1:0.9995}`，greek_key 等非对称源响应不含 symmetry 字段。
+3. E2E：/trace 与 /layer 对 rosette `symmetry:"auto"` 均产出装配 svg（16×`<use href="#sector-0">`，4.7KB，512×512 viewBox）；fold 被拒的 greek_key 在 /layer 上带/不带 symmetry 的响应 JSON 逐字节一致（回退零影响）；release 基线门禁 2 passed、workspace 测试全绿（core 85、engine 10）、clippy 0、web vitest 62 passed + vite build 通过。
+4. 已知局限（如实记录）：折叠探测每次 /smart 与每次 symmetry:auto 的 /layer 都重跑（analyze+fold 全图，已计入 482ms；会话缓存命中时仅探测本身的开销）；编辑器分层面板的 per-layer 预览仍显示扇区文档的普通渲染，装配 svg 在写出阶段生成——对装配 defs 的逐层编辑为后续项；`write_symmetric` 无 line-art 描边样式，故「对称纹样」预设不带 lineArt（开 symmetry+lineArt 时输出为填充渲染）；LRU 会话缓存每个 symmetry 请求多占用一条扇区会话条目（MAX_SESSIONS=10，两路由共享同一 key 不重复占位）。
 
 ## 5. 实施顺序与依赖
 
@@ -209,7 +216,7 @@ QWP7(装配器产品化) 依赖 QWP6 spike 达标
 | 学习型矢量化（SVGDreamer++/StarVector） | QWP1–QWP5 全部落地后，某类真实输入 F1 仍 <0.5 且量大 | 蒸馏为轻量后处理或独立可选服务，不进主链路 |
 | SAM 语义分层 | cutout/watershed 分层满意度 <70%（用户反馈） | onnxruntime 可选依赖，区域预切后逐区追踪 |
 | 真实文物样本集 | 有授权图源 | 进 quality fixtures 分区（synthetic/real），real 区只做监控不做门禁 |
-| 对称装配器产品化 | QWP6 spike 达标 | 已由 QWP7 落地（CLI `--symmetry auto`）；server /smart 候选与 web「对称纹样」预设为后续切片 |
+| 对称装配器产品化 | QWP6 spike 达标 | 已由 QWP7 落地（CLI `--symmetry auto`）；server /smart 候选与 web「对称纹样」预设已由后续切片落地 |
 
 ## 7. 总体度量
 
