@@ -54,6 +54,10 @@ struct Criteria {
     /// Measure fidelity as ink recall/precision (binary styles) instead of
     /// plain color RMSE.
     ink_aware: bool,
+    /// On line-art-like sources (`stroke_dominant`) judge by dilated stroke
+    /// F1 instead of color RMSE, so candidates that drop thin strokes are
+    /// penalized (a lost stroke barely moves RMSE; see `stroke_fidelity`).
+    stroke_aware: bool,
 }
 
 /// The evaluation criteria for a preset family.
@@ -66,46 +70,68 @@ fn criteria_for(family: &str) -> Criteria {
         "lineArt" => Criteria {
             lambda: 0.15,
             ink_aware: true,
+            stroke_aware: false,
         },
         // Black & white: whole-image binarization (filled regions), so judge
         // by overall color fidelity rather than stroke capture.
         "bw" => Criteria {
             lambda: 0.2,
             ink_aware: false,
+            stroke_aware: true,
         },
         // Color poster: faithful, clean quantization.
         "color" => Criteria {
             lambda: 0.25,
             ink_aware: false,
+            stroke_aware: true,
         },
         // Gradient: needs many colors to avoid banding — barely penalize
         // complexity so detail is preserved.
         "gradient" => Criteria {
             lambda: 0.08,
             ink_aware: false,
+            stroke_aware: false,
         },
         // Low-poly: should stay simple — heavy complexity penalty.
         "lowPoly" => Criteria {
             lambda: 0.5,
             ink_aware: false,
+            stroke_aware: false,
         },
         // Auto-mode families (not user-selectable presets).
         "photo" => Criteria {
             lambda: 0.1,
             ink_aware: false,
+            stroke_aware: true,
         },
         "flat" => Criteria {
             lambda: 0.3,
             ink_aware: false,
+            stroke_aware: true,
         },
         _ => Criteria {
             lambda: 0.25,
             ink_aware: false,
+            stroke_aware: true,
         },
     }
 }
 
-// ── Image analysis ──────────────────────────────────────────────────────────
+// ── Image analysis ──────────────────────────────────────────────────────
+
+/// Stroke-F1 dilation radius in pixels: a stroke may shrink by up to this
+/// much during tracing without being counted as lost, but a *dropped*
+/// stroke still collapses the score (its dilated source band has no match).
+pub const STROKE_DILATE_PX: usize = 2;
+
+/// A source whose content is sparse dark strokes over a light field: the
+/// candidates that win for it must *keep* those strokes, so fidelity is
+/// judged by stroke F1 rather than color RMSE (which the large white
+/// background dominates). Rosette/meander-like patterns hit this; photo and
+/// flat color-field images do not.
+pub fn stroke_dominant(stats: &ImageStats) -> bool {
+    stats.ink_coverage < 0.15 && stats.texture >= 0.05
+}
 
 /// Statistics computed from a downsampled copy of the source image.
 #[derive(Debug, Clone, Serialize)]
@@ -125,6 +151,9 @@ pub struct ImageStats {
     pub otsu_threshold: u8,
     /// Fraction of pixels with a strong gradient (edge/texture density).
     pub texture: f64,
+    /// Fraction of dark pixels (luminance < 128): "ink" coverage. Line art
+    /// has low coverage over a light field; photo/flat color images do not.
+    pub ink_coverage: f64,
     /// Mean gradient magnitude over near-flat pixels (noise proxy, 0..255).
     pub noise: f64,
     /// Mean grayscale luminance (0..=255).
@@ -189,6 +218,7 @@ pub fn analyze_image(img: &ColorImage) -> ImageStats {
     let mut hist = [0f64; 256];
     let (mut sum_rg, mut sum_yb, mut sum_rg2, mut sum_yb2) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
     let mut buckets: HashMap<u32, usize> = HashMap::new();
+    let mut dark = 0usize;
 
     for y in 0..h {
         for x in 0..w {
@@ -200,6 +230,9 @@ pub fn analyze_image(img: &ColorImage) -> ImageStats {
             );
             let l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
             lum[y * w + x] = l;
+            if l < 128.0 {
+                dark += 1;
+            }
             hist[l.round().clamp(0.0, 255.0) as usize] += 1.0;
             let rg = r - g;
             let yb = 0.5 * (r + g) - b;
@@ -241,6 +274,7 @@ pub fn analyze_image(img: &ColorImage) -> ImageStats {
         bimodality,
         otsu_threshold,
         texture,
+        ink_coverage: dark as f64 / n_f,
         noise,
         mean_luminance,
         illumination_var,
@@ -858,11 +892,10 @@ pub struct SmartDecision {
     pub elapsed_ms: u64,
 }
 
-/// Composite the segmentation (top-to-bottom, first paint wins) into an RGB
-/// canvas and measure the RMSE color distance to the source image.
-/// Returns 1.0 for a pixel-perfect reproduction.
-pub fn color_fidelity(seg: &Segmentation, img: &ColorImage) -> f64 {
-    let (w, h) = (seg.width as usize, seg.height as usize);
+/// Composite the segmentation layers into an RGB canvas (white background).
+/// Layers are stored bottom-to-top; the topmost paints first and wins, so
+/// lower layers only fill the gaps. Shared by the fidelity metrics.
+fn composite_seg(seg: &Segmentation, w: usize, h: usize) -> Vec<u8> {
     let n = (w * h).max(1);
     let mut canvas = vec![255u8; n * 3];
     let mut filled = vec![false; n];
@@ -891,6 +924,62 @@ pub fn color_fidelity(seg: &Segmentation, img: &ColorImage) -> f64 {
             }
         }
     }
+    canvas
+}
+
+/// Harmonic mean of precision and recall from the binary confusion counts.
+fn f1(tp: usize, fp: usize, fn_: usize) -> f64 {
+    if tp == 0 {
+        // No ink captured. If the source has no ink either, that's a perfect
+        // (empty) match; otherwise it's a total miss.
+        return if fn_ == 0 { 1.0 } else { 0.0 };
+    }
+    let recall = tp as f64 / (tp + fn_) as f64;
+    let precision = tp as f64 / (tp + fp) as f64;
+    (2.0 * precision * recall / (precision + recall).max(1e-9)).clamp(0.0, 1.0)
+}
+
+/// Dilate a binary mask by a square `r`-pixel neighborhood (two separable
+/// max passes: horizontal then vertical). Public so the CLI quality gate
+/// dilates its F1 masks identically to the smart scoring.
+pub fn dilate_mask(mask: &[bool], w: usize, h: usize, r: usize) -> Vec<bool> {
+    if r == 0 {
+        return mask.to_vec();
+    }
+    let mut tmp = vec![false; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let x1 = (x + r + 1).min(w);
+            if mask[y * w + x.saturating_sub(r)..y * w + x1]
+                .iter()
+                .any(|&v| v)
+            {
+                tmp[y * w + x] = true;
+            }
+        }
+    }
+    let mut out = vec![false; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let y1 = (y + r + 1).min(h);
+            for yy in y.saturating_sub(r)..y1 {
+                if tmp[yy * w + x] {
+                    out[y * w + x] = true;
+                    break;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Composite the segmentation (top-to-bottom, first paint wins) into an RGB
+/// canvas and measure the RMSE color distance to the source image.
+/// Returns 1.0 for a pixel-perfect reproduction.
+pub fn color_fidelity(seg: &Segmentation, img: &ColorImage) -> f64 {
+    let (w, h) = (seg.width as usize, seg.height as usize);
+    let n = (w * h).max(1);
+    let canvas = composite_seg(seg, w, h);
     let mut se = 0.0f64;
     for i in 0..n {
         let dr = canvas[i * 3] as f64 - img.pixels[i * 4] as f64;
@@ -959,14 +1048,45 @@ pub fn ink_fidelity(seg: &Segmentation, img: &ColorImage) -> f64 {
             (false, false) => {}
         }
     }
-    if tp == 0 {
-        // No ink captured. If the source has no ink either, that's a perfect
-        // (empty) match; otherwise it's a total miss.
-        return if fn_ == 0 { 1.0 } else { 0.0 };
+    f1(tp, fp, fn_)
+}
+
+/// Stroke-recall fidelity for line-art-like sources: binarize the source and
+/// the composited result by luminance, dilate both ink masks by
+/// [`STROKE_DILATE_PX`] (so a stroke that merely *thinned* during tracing
+/// still matches), and report the F1 of the dilated masks. Unlike color
+/// RMSE — which a dropped 1-px stroke barely moves because the white
+/// background dominates — this collapses when strokes are *lost*, which is
+/// exactly the failure the smart metric must not hide (see the 2026-11
+/// quality evaluation, finding F1).
+pub fn stroke_fidelity(seg: &Segmentation, img: &ColorImage) -> f64 {
+    let (w, h) = (seg.width as usize, seg.height as usize);
+    let n = (w * h).max(1);
+    let canvas = composite_seg(seg, w, h);
+    let mut src_ink = vec![false; n];
+    let mut out_ink = vec![false; n];
+    for i in 0..n {
+        let sl = 0.2126 * img.pixels[i * 4] as f64
+            + 0.7152 * img.pixels[i * 4 + 1] as f64
+            + 0.0722 * img.pixels[i * 4 + 2] as f64;
+        let ol = 0.2126 * canvas[i * 3] as f64
+            + 0.7152 * canvas[i * 3 + 1] as f64
+            + 0.0722 * canvas[i * 3 + 2] as f64;
+        src_ink[i] = sl < 128.0;
+        out_ink[i] = ol < 128.0;
     }
-    let recall = tp as f64 / (tp + fn_) as f64;
-    let precision = tp as f64 / (tp + fp) as f64;
-    (2.0 * precision * recall / (precision + recall).max(1e-9)).clamp(0.0, 1.0)
+    let src_ink = dilate_mask(&src_ink, w, h, STROKE_DILATE_PX);
+    let out_ink = dilate_mask(&out_ink, w, h, STROKE_DILATE_PX);
+    let (mut tp, mut fp, mut fn_) = (0usize, 0usize, 0usize);
+    for i in 0..n {
+        match (src_ink[i], out_ink[i]) {
+            (true, true) => tp += 1,
+            (false, true) => fp += 1,
+            (true, false) => fn_ += 1,
+            (false, false) => {}
+        }
+    }
+    f1(tp, fp, fn_)
 }
 
 /// Normalize SVG size to 0..=1: bytes-per-pixel on a log scale, saturating at
@@ -992,6 +1112,7 @@ fn doc_stats(doc: &VectorDoc) -> (usize, usize) {
 /// expensive clustering result.
 fn trial_candidates(
     img: &ColorImage,
+    stats: &ImageStats,
     candidates: &[SmartCandidate],
 ) -> Result<Vec<CandidateReport>, Error> {
     // Trial at reduced resolution; scale pixel-unit params accordingly.
@@ -1020,6 +1141,10 @@ fn trial_candidates(
         let criteria = criteria_for(c.family);
         let fidelity = if criteria.ink_aware {
             ink_fidelity(&seg, &test_img)
+        } else if criteria.stroke_aware && stroke_dominant(stats) {
+            // Line-art-like source: RMSE would call a stroke-losing
+            // candidate faithful; score the dilated stroke F1 instead.
+            stroke_fidelity(&seg, &test_img)
         } else {
             color_fidelity(&seg, &test_img)
         };
@@ -1104,7 +1229,7 @@ pub fn recommend(img: &ColorImage) -> Result<SmartDecision, Error> {
     if candidates.is_empty() {
         return Err(Error::Config("no smart candidates".into()));
     }
-    let reports = trial_candidates(img, &candidates)?;
+    let reports = trial_candidates(img, &stats, &candidates)?;
     Ok(decision_from(stats, reports, None, t0))
 }
 
@@ -1143,7 +1268,7 @@ pub fn recommend_for(img: &ColorImage, family: &str) -> Result<SmartDecision, Er
             "no smart candidates for family {family_id}"
         )));
     }
-    let reports = trial_candidates(img, &candidates)?;
+    let reports = trial_candidates(img, &stats, &candidates)?;
     Ok(decision_from(stats, reports, Some(family_id), t0))
 }
 
@@ -1504,5 +1629,133 @@ mod tests {
                 preset.score
             );
         }
+    }
+
+    // ── QWP1: stroke fidelity ──────────────────────────────────────────
+
+    use visioncortex::BinaryImage;
+    use vtracer::ir::{Layer as SegLayer, Paint as SegPaint, RegionMask};
+    use vtracer::{Color, PointI32};
+
+    /// White canvas with one 1-px vertical dark stroke at `x`.
+    fn one_stroke(w: usize, h: usize, x: usize) -> ColorImage {
+        make_image(w, h, move |px, _| {
+            let v = if px == x { 0u8 } else { 255u8 };
+            (v, v, v)
+        })
+    }
+
+    /// Segmentation for `one_stroke`: white background below, dark stroke on
+    /// top (`strokes = false` drops the stroke layer — the failure mode).
+    fn seg_stroke(w: usize, h: usize, x: usize, strokes: bool) -> Segmentation {
+        let mut bg = BinaryImage::new_w_h(w, h);
+        for y in 0..h {
+            for px in 0..w {
+                bg.set_pixel(px, y, true);
+            }
+        }
+        let mut stroke = BinaryImage::new_w_h(w, h);
+        if strokes {
+            for y in 0..h {
+                stroke.set_pixel(x, y, true);
+            }
+        }
+        let mut seg = Segmentation::new(w as u32, h as u32);
+        seg.layers.push(SegLayer {
+            paint: SegPaint::Solid(Color::new(255, 255, 255)),
+            mask: RegionMask::new(bg, PointI32 { x: 0, y: 0 }),
+        });
+        seg.layers.push(SegLayer {
+            paint: SegPaint::Solid(Color::new(0, 0, 0)),
+            mask: RegionMask::new(stroke, PointI32 { x: 0, y: 0 }),
+        });
+        seg
+    }
+
+    /// Line art: sparse 1-px strokes on white (low ink, real edges).
+    fn stroke_art(w: usize, h: usize, gap: usize) -> ColorImage {
+        make_image(w, h, move |px, _| {
+            let v = if px % gap == gap / 2 { 0u8 } else { 255u8 };
+            (v, v, v)
+        })
+    }
+
+    #[test]
+    fn ink_coverage_separates_line_art_from_photo() {
+        let line = analyze_image(&stroke_art(256, 256, 32));
+        assert!(
+            line.ink_coverage < 0.15,
+            "line art ink coverage = {}",
+            line.ink_coverage
+        );
+        assert!(
+            stroke_dominant(&line),
+            "line art should be stroke-dominant (coverage {}, texture {})",
+            line.ink_coverage,
+            line.texture
+        );
+        let photo = analyze_image(&photo_like(256, 256));
+        assert!(
+            !stroke_dominant(&photo),
+            "photo should not be stroke-dominant (coverage {}, texture {})",
+            photo.ink_coverage,
+            photo.texture
+        );
+        let two_tone = analyze_image(&two_tone(256, 256));
+        assert!(
+            (two_tone.ink_coverage - 0.5).abs() < 0.02,
+            "two-tone ink coverage = {}",
+            two_tone.ink_coverage
+        );
+    }
+
+    #[test]
+    fn dilate_mask_grows_a_line_by_radius() {
+        let (w, h, r) = (16usize, 8usize, STROKE_DILATE_PX);
+        let mut m = vec![false; w * h];
+        for y in 0..h {
+            m[y * w + 8] = true;
+        }
+        let d = dilate_mask(&m, w, h, r);
+        for y in 0..h {
+            for x in 0..w {
+                assert_eq!(
+                    d[y * w + x],
+                    (x as i32 - 8).abs() <= r as i32,
+                    "pixel ({x},{y}) after dilation"
+                );
+            }
+        }
+    }
+
+    /// QWP1 meta-test: dropping one stroke must collapse stroke_fidelity
+    /// while the color-RMSE fidelity stays healthy (the blind spot F1 found
+    /// in the evaluation: smart fid 0.94–1.00 while ink F1 was 0.37).
+    #[test]
+    fn stroke_fidelity_flags_a_lost_stroke_that_rmse_hides() {
+        let src = one_stroke(256, 256, 128);
+        let kept = seg_stroke(256, 256, 128, true);
+        let lost = seg_stroke(256, 256, 128, false);
+
+        let sf_kept = stroke_fidelity(&kept, &src);
+        let sf_lost = stroke_fidelity(&lost, &src);
+        assert!(sf_kept > 0.95, "kept strokes F1 = {sf_kept}");
+        assert!(sf_lost < 0.05, "lost strokes F1 = {sf_lost}");
+
+        let cf_kept = color_fidelity(&kept, &src);
+        let cf_lost = color_fidelity(&lost, &src);
+        assert!(cf_kept > 0.95, "kept color fidelity = {cf_kept}");
+        assert!(
+            cf_lost > 0.9,
+            "color fidelity should stay high when a thin stroke is lost \
+             (that is the RMSE blind spot stroke_fidelity closes): {cf_lost}"
+        );
+        // Stroke loss moves the stroke metric more than 5x more than RMSE.
+        assert!(
+            (sf_kept - sf_lost) > 5.0 * (cf_kept - cf_lost),
+            "stroke metric should dominate: sfΔ {} vs cfΔ {}",
+            sf_kept - sf_lost,
+            cf_kept - cf_lost
+        );
     }
 }

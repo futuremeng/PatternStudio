@@ -2,18 +2,39 @@
 //! committed baseline, and a tampered baseline must fail the run. A failing
 //! test means engine behaviour drifted (vtracer bump, param default change,
 //! ...) — review and, if intended, re-bless with
-//! `patternstudio trace <sample> --baseline <file> --bless` and note it in
-//! the PR.
+//! `patternstudio trace <sample> --baseline <file> --bless` (or rerun
+//! `tests/fixtures/quality/record.sh` for the generated fixtures) and note
+//! it in the PR.
+//!
+//! Baseline v2 (QWP1) adds round-trip metrics to every sample: `ink_f1`
+//! (F1 of the ink masks dilated by 2px, computed against the rasterized
+//! traced document) and `psnr`. They compare with fixed absolute
+//! tolerances (0.05 / 1 dB) instead of the `--tolerance` relative one,
+//! because a stroke that disappears is a quality change no count drift
+//! would reveal.
 //!
 //! NOTE: the baseline was blessed on an arm64 macOS debug build. Counts are
-//! integer-stable for these flat-color samples; if a different platform ever
-//! drifts past tolerance, re-bless from that platform in a PR.
+//! integer-stable for these flat-color samples, and the round-trip metrics
+//! are computed by the in-tree scanline rasterizer (pure Rust, no external
+//! renderer), so they are stable across platforms; if a platform ever
+//! drifts past tolerance, re-bless from it in a PR.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const SAMPLES: [&str; 4] = ["bands", "colors", "duo", "lineart"];
+const SAMPLES: [&str; 10] = [
+    "bands",
+    "colors",
+    "duo",
+    "gradient",
+    "lineart",
+    "rosette",
+    "meander",
+    "ice_crack",
+    "cloud",
+    "rosette-scan",
+];
 
 fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/quality")
@@ -62,7 +83,7 @@ fn quality_gate_detects_drift() {
     // Baseline whose "duo" entry is actually the "colors" snapshot: the duo
     // trace must fail with a drift report (this is the CI-red acceptance path
     // for an engine change that moves the metrics; "colors" was picked because
-    // it differs from duo on every metric).
+    // it differs from duo on the shape/color counts).
     let committed: serde_json::Value =
         serde_json::from_slice(&fs::read(fixtures_dir().join("baseline.json")).unwrap()).unwrap();
     let mut tampered = committed.clone();

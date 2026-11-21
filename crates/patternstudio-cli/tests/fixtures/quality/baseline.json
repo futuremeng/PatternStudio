@@ -2,27 +2,83 @@
   "samples": {
     "bands": {
       "color_count": 8,
+      "ink_f1": 1.0,
       "layer_count": 1,
+      "psnr": 100.0,
       "shape_count": 8,
       "svg_bytes": 1707
     },
+    "cloud": {
+      "color_count": 19,
+      "ink_f1": 0.933,
+      "layer_count": 1,
+      "psnr": 25.97,
+      "shape_count": 149,
+      "svg_bytes": 50396
+    },
     "colors": {
       "color_count": 9,
+      "ink_f1": 1.0,
       "layer_count": 1,
+      "psnr": 100.0,
       "shape_count": 9,
       "svg_bytes": 1919
     },
     "duo": {
       "color_count": 2,
+      "ink_f1": 1.0,
       "layer_count": 1,
+      "psnr": 100.0,
       "shape_count": 2,
       "svg_bytes": 618
     },
+    "gradient": {
+      "color_count": 1,
+      "ink_f1": 0.733,
+      "layer_count": 1,
+      "psnr": 16.63,
+      "shape_count": 1,
+      "svg_bytes": 438
+    },
+    "ice_crack": {
+      "color_count": 43,
+      "ink_f1": 0.632,
+      "layer_count": 1,
+      "psnr": 23.86,
+      "shape_count": 57,
+      "svg_bytes": 31628
+    },
     "lineart": {
       "color_count": 2,
+      "ink_f1": 0.996,
       "layer_count": 1,
+      "psnr": 25.69,
       "shape_count": 3,
       "svg_bytes": 919
+    },
+    "meander": {
+      "color_count": 4,
+      "ink_f1": 0.996,
+      "layer_count": 1,
+      "psnr": 32.99,
+      "shape_count": 10,
+      "svg_bytes": 4617
+    },
+    "rosette": {
+      "color_count": 55,
+      "ink_f1": 0.918,
+      "layer_count": 1,
+      "psnr": 24.18,
+      "shape_count": 94,
+      "svg_bytes": 29201
+    },
+    "rosette-scan": {
+      "color_count": 64,
+      "ink_f1": 0.842,
+      "layer_count": 1,
+      "psnr": 23.51,
+      "shape_count": 102,
+      "svg_bytes": 28150
     }
   }
 }

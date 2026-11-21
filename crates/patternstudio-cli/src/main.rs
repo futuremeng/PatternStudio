@@ -11,6 +11,9 @@ use patternstudio_core::{
 use patternstudio_svg::LayeredWriter;
 use patternstudio_tracer::load_image;
 use vtracer::config::Preset;
+use vtracer::ColorImage;
+
+mod raster;
 
 #[derive(Parser)]
 #[command(
@@ -500,7 +503,7 @@ fn trace_single(
         }
     }
 
-    let snapshot = quality_snapshot(&layered, output)?;
+    let snapshot = quality_snapshot(&layered, &img, output)?;
 
     if json {
         let stats = serde_json::json!({
@@ -512,6 +515,8 @@ fn trace_single(
             "layer_count": snapshot["layer_count"],
             "color_count": snapshot["color_count"],
             "svg_bytes": snapshot["svg_bytes"],
+            "ink_f1": snapshot["ink_f1"],
+            "psnr": snapshot["psnr"],
             "layers": layered.layers.iter().map(|l| serde_json::json!({
                 "name": l.name,
                 "role": l.role.to_string(),
@@ -668,9 +673,14 @@ fn cmd_convert(
 
 /// Machine-readable quality snapshot of a trace run, used by the quality
 /// gate (`--baseline`). Counts are stable for a fixed engine + input; any
-/// drift beyond tolerance means engine behaviour changed.
+/// drift beyond tolerance means engine behaviour changed. The round-trip
+/// metrics (QWP1) rasterize the traced document and compare it with the
+/// source bitmap: `ink_f1` (F1 of ink masks dilated by
+/// `patternstudio_core::smart::STROKE_DILATE_PX`) catches lost strokes,
+/// `psnr` the overall pixel error.
 fn quality_snapshot(
     layered: &LayeredDoc,
+    img: &ColorImage,
     output: &Path,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let mut colors: HashSet<[u8; 3]> = HashSet::new();
@@ -680,12 +690,81 @@ fn quality_snapshot(
         }
     }
     let svg_bytes = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
+
+    let canvas = raster::rasterize(layered);
+    let (w, h) = (canvas.width, canvas.height);
+    let src_luma = luma_resized(img, w, h);
+    let out_luma = canvas.luma();
+    let psnr = raster::psnr_db(&src_luma, &out_luma);
+    let src_ink: Vec<bool> = src_luma.iter().map(|&l| l < 128.0).collect();
+    let out_ink: Vec<bool> = out_luma.iter().map(|&l| l < 128.0).collect();
+    let src_ink = patternstudio_core::smart::dilate_mask(
+        &src_ink,
+        w,
+        h,
+        patternstudio_core::smart::STROKE_DILATE_PX,
+    );
+    let out_ink = patternstudio_core::smart::dilate_mask(
+        &out_ink,
+        w,
+        h,
+        patternstudio_core::smart::STROKE_DILATE_PX,
+    );
+    let (mut tp, mut fp, mut fn_) = (0usize, 0usize, 0usize);
+    for i in 0..src_ink.len() {
+        match (src_ink[i], out_ink[i]) {
+            (true, true) => tp += 1,
+            (false, true) => fp += 1,
+            (true, false) => fn_ += 1,
+            (false, false) => {}
+        }
+    }
+    let ink_f1 = if tp == 0 {
+        if fn_ == 0 {
+            1.0
+        } else {
+            0.0
+        }
+    } else {
+        let recall = tp as f64 / (tp + fn_) as f64;
+        let precision = tp as f64 / (tp + fp) as f64;
+        (2.0 * precision * recall / (precision + recall).max(1e-9)).clamp(0.0, 1.0)
+    };
+
     Ok(serde_json::json!({
         "shape_count": layered.total_shapes(),
         "layer_count": layered.layers.len(),
         "color_count": colors.len(),
         "svg_bytes": svg_bytes,
+        "ink_f1": (ink_f1 * 1000.0).round() / 1000.0,
+        "psnr": (psnr * 100.0).round() / 100.0,
     }))
+}
+
+/// Source luma aligned to the rasterized canvas size (nearest-neighbor
+/// resampling when the document was traced at a different scale).
+fn luma_resized(img: &ColorImage, w: usize, h: usize) -> Vec<f64> {
+    if img.width == w && img.height == h {
+        return img
+            .pixels
+            .chunks(4)
+            .map(|px| 0.2126 * px[0] as f64 + 0.7152 * px[1] as f64 + 0.0722 * px[2] as f64)
+            .collect();
+    }
+    (0..h)
+        .flat_map(|y| {
+            let sy = (((y as f64 + 0.5) * img.height as f64) / h as f64)
+                .min((img.height - 1) as f64) as usize;
+            (0..w).map(move |x| {
+                let sx = (((x as f64 + 0.5) * img.width as f64) / w as f64)
+                    .min((img.width - 1) as f64) as usize;
+                let i = (sy * img.width + sx) * 4;
+                0.2126 * img.pixels[i] as f64
+                    + 0.7152 * img.pixels[i + 1] as f64
+                    + 0.0722 * img.pixels[i + 2] as f64
+            })
+        })
+        .collect()
 }
 
 /// The baseline key for an input file: its stem ("colors.png" -> "colors").
@@ -706,6 +785,11 @@ fn baseline_entry(doc: &serde_json::Value, input: &Path) -> Option<serde_json::V
 }
 
 const QUALITY_METRICS: [&str; 4] = ["shape_count", "layer_count", "color_count", "svg_bytes"];
+
+/// Float round-trip metrics and their *absolute* tolerances (QWP1): ink F1
+/// in [0..=1] drifts at most 0.05, PSNR at most 1 dB — deliberately not
+/// scaled by `--tolerance`, which is a relative knob for the integer counts.
+const FLOAT_METRICS: [(&str, f64); 2] = [("ink_f1", 0.05), ("psnr", 1.0)];
 
 /// Refresh the quality gate: merge this run's snapshot into the baseline
 /// file under `samples.<stem>` (maintainer tooling; changes must be noted
@@ -754,6 +838,22 @@ fn check_baseline(
         )
     })?;
     let mut drifts = Vec::new();
+    for &(key, tol) in FLOAT_METRICS.iter() {
+        let base = want
+            .get(key)
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| format!("baseline missing metric {key}"))?;
+        let cur = got
+            .get(key)
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| format!("snapshot missing metric {key}"))?;
+        let delta = (cur - base).abs();
+        if delta > tol {
+            drifts.push(format!(
+                "{key}={cur:.3} vs baseline {base:.3} (Δ {delta:.3} > {tol})"
+            ));
+        }
+    }
     for key in QUALITY_METRICS {
         let base = want
             .get(key)
