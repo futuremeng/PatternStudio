@@ -16,7 +16,8 @@ export default function LineageTreePage() {
   const { t } = useI18n();
   const { projectId, filename } = useParams();
   const navigate = useNavigate();
-  const { project, error } = useProject(projectId);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { project, error } = useProject(projectId, refreshKey);
   // Tree filter: "confirmed" = only user-saved images, "all" = also the
   // auto-generated previews (badged by type). Persisted per browser.
   const [treeFilter, setTreeFilter] = useState(() => {
@@ -27,7 +28,24 @@ export default function LineageTreePage() {
   }, [treeFilter]);
 
   if (!project) {
-    return <div className="placeholder">{error ? error : t("loading")}</div>;
+    // Same dead-end fix as the detail page: keep the header so Back works,
+    // and retry re-reads the folder.
+    return (
+      <div className="project-detail-page">
+        <AppHeader
+          title={filename}
+          onBack={() => navigate(`/project/${encodeURIComponent(projectId)}`)}
+        />
+        <div className="placeholder">
+          {error ? (
+            <div className="error">
+              {error}
+              <button className="error-retry" onClick={() => setRefreshKey(k => k + 1)}>{t("retry")}</button>
+            </div>
+          ) : t("loading")}
+        </div>
+      </div>
+    );
   }
 
   const openImage = (name) =>

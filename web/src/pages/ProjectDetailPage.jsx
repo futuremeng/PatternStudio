@@ -323,7 +323,21 @@ export default function ProjectDetailPage() {
   }, [projectId]);
 
   if (!project) {
-    return <div className="placeholder">{error ? error : t("loading")}</div>;
+    // Keep the header while loading and on failure: without it this page was
+    // a dead end (deleted project / unreachable server) with no way back.
+    return (
+      <div className="project-detail-page">
+        <AppHeader title={projectId.split("/").pop()} onBack={() => navigate("/")} />
+        <div className="placeholder">
+          {error ? (
+            <div className="error">
+              {error}
+              <button className="error-retry" onClick={() => setRefreshKey(k => k + 1)}>{t("retry")}</button>
+            </div>
+          ) : t("loading")}
+        </div>
+      </div>
+    );
   }
 
   const allDone = batchStatus === "done" && batchFailed === 0;

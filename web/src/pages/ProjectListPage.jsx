@@ -82,12 +82,19 @@ export default function ProjectListPage() {
       </AppHeader>
 
       <div className="project-list-body">
-        {error && <div className="error">{error}</div>}
+        {error && projects.length > 0 && <div className="error">{error}</div>}
         {loading ? (
           <div className="project-grid">
             {[0, 1, 2, 3, 4, 5].map(i => (
               <div key={i} className="project-card skeleton" aria-hidden="true" />
             ))}
+          </div>
+        ) : error ? (
+          // The first list fetch failed: do not claim "no projects" — the
+          // error was a dead end, so offer a retry instead.
+          <div className="error">
+            {error}
+            <button className="error-retry" onClick={loadProjects}>{t("retry")}</button>
           </div>
         ) : projects.length === 0 ? (
           <div className="empty-state">
