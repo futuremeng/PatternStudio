@@ -94,7 +94,7 @@
 1. 第 1 条按设计落地：色块分支加 `cutout`/`palette4`/`palette8`（+ texture<0.1 时 `watershed64`）、混合分支加 `cutout`/`palette4`/`palette8`；fork 原生支持这些参数，未动 fork。第 2 条候选预算未做（留给 QWP4，session 缓存天然复用分割）。cutout 候选固定 layers=0。
 2. **A/B 落地附带修复**：逐候选往返扫描证实试评选择与往返 F1 强相关（ice_crack：lowPoly 试评 0.622↔往返 0.617，bw 0.932↔0.849），但原实现只在 `stroke_dominant` 时用 stroke F1，scan 类 `stroke_like` 源上 lowPoly/photo 等非线稿族仍按 color RMSE 打分——wave 上 color 族 RMSE 0.9197 而往返 F1=0.000 的盲区在选型端复现。修正为 `stroke_basis = stroke_dominant || stroke_like` 时**所有非 ink 族**按 stroke_fidelity 打分（ink_aware 的 lineArt 保持 ink 召回）。
 3. **确定性 tie-break**：color RMSE 饱和使 taotie 上 watershed64/palette4/lowPoly 分差 ~9e-5，原排序由试跑噪声决定（QWP2 A/B 曾因此选 watershed64，0.949）。`decision_from` 在距最优分 <1e-3 的候选中选 svg_bytes 最小者升至首位（remove+insert，保持其余降序），taotie 稳定回 lowPoly。
-4. 最终 A/B（8 干净原图 + 4 干净 scan + 4 scan2，dev 构建）：**ice_crack 原图 lowPoly→bw，F1 0.617→0.849**（第 2 条打分修正生效）；taotie 回 0.962（第 3 条）；其余样本选型与 F1 与 QWP2 基线一致，scan 两组数值集合与 QWP2 完全相同（0.918–0.997 / 0.909–0.970），无回退。新候选 cutout/palette4/palette8/watershed64 **在 16 样本中 0 次胜出**，无一例 svg_bytes 降 ≥30%——**验收标准（≥2 样本改善）未达**。新候选作为更多试评数据落地（UI 可选展示），是否调评分或展示由后续数据决定，本轮不回调阈值凑验收。smart 延迟因候选 11→13 升至 2.9–10.0s（dev 构建，交由 QWP4 压回）。
+4. 最终 A/B（8 干净原图 + 4 干净 scan + 4 scan2，dev 构建）：**ice_crack 原图 lowPoly→bw，F1 0.617→0.849**（第 2 条打分修正生效）；taotie 回 0.962（第 3 条）；其余样本选型与 F1 与 QWP2 基线一致，scan 两组数值集合与 QWP2 完全相同（0.918–0.997 / 0.909–0.970），无回退。新候选 cutout/palette4/palette8/watershed64 **在 16 样本中 0 次胜出**，无一例 svg_bytes 降 ≥30%——**验收标准（≥2 样本改善）未达**。新候选作为更多试评数据落地（UI 可选展示），是否调评分或展示由后续数据决定，本轮不回调阈值凑验收。smart 延迟因候选 11→13 升至 2.9–10.0s（dev 构建，交由 QWP4 压回）。（后续勘误：这 4 条候选已因 0 胜 + 延迟回拉降为 opt-in，默认集恢复 QWP2 口径，见 QWP4 落地记录第 5 条。）
 
 ### QWP4 — smart 性能与工程项（P1）
 
@@ -112,6 +112,7 @@
 2. 第 1 条热点实测：**不在 segment 共享**。seg_cache 改 Arc 共享（免克隆全分辨率 mask 层）实测增益 <1ms，保留改动；真实增量在每候选一次全分辨率 finish+SVG 写出+打分，与候选数线性（512px release 约 10ms/条）。palette4/palette8/cutout 本就与色族共享 segment_key（max_colors/hierarchical 不进 SegmentKey），“同分割键合并候选”在 QWP2 已实现。QWP3 遗留的候选预算：试评固定 ≤1024px、候选数有界（≤13），试评成本已与源图尺寸解耦；原尺寸复验在后续 /trace 阶段只跑胜者一次，预算目标由分辨率上限天然覆盖。
 3. release 实测（arm64 macOS）：16 样本 smart 总耗时 **104–381ms**（dev 同代码 2.9–10.0s 的 1/10；选型与 F1 与 dev 完全一致），验收线 512px ≤2s **达标**。对照 QWP2 release 基线（checkout c04093a 实测 12 样本 56–282ms）：短基线小样本（QWP2 56–79ms）相对增幅 +57%–101%（绝对 +30–75ms），“候选数 ↑ 而延迟差 ≤30%” **未达**——50ms 量级上 2–4 条新候选的 segment+finish 成本天然 >30%。回拉选项（未自行采纳）：A) 把 QWP3 新增 4 候选（16 样本 0 胜）降为 opt-in；B) 试评并行化（引并行依赖）。留给下一包决策。
 4. 第 3 条落地：CI 新增 `quality` job，`cargo test --release -p patternstudio-cli --test quality_baseline`；本地 release 实跑门禁两例通过，基线跨 profile FP 稳定。
+5. 回拉选项 A 采纳落地：QWP3 新增 4 候选（cutout/palette4/palette8/watershed64，16 样本 0 胜）从默认候选集移出。core `candidate_params` 恢复 QWP2 集，新增 `candidate_params_extended`（含 4 候选，watershed64 仍限色块分支且 texture<0.1）与统一入口 `recommend_with_opts(img, SmartOpts{family,extended,stats})`，原 4 个 pub 入口成为其薄 wrapper；server `/smart` 新增 `extended` 字段（默认 false；族限定搜索在族内变参，extended 对其无效）；engine/batch 调用点不改，默认 extended=false。release 实测 16 样本：默认集**选型与 F1 与本包第 3 条完全一致**（胜者全为旧候选），smart 延迟 **56–288ms** 回到 QWP2 基线水平；extended=true 走 13 候选全集，结果与第 3 条一致。web 编辑器 smart 恒为族限定模式（族由当前参数推导），extended 在其上无效，故 UI 未加开关——extended 面向 API/batch 的 auto 模式调用方。
 
 ### QWP5 — 二值化算法扩展：Sauvola 对照（P2）
 

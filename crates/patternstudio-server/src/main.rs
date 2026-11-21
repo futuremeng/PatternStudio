@@ -175,6 +175,12 @@ struct TraceRequest {
     /// Absent = auto family selection.
     #[serde(default)]
     family: Option<String>,
+    /// Smart mode: also trial the opt-in extended candidate set (cutout /
+    /// palette / fine-watershed trials). Default false. Only meaningful in
+    /// auto-family mode; a family-scoped search varies parameters inside the
+    /// chosen preset and ignores this.
+    #[serde(default)]
+    extended: Option<bool>,
     /// Client-generated id for this request; identifies the in-flight trace
     /// so a newer request can supersede it.
     #[serde(default)]
@@ -514,6 +520,7 @@ async fn smart(
         )
     })?;
     let family = req.family;
+    let extended = req.extended.unwrap_or(false);
     let result = tokio::task::spawn_blocking(move || {
         let total_t = Instant::now();
         let mut image = load_image(&img_path)
@@ -543,13 +550,40 @@ async fn smart(
         // Family-scoped when the client picked a preset, auto otherwise.
         // After preprocessing the image changed, so the recommendation
         // re-analyzes; otherwise it reuses the stats measured above.
+        // `extended` adds the opt-in QWP3 color-graph trials (auto mode only).
         let mut decision = match (family.as_deref(), preprocessed) {
-            (Some(f), true) => patternstudio_core::smart::recommend_for(&image, f),
-            (None, true) => patternstudio_core::smart::recommend(&image),
-            (Some(f), false) => {
-                patternstudio_core::smart::recommend_for_with_stats(&image, &stats, f)
-            }
-            (None, false) => patternstudio_core::smart::recommend_with_stats(&image, &stats),
+            (Some(f), true) => patternstudio_core::smart::recommend_with_opts(
+                &image,
+                &patternstudio_core::smart::SmartOpts {
+                    family: Some(f),
+                    extended,
+                    stats: None,
+                },
+            ),
+            (None, true) => patternstudio_core::smart::recommend_with_opts(
+                &image,
+                &patternstudio_core::smart::SmartOpts {
+                    family: None,
+                    extended,
+                    stats: None,
+                },
+            ),
+            (Some(f), false) => patternstudio_core::smart::recommend_with_opts(
+                &image,
+                &patternstudio_core::smart::SmartOpts {
+                    family: Some(f),
+                    extended,
+                    stats: Some(&stats),
+                },
+            ),
+            (None, false) => patternstudio_core::smart::recommend_with_opts(
+                &image,
+                &patternstudio_core::smart::SmartOpts {
+                    family: None,
+                    extended,
+                    stats: Some(&stats),
+                },
+            ),
         }
         .map_err(|e| EngineError::Internal(format!("smart analysis failed: {e}")))?;
         decision.preprocessed = preprocessed;
@@ -658,6 +692,7 @@ async fn redraw(
         filename: req.filename,
         params: None,
         family: None,
+        extended: None,
         request_id: None,
         priority: None,
     };

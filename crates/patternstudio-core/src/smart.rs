@@ -583,7 +583,22 @@ pub struct SmartCandidate {
 /// - flat illustration          -> 彩色填充 / 扁平色块 / 低多边形
 /// - photo-like                  -> 照片 / 渐变 / 彩色填充
 /// - mixed                       -> 彩色填充 / 照片 / 低多边形 / 扁平色块
+///
+/// This is the default trial set. The four extra color-graph trials added
+/// in QWP3 (cutout / palette4 / palette8 / watershed64) won zero samples in
+/// the 16-sample evaluation and cost linear finish time, so they live only
+/// in the opt-in [`candidate_params_extended`] set.
 pub fn candidate_params(stats: &ImageStats) -> Vec<SmartCandidate> {
+    candidate_params_inner(stats, false)
+}
+
+/// The opt-in extended trial set: the default candidates plus the four
+/// QWP3 color-graph trials (cutout / palette4 / palette8 / watershed64).
+pub fn candidate_params_extended(stats: &ImageStats) -> Vec<SmartCandidate> {
+    candidate_params_inner(stats, true)
+}
+
+fn candidate_params_inner(stats: &ImageStats, extended: bool) -> Vec<SmartCandidate> {
     // Noise-adaptive speckle: clean images keep the base, noisy ones grow it.
     let speckle = |base: u32| (base as f64 + stats.noise / 6.0).round().clamp(0.0, 20.0) as u32;
     let adaptive = stats.illumination_var > 20.0;
@@ -598,15 +613,17 @@ pub fn candidate_params(stats: &ImageStats) -> Vec<SmartCandidate> {
         out.push(poster_candidate(speckle(4)));
         out.push(flat_candidate(speckle(4)));
         out.push(low_poly_candidate(speckle(4)));
-        // Flat color-block patterns: cutout removes the stacked-layer seams,
-        // the palette caps halve the file, and a finer watershed cut keeps
-        // small regions whole (only for calm images where 64 does not
-        // over-segment the field).
-        out.push(cutout_candidate(speckle(4)));
-        out.push(palette_candidate(speckle(4), 4));
-        out.push(palette_candidate(speckle(4), 8));
-        if stats.texture < 0.1 {
-            out.push(watershed_candidate(speckle(4), 64));
+        if extended {
+            // Flat color-block patterns: cutout removes the stacked-layer
+            // seams, the palette caps halve the file, and a finer watershed
+            // cut keeps small regions whole (only for calm images where 64
+            // does not over-segment the field).
+            out.push(cutout_candidate(speckle(4)));
+            out.push(palette_candidate(speckle(4), 4));
+            out.push(palette_candidate(speckle(4), 8));
+            if stats.texture < 0.1 {
+                out.push(watershed_candidate(speckle(4), 64));
+            }
         }
     } else if stats.effective_colors >= 48 || stats.texture >= 0.35 {
         out.push(photo_candidate(speckle(8)));
@@ -617,12 +634,14 @@ pub fn candidate_params(stats: &ImageStats) -> Vec<SmartCandidate> {
         out.push(photo_candidate(speckle(8)));
         out.push(low_poly_candidate(speckle(4)));
         out.push(flat_candidate(speckle(4)));
-        // Mixed mid-palette sources (multi-color patterns included): the
-        // palette-capped color trials often win on complexity without
-        // losing pattern colors; scoring decides.
-        out.push(cutout_candidate(speckle(4)));
-        out.push(palette_candidate(speckle(4), 4));
-        out.push(palette_candidate(speckle(4), 8));
+        if extended {
+            // Mixed mid-palette sources (multi-color patterns included): the
+            // palette-capped color trials often win on complexity without
+            // losing pattern colors; scoring decides.
+            out.push(cutout_candidate(speckle(4)));
+            out.push(palette_candidate(speckle(4), 4));
+            out.push(palette_candidate(speckle(4), 8));
+        }
     }
     // Stroke-like sources deserve binarization trials regardless of how the
     // branch above routed: a scanned pattern's JPEG noise smears the
@@ -1410,15 +1429,68 @@ fn decision_from(
     }
 }
 
+/// Options for [`recommend_with_opts`], the single entry all recommend
+/// wrappers funnel through.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SmartOpts<'a> {
+    /// Restrict the search to one preset family (see [`recommend_for`]);
+    /// `None` = auto family selection.
+    pub family: Option<&'a str>,
+    /// Trial the opt-in [`candidate_params_extended`] set instead of the
+    /// default candidates. Only meaningful in auto mode: a family-scoped
+    /// search varies parameters inside the chosen preset and never sees the
+    /// extra color-graph trials either way.
+    pub extended: bool,
+    /// Caller-supplied statistics so a caller that already inspected the
+    /// image (the server's preprocess gate) skips a second analysis pass;
+    /// `None` = analyze internally.
+    pub stats: Option<&'a ImageStats>,
+}
+
+/// Recommend with explicit options. After a preprocess the image changed,
+/// so pass `stats: None` to re-analyze; otherwise reuse the caller's stats.
+pub fn recommend_with_opts(img: &ColorImage, opts: &SmartOpts) -> Result<SmartDecision, Error> {
+    let t0 = Instant::now();
+    match (opts.family, opts.stats) {
+        (Some(f), Some(stats)) => {
+            let family_id = validate_family(f)?;
+            let candidates = scoped_candidates(stats, family_id);
+            recommend_inner(img, stats.clone(), Some(family_id), candidates, t0, 0)
+        }
+        (Some(f), None) => {
+            let family_id = validate_family(f)?;
+            let ta = Instant::now();
+            let stats = analyze_image(img);
+            let analyze_ms = ta.elapsed().as_millis() as u64;
+            let candidates = scoped_candidates(&stats, family_id);
+            recommend_inner(img, stats, Some(family_id), candidates, t0, analyze_ms)
+        }
+        (None, Some(stats)) => {
+            let candidates = candidate_set(stats, opts.extended);
+            recommend_inner(img, stats.clone(), None, candidates, t0, 0)
+        }
+        (None, None) => {
+            let ta = Instant::now();
+            let stats = analyze_image(img);
+            let analyze_ms = ta.elapsed().as_millis() as u64;
+            let candidates = candidate_set(&stats, opts.extended);
+            recommend_inner(img, stats, None, candidates, t0, analyze_ms)
+        }
+    }
+}
+
+fn candidate_set(stats: &ImageStats, extended: bool) -> Vec<SmartCandidate> {
+    if extended {
+        candidate_params_extended(stats)
+    } else {
+        candidate_params(stats)
+    }
+}
+
 /// Auto mode: analyze the image, pick candidate families from the statistics,
 /// trial-trace them, and return the winner with a full report.
 pub fn recommend(img: &ColorImage) -> Result<SmartDecision, Error> {
-    let t0 = Instant::now();
-    let ta = Instant::now();
-    let stats = analyze_image(img);
-    let analyze_ms = ta.elapsed().as_millis() as u64;
-    let candidates = candidate_params(&stats);
-    recommend_inner(img, stats, None, candidates, t0, analyze_ms)
+    recommend_with_opts(img, &SmartOpts::default())
 }
 
 /// Same as [`recommend`] but with the caller's already-computed stats, so a
@@ -1426,22 +1498,26 @@ pub fn recommend(img: &ColorImage) -> Result<SmartDecision, Error> {
 /// not pay for a second analysis pass. `analyze_ms` stays 0 in the breakdown;
 /// the caller should overwrite it with its own measurement.
 pub fn recommend_with_stats(img: &ColorImage, stats: &ImageStats) -> Result<SmartDecision, Error> {
-    let t0 = Instant::now();
-    let candidates = candidate_params(stats);
-    recommend_inner(img, stats.clone(), None, candidates, t0, 0)
+    recommend_with_opts(
+        img,
+        &SmartOpts {
+            stats: Some(stats),
+            ..Default::default()
+        },
+    )
 }
 
 /// Family-scoped mode: the user chose the preset family (what kind of output
 /// they want); trial-trace parameter variations *within* that family and
 /// return the best one. The winner always stays in the requested family.
 pub fn recommend_for(img: &ColorImage, family: &str) -> Result<SmartDecision, Error> {
-    let family_id = validate_family(family)?;
-    let t0 = Instant::now();
-    let ta = Instant::now();
-    let stats = analyze_image(img);
-    let analyze_ms = ta.elapsed().as_millis() as u64;
-    let candidates = scoped_candidates(&stats, family_id);
-    recommend_inner(img, stats, Some(family_id), candidates, t0, analyze_ms)
+    recommend_with_opts(
+        img,
+        &SmartOpts {
+            family: Some(family),
+            ..Default::default()
+        },
+    )
 }
 
 /// [`recommend_for`] with the caller's stats (see [`recommend_with_stats`]).
@@ -1450,10 +1526,14 @@ pub fn recommend_for_with_stats(
     stats: &ImageStats,
     family: &str,
 ) -> Result<SmartDecision, Error> {
-    let family_id = validate_family(family)?;
-    let t0 = Instant::now();
-    let candidates = scoped_candidates(stats, family_id);
-    recommend_inner(img, stats.clone(), Some(family_id), candidates, t0, 0)
+    recommend_with_opts(
+        img,
+        &SmartOpts {
+            family: Some(family),
+            stats: Some(stats),
+            ..Default::default()
+        },
+    )
 }
 
 fn validate_family(family: &str) -> Result<&'static str, Error> {
@@ -2060,12 +2140,13 @@ mod tests {
         );
     }
 
-    /// QWP3: the new color-graph candidates reach color-block and mixed
-    /// routes, with the right parameter payloads, and never photo routes.
+    /// QWP3 + opt-in: the new color-graph candidates reach color-block and
+    /// mixed routes only in the extended set, with the right parameter
+    /// payloads, and never photo routes.
     #[test]
     fn colorblock_and_mixed_sources_get_new_color_trials() {
         let poster_stats = analyze_image(&poster(256, 256));
-        let cands = candidate_params(&poster_stats);
+        let cands = candidate_params_extended(&poster_stats);
         for label in ["cutout", "palette4", "palette8", "watershed64"] {
             assert!(
                 cands.iter().any(|c| c.label == label),
@@ -2089,13 +2170,69 @@ mod tests {
     #[test]
     fn photo_and_active_watershed_sources_skip_the_new_trials_where_wrong() {
         let photo_stats = analyze_image(&photo_like(256, 256));
-        let cands = candidate_params(&photo_stats);
+        let cands = candidate_params_extended(&photo_stats);
         for label in ["cutout", "palette4", "palette8", "watershed64"] {
             assert!(
                 !cands.iter().any(|c| c.label == label),
-                "photo route must not trial {label}"
+                "photo route must not trial {label} even when extended"
             );
         }
+    }
+
+    /// QWP3 opt-in: the four zero-win trials leave the default set and come
+    /// back only through the extended set.
+    #[test]
+    fn extended_candidates_are_opt_in() {
+        let stats = analyze_image(&poster(64, 64));
+        let base = candidate_params(&stats);
+        let ext = candidate_params_extended(&stats);
+        for label in ["cutout", "palette4", "palette8", "watershed64"] {
+            assert!(
+                !base.iter().any(|c| c.label == label),
+                "default set must not trial {label}"
+            );
+            assert!(
+                ext.iter().any(|c| c.label == label),
+                "extended set must trial {label}"
+            );
+        }
+        // On a calm color-block source the extended set is the default set
+        // plus exactly the four extras (poster stats clear the texture < 0.1
+        // watershed gate).
+        assert_eq!(ext.len(), base.len() + 4);
+    }
+
+    /// The unified entry must match the wrappers, and `extended` must only
+    /// widen the auto candidate set (scoped family search ignores it).
+    #[test]
+    fn recommend_with_opts_matches_wrappers() {
+        let img = poster(64, 64);
+        let a = recommend_with_opts(&img, &SmartOpts::default()).expect("auto");
+        let b = recommend(&img).expect("recommend");
+        assert_eq!(a.family, b.family);
+        assert_eq!(a.candidates.len(), b.candidates.len());
+        let x = recommend_with_opts(
+            &img,
+            &SmartOpts {
+                extended: true,
+                ..Default::default()
+            },
+        )
+        .expect("auto extended");
+        assert_eq!(x.candidates.len(), a.candidates.len() + 4);
+        // Family-scoped: extended changes nothing.
+        let s = recommend_for(&img, "color").expect("scoped");
+        let se = recommend_with_opts(
+            &img,
+            &SmartOpts {
+                family: Some("color"),
+                extended: true,
+                ..Default::default()
+            },
+        )
+        .expect("scoped extended");
+        assert_eq!(s.candidates.len(), se.candidates.len());
+        assert_eq!(s.family, se.family);
     }
 
     /// QWP3: on stroke-like sources every non-ink family is scored by stroke

@@ -23,5 +23,6 @@ pub use profiles::{
 };
 pub use session_cache::{key_for_path, key_for_source, SessionCache};
 pub use smart::{
-    analyze_image, candidate_params, recommend, ImageStats, SmartDecision, SmartParams,
+    analyze_image, candidate_params, candidate_params_extended, recommend, recommend_with_opts,
+    ImageStats, SmartDecision, SmartOpts, SmartParams,
 };
