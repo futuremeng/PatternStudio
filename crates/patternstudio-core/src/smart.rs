@@ -20,6 +20,7 @@
 //! image scale, so the winning params can be applied as-is.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use serde::Serialize;
@@ -1029,6 +1030,22 @@ pub struct SmartDecision {
     pub preprocessed: bool,
     /// Total elapsed time (ms).
     pub elapsed_ms: u64,
+    /// Where the wall-clock time went (QWP4). analyze/trials are measured by
+    /// core; preprocess is filled in by the caller that runs the enhance step.
+    pub elapsed_breakdown: ElapsedBreakdown,
+}
+
+/// Wall-clock split of a smart call in ms.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElapsedBreakdown {
+    /// Image statistics pass (skipped — 0 — when the caller passed stats in).
+    pub analyze_ms: u64,
+    /// Trial-tracing and scoring of all candidates.
+    pub trials_ms: u64,
+    /// Automatic enhance pass, set by callers that can preprocess.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preprocess_ms: Option<u64>,
 }
 
 /// Composite the segmentation layers into an RGB canvas (white background).
@@ -1258,7 +1275,10 @@ fn trial_candidates(
     let test_scale = (TEST_MAX_SIDE as f64 / img.width.max(img.height) as f64).min(1.0);
     let test_img = downsample(img, TEST_MAX_SIDE);
 
-    let mut seg_cache: Vec<(SegmentKey, Segmentation)> = Vec::new();
+    // Candidates sharing a segmentation key share one owned segmentation
+    // (Arc): the segmentation carries full-resolution mask layers, so
+    // cloning it per candidate was measurable trial time (QWP4).
+    let mut seg_cache: Vec<(SegmentKey, Arc<Segmentation>)> = Vec::new();
     let mut reports: Vec<CandidateReport> = Vec::new();
     for c in candidates {
         let t = Instant::now();
@@ -1267,10 +1287,10 @@ fn trial_candidates(
         let pipeline = config.build()?;
         let key = config.segment_key();
         let seg = match seg_cache.iter().find(|(k, _)| *k == key) {
-            Some((_, s)) => s.clone(),
+            Some((_, s)) => Arc::clone(s),
             None => {
-                let s = pipeline.segment(&test_img)?;
-                seg_cache.push((key, s.clone()));
+                let s = Arc::new(pipeline.segment(&test_img)?);
+                seg_cache.push((key, Arc::clone(&s)));
                 s
             }
         };
@@ -1284,17 +1304,17 @@ fn trial_candidates(
         // family by dilated stroke F1 instead, keeping the score aligned
         // with round-trip reality.
         let stroke_basis = stroke_dominant(stats) || stroke_like(stats);
+        // One stroke-F1 pass per candidate; non-ink families on stroke
+        // sources are *scored* by it, everyone else just reports it.
+        let sf = stroke_basis.then(|| stroke_fidelity(&seg, &test_img));
         let fidelity = if criteria.ink_aware {
             ink_fidelity(&seg, &test_img)
-        } else if stroke_basis {
-            stroke_fidelity(&seg, &test_img)
+        } else if let Some(v) = sf {
+            v
         } else {
             color_fidelity(&seg, &test_img)
         };
-        // On stroke-like sources (dominant or noise-routed), report the stroke
-        // F1 for *every* candidate (even ones scored by other metrics) so the
-        // report shows which candidates actually kept the strokes.
-        let stroke = stroke_basis.then(|| stroke_fidelity(&seg, &test_img));
+        let stroke = sf;
         let (shape_count, command_count) = doc_stats(&doc);
         let svg = pipeline.writer.write(&doc);
         let complexity = complexity_of(svg.len(), test_img.width, test_img.height);
@@ -1324,6 +1344,7 @@ fn decision_from(
     mut reports: Vec<CandidateReport>,
     scope: Option<&str>,
     t0: Instant,
+    elapsed_breakdown: ElapsedBreakdown,
 ) -> SmartDecision {
     reports.sort_by(|a, b| {
         b.score
@@ -1385,6 +1406,7 @@ fn decision_from(
         preset,
         preprocessed: false,
         elapsed_ms: t0.elapsed().as_millis() as u64,
+        elapsed_breakdown,
     }
 }
 
@@ -1392,34 +1414,65 @@ fn decision_from(
 /// trial-trace them, and return the winner with a full report.
 pub fn recommend(img: &ColorImage) -> Result<SmartDecision, Error> {
     let t0 = Instant::now();
+    let ta = Instant::now();
     let stats = analyze_image(img);
+    let analyze_ms = ta.elapsed().as_millis() as u64;
     let candidates = candidate_params(&stats);
-    if candidates.is_empty() {
-        return Err(Error::Config("no smart candidates".into()));
-    }
-    let reports = trial_candidates(img, &stats, &candidates)?;
-    Ok(decision_from(stats, reports, None, t0))
+    recommend_inner(img, stats, None, candidates, t0, analyze_ms)
+}
+
+/// Same as [`recommend`] but with the caller's already-computed stats, so a
+/// caller that inspected the image first (the server's preprocess gate) does
+/// not pay for a second analysis pass. `analyze_ms` stays 0 in the breakdown;
+/// the caller should overwrite it with its own measurement.
+pub fn recommend_with_stats(img: &ColorImage, stats: &ImageStats) -> Result<SmartDecision, Error> {
+    let t0 = Instant::now();
+    let candidates = candidate_params(stats);
+    recommend_inner(img, stats.clone(), None, candidates, t0, 0)
 }
 
 /// Family-scoped mode: the user chose the preset family (what kind of output
 /// they want); trial-trace parameter variations *within* that family and
 /// return the best one. The winner always stays in the requested family.
 pub fn recommend_for(img: &ColorImage, family: &str) -> Result<SmartDecision, Error> {
+    let family_id = validate_family(family)?;
     let t0 = Instant::now();
-    // Validate and get the 'static family id (SmartCandidate.family is 'static).
-    let family_id: &'static str = match family {
-        "lineArt" => "lineArt",
-        "color" => "color",
-        "bw" => "bw",
-        "gradient" => "gradient",
-        "lowPoly" => "lowPoly",
-        other => return Err(Error::Config(format!("unknown smart family: {other}"))),
-    };
+    let ta = Instant::now();
     let stats = analyze_image(img);
-    let mut candidates = family_candidates(&stats, family_id);
-    // Always include the exact preset default as the baseline, so the smart
-    // result is compared against the preset itself and can never be worse
-    // than it (the preset wins unless a variation clearly beats it).
+    let analyze_ms = ta.elapsed().as_millis() as u64;
+    let candidates = scoped_candidates(&stats, family_id);
+    recommend_inner(img, stats, Some(family_id), candidates, t0, analyze_ms)
+}
+
+/// [`recommend_for`] with the caller's stats (see [`recommend_with_stats`]).
+pub fn recommend_for_with_stats(
+    img: &ColorImage,
+    stats: &ImageStats,
+    family: &str,
+) -> Result<SmartDecision, Error> {
+    let family_id = validate_family(family)?;
+    let t0 = Instant::now();
+    let candidates = scoped_candidates(stats, family_id);
+    recommend_inner(img, stats.clone(), Some(family_id), candidates, t0, 0)
+}
+
+fn validate_family(family: &str) -> Result<&'static str, Error> {
+    // 'static ids (SmartCandidate.family is 'static).
+    match family {
+        "lineArt" => Ok("lineArt"),
+        "color" => Ok("color"),
+        "bw" => Ok("bw"),
+        "gradient" => Ok("gradient"),
+        "lowPoly" => Ok("lowPoly"),
+        other => Err(Error::Config(format!("unknown smart family: {other}"))),
+    }
+}
+
+/// Family candidates plus the exact preset default as the baseline, so the
+/// smart result is compared against the preset itself and can never be worse
+/// than it (the preset wins unless a variation clearly beats it).
+fn scoped_candidates(stats: &ImageStats, family_id: &'static str) -> Vec<SmartCandidate> {
+    let mut candidates = family_candidates(stats, family_id);
     if let Some(baseline) = preset_params(family_id) {
         candidates.insert(
             0,
@@ -1431,13 +1484,36 @@ pub fn recommend_for(img: &ColorImage, family: &str) -> Result<SmartDecision, Er
             },
         );
     }
+    candidates
+}
+
+fn recommend_inner(
+    img: &ColorImage,
+    stats: ImageStats,
+    scope: Option<&'static str>,
+    candidates: Vec<SmartCandidate>,
+    t0: Instant,
+    analyze_ms: u64,
+) -> Result<SmartDecision, Error> {
     if candidates.is_empty() {
-        return Err(Error::Config(format!(
-            "no smart candidates for family {family_id}"
-        )));
+        return Err(Error::Config(match scope {
+            Some(f) => format!("no smart candidates for family {f}"),
+            None => "no smart candidates".into(),
+        }));
     }
+    let tt = Instant::now();
     let reports = trial_candidates(img, &stats, &candidates)?;
-    Ok(decision_from(stats, reports, Some(family_id), t0))
+    Ok(decision_from(
+        stats,
+        reports,
+        scope,
+        t0,
+        ElapsedBreakdown {
+            analyze_ms,
+            trials_ms: tt.elapsed().as_millis() as u64,
+            preprocess_ms: None,
+        },
+    ))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -2074,6 +2150,11 @@ mod tests {
             ],
             None,
             Instant::now(),
+            ElapsedBreakdown {
+                analyze_ms: 0,
+                trials_ms: 1,
+                preprocess_ms: None,
+            },
         );
         assert_eq!(
             d.family, "b",
@@ -2085,8 +2166,30 @@ mod tests {
             vec![mk("a", 0.9, 5000), mk("c", 0.89, 10)],
             None,
             Instant::now(),
+            ElapsedBreakdown {
+                analyze_ms: 0,
+                trials_ms: 1,
+                preprocess_ms: None,
+            },
         );
         assert_eq!(d.family, "a");
+    }
+
+    /// QWP4: the with-stats entry reuses the caller's analysis and must make
+    /// the identical recommendation; the breakdown exposes the phase split.
+    #[test]
+    fn recommend_with_stats_matches_recommend() {
+        let img = noisy_scan(256, 256);
+        let a = recommend(&img).expect("recommend");
+        let stats = analyze_image(&img);
+        let b = recommend_with_stats(&img, &stats).expect("recommend_with_stats");
+        assert_eq!(a.family, b.family);
+        assert_eq!(a.params.clustering, b.params.clustering);
+        assert_eq!(a.candidates.len(), b.candidates.len());
+        // Core measured its own analyze pass; the with-stats path did none.
+        assert!(a.elapsed_breakdown.trials_ms <= a.elapsed_ms);
+        assert!(a.elapsed_breakdown.preprocess_ms.is_none());
+        assert_eq!(b.elapsed_breakdown.analyze_ms, 0);
     }
 
     #[test]

@@ -24,6 +24,17 @@ jobs:
       - name: Format check
         run: cargo fmt --check
 
+  # Quality gate against the release binary (QWP4): what actually ships runs
+  # the fixtures, and the metrics are FP-stable across profiles for these
+  # flat-color samples (see tests/quality_baseline.rs).
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Quality gate (release)
+        run: cargo test --release -p patternstudio-cli --test quality_baseline
+
   web:
     runs-on: ubuntu-latest
     steps:

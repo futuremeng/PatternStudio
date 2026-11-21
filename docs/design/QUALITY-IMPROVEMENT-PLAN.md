@@ -106,6 +106,13 @@
 
 **工作量**：1–2 天。
 
+**落地记录（2026-11-21）**：
+
+1. 第 2 条落地：smart 响应加 `elapsedBreakdown{analyzeMs,trialsMs,preprocessMs}`；server/batch 路径新增 `recommend_with_stats`/`recommend_for_with_stats`——预检 `needs_preprocess` 的 stats 直接复用（不触发预处理时 analyze 只跑一次；触发时图像已变，重跑 recommend 内部 analyze），server 另用整次计时覆写 `elapsed_ms`（现在含图像加载与预处理，此前不含加载）；batch `trace_file_smart` 同步。另去重了 stroke 源候选在试评中跑两遍 stroke_fidelity 的问题（现在每候选至多一次）。
+2. 第 1 条热点实测：**不在 segment 共享**。seg_cache 改 Arc 共享（免克隆全分辨率 mask 层）实测增益 <1ms，保留改动；真实增量在每候选一次全分辨率 finish+SVG 写出+打分，与候选数线性（512px release 约 10ms/条）。palette4/palette8/cutout 本就与色族共享 segment_key（max_colors/hierarchical 不进 SegmentKey），“同分割键合并候选”在 QWP2 已实现。QWP3 遗留的候选预算：试评固定 ≤1024px、候选数有界（≤13），试评成本已与源图尺寸解耦；原尺寸复验在后续 /trace 阶段只跑胜者一次，预算目标由分辨率上限天然覆盖。
+3. release 实测（arm64 macOS）：16 样本 smart 总耗时 **104–381ms**（dev 同代码 2.9–10.0s 的 1/10；选型与 F1 与 dev 完全一致），验收线 512px ≤2s **达标**。对照 QWP2 release 基线（checkout c04093a 实测 12 样本 56–282ms）：短基线小样本（QWP2 56–79ms）相对增幅 +57%–101%（绝对 +30–75ms），“候选数 ↑ 而延迟差 ≤30%” **未达**——50ms 量级上 2–4 条新候选的 segment+finish 成本天然 >30%。回拉选项（未自行采纳）：A) 把 QWP3 新增 4 候选（16 样本 0 胜）降为 opt-in；B) 试评并行化（引并行依赖）。留给下一包决策。
+4. 第 3 条落地：CI 新增 `quality` job，`cargo test --release -p patternstudio-cli --test quality_baseline`；本地 release 实跑门禁两例通过，基线跨 profile FP 稳定。
+
 ### QWP5 — 二值化算法扩展：Sauvola 对照（P2）
 
 **问题**：F2 修复后残留的软边/光照不均长尾。

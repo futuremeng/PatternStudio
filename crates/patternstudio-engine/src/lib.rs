@@ -720,10 +720,12 @@ pub fn trace_file_smart(
     let mut img = patternstudio_tracer::load_image(img_path)
         .map_err(|e| EngineError::Io(format!("failed to load image: {e}")))?;
     // Same automatic-enhancement hook as the server's /smart endpoint (see
-    // `needs_preprocess`); any failure keeps the original image.
+    // `needs_preprocess`); any failure keeps the original image. The stats
+    // serve both the gate and the recommendation so clean sources analyze
+    // once.
+    let stats = patternstudio_core::smart::analyze_image(&img);
     let mut preprocessed = false;
-    if patternstudio_core::smart::needs_preprocess(&patternstudio_core::smart::analyze_image(&img))
-    {
+    if patternstudio_core::smart::needs_preprocess(&stats) {
         if let Ok(out) = patternstudio_tracer::preprocess_image(img_path, None) {
             if let Ok(enhanced) = patternstudio_tracer::load_image(&out.path) {
                 img = enhanced;
@@ -731,7 +733,11 @@ pub fn trace_file_smart(
             }
         }
     }
-    let (tr, mut decision) = smart_trace_image(img, family)?;
+    let (tr, mut decision) = if preprocessed {
+        smart_trace_image(img, family)?
+    } else {
+        smart_trace_image_with_stats(img, &stats, family)?
+    };
     decision.preprocessed = preprocessed;
     Ok((tr, decision))
 }
@@ -755,6 +761,26 @@ fn smart_trace_image(
         None => patternstudio_core::smart::recommend(&img),
     }
     .map_err(|e| EngineError::Internal(format!("smart analysis failed: {e}")))?;
+    finish_smart_trace(img, decision)
+}
+
+fn smart_trace_image_with_stats(
+    img: ColorImage,
+    stats: &patternstudio_core::smart::ImageStats,
+    family: Option<&str>,
+) -> Result<(TraceResult, SmartDecision), EngineError> {
+    let decision = match family {
+        Some(f) => patternstudio_core::smart::recommend_for_with_stats(&img, stats, f),
+        None => patternstudio_core::smart::recommend_with_stats(&img, stats),
+    }
+    .map_err(|e| EngineError::Internal(format!("smart analysis failed: {e}")))?;
+    finish_smart_trace(img, decision)
+}
+
+fn finish_smart_trace(
+    img: ColorImage,
+    decision: SmartDecision,
+) -> Result<(TraceResult, SmartDecision), EngineError> {
     let params = smart_to_trace_params(&decision.params)?;
     let config = build_vtracer_config(&params)?;
     let mut session = Session::new(img);

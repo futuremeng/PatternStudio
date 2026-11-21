@@ -515,30 +515,51 @@ async fn smart(
     })?;
     let family = req.family;
     let result = tokio::task::spawn_blocking(move || {
+        let total_t = Instant::now();
         let mut image = load_image(&img_path)
             .map_err(|e| EngineError::InvalidInput(format!("failed to load image: {e}")))?;
+        // Analyze once up front: the same stats drive both the preprocess gate
+        // and (when no preprocess runs) the recommendation itself, so the
+        // common clean-source path never pays for a second analysis pass.
+        let ta = Instant::now();
+        let stats = patternstudio_core::smart::analyze_image(&image);
+        let analyze_ms = ta.elapsed().as_millis() as u64;
         // Automatic enhancement: noisy / unevenly-lit stroke sources (paper
         // scans) analyze and trace better after the Real-ESRGAN pass. Any
         // failure (missing model, decode) silently keeps the original image
         // so smart never regresses because of this step.
         let mut preprocessed = false;
-        if patternstudio_core::smart::needs_preprocess(&patternstudio_core::smart::analyze_image(
-            &image,
-        )) {
+        let mut preprocess_ms = None;
+        if patternstudio_core::smart::needs_preprocess(&stats) {
+            let tp = Instant::now();
             if let Ok(out) = patternstudio_tracer::preprocess_image(&img_path, None) {
                 if let Ok(enhanced) = load_image(&out.path) {
                     image = enhanced;
                     preprocessed = true;
+                    preprocess_ms = Some(tp.elapsed().as_millis() as u64);
                 }
             }
         }
         // Family-scoped when the client picked a preset, auto otherwise.
-        let mut decision = match family.as_deref() {
-            Some(f) => patternstudio_core::smart::recommend_for(&image, f),
-            None => patternstudio_core::smart::recommend(&image),
+        // After preprocessing the image changed, so the recommendation
+        // re-analyzes; otherwise it reuses the stats measured above.
+        let mut decision = match (family.as_deref(), preprocessed) {
+            (Some(f), true) => patternstudio_core::smart::recommend_for(&image, f),
+            (None, true) => patternstudio_core::smart::recommend(&image),
+            (Some(f), false) => {
+                patternstudio_core::smart::recommend_for_with_stats(&image, &stats, f)
+            }
+            (None, false) => patternstudio_core::smart::recommend_with_stats(&image, &stats),
         }
         .map_err(|e| EngineError::Internal(format!("smart analysis failed: {e}")))?;
         decision.preprocessed = preprocessed;
+        // The server sees the whole call (load + gate analyze + trials), so
+        // report the true totals from here.
+        decision.elapsed_ms = total_t.elapsed().as_millis() as u64;
+        decision.elapsed_breakdown.preprocess_ms = preprocess_ms;
+        if !preprocessed {
+            decision.elapsed_breakdown.analyze_ms = analyze_ms;
+        }
         Ok::<SmartDecision, EngineError>(decision)
     })
     .await
