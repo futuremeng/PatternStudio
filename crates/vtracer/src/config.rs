@@ -80,6 +80,9 @@ pub struct SegmentKey {
     binary_adaptive: bool,
     binary_adaptive_window: u32,
     binary_adaptive_t: f64,
+    binary_sauvola: bool,
+    binary_sauvola_window: u32,
+    binary_sauvola_k: f64,
     watershed_detail: u32,
 }
 
@@ -131,6 +134,15 @@ pub struct Config {
     pub binary_adaptive_window: u32,
     /// Adaptive sensitivity `t`: percent below the local mean (default 15).
     pub binary_adaptive_t: f64,
+    /// Binary mode: use Sauvola adaptive thresholding (takes precedence over
+    /// `binary_adaptive`). Better on uneven lighting with flat low-contrast
+    /// areas where Bradley–Roth over-fires.
+    pub binary_sauvola: bool,
+    /// Sauvola window side length in pixels; 0 = auto (~1/8 of the shorter
+    /// side). Default 15 (paper).
+    pub binary_sauvola_window: u32,
+    /// Sauvola contrast sensitivity k (default 0.2, paper).
+    pub binary_sauvola_k: f64,
     /// Watershed clustering: where to cut the hierarchy. Higher keeps more
     /// regions (each +25.5 roughly doubles the region count); 0 collapses the
     /// image to a single region. Uncapped.
@@ -159,6 +171,9 @@ impl Default for Config {
             binary_adaptive: false,
             binary_adaptive_window: 0,
             binary_adaptive_t: 15.0,
+            binary_sauvola: false,
+            binary_sauvola_window: 15,
+            binary_sauvola_k: 0.2,
             watershed_detail: 128,
         }
     }
@@ -204,7 +219,12 @@ impl Config {
                 good_min_area: self.speckle_area(),
             }),
             Clustering::Binary => {
-                let threshold = if self.binary_adaptive {
+                let threshold = if self.binary_sauvola {
+                    Threshold::Sauvola {
+                        window: self.binary_sauvola_window,
+                        k: self.binary_sauvola_k,
+                    }
+                } else if self.binary_adaptive {
                     Threshold::Adaptive {
                         window: self.binary_adaptive_window,
                         t: self.binary_adaptive_t,
@@ -322,6 +342,9 @@ impl Config {
             binary_adaptive: self.binary_adaptive,
             binary_adaptive_window: self.binary_adaptive_window,
             binary_adaptive_t: self.binary_adaptive_t,
+            binary_sauvola: self.binary_sauvola,
+            binary_sauvola_window: self.binary_sauvola_window,
+            binary_sauvola_k: self.binary_sauvola_k,
             watershed_detail: self.watershed_detail,
         }
     }

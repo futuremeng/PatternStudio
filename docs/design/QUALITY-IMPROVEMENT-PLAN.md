@@ -124,6 +124,12 @@
 
 **工作量**：2–3 天。**风险**：动 fork = 基线全量重录；改动隔离在 binarization 模块，上游合并友好。
 
+**落地记录（2026-11-21）**：
+
+1. 实现落地：fork `frontend/binary.rs` 新增 `Threshold::Sauvola { window, k }`，积分图 Θ(HW) 实现（u64 双积分图 sum/sum²，T = mean·(1+k·(std/128−1))，暗于阈值为前景；区域和按 (a+d)−b−c 顺序求避免 u64 下溢），window=0 与 Bradley 同样自动取短边 ~1/8；`Config` 新增 `binary_sauvola`(false)/`binary_sauvola_window`(15)/`binary_sauvola_k`(0.2) 并纳入 SegmentKey，Binary 分支 sauvola 优先于 adaptive。engine `TraceParams`/`VectorizeParams` 透传 `binarySauvola`/`binarySauvolaWindow`/`binarySauvolaK`（camelCase）。**默认关闭，现有输出逐字节不变，基线未重录**；web UI 不改（编辑器 smart 恒为族限定模式，二值化实验走后端 API 显式参数）。fork 3 例单测通过：均匀场零墨迹、细线完整保留、光照不均下假阳远低于 Fixed(128)。
+2. A/B（release 构建，16 样本 = 8 干净原图 + 4 scan + 4 scan2；基线列为 /smart 胜者 F1，实验臂为 /trace 显式二值化参数 + QWP1 墨迹 F1）：**scan 组（8）F1 中位：基线 0.949，sauvola15（W=15/k=0.2 论文默认）0.930，sauvolaAuto（W=0）0.9245**；干净原图组基线中位 0.9285，sauvola15 0.9185。逐样本 sauvola 仅 cloud 系小幅占优（+0.003~0.006），在 meander（0.935/0.914 vs 基线 0.997）与 greek_key（0.957 vs 1.000）等 stroke 类明显回退；scan 组逐样本与 Bradley arms 差距 ≤0.03，无一例接近 +0.05。
+3. **决策：不达验收线，不改默认**——不新增 sauvola smart 候选（现 otsu/Bradley 臂在 16 样本上已近各自最优，加入只会引入噪声候选），保留 fork/engine 开关为 opt-in。结论与 QWP4 观察一致：scan 长尾主因是软边/分辨率而非光照不均，Sauvola 的局部统计在细密 stroke 上反而丢线。质量门禁：release 基线 2 例 passed、workspace 测试全绿、clippy 0 warning。
+
 ### QWP6 — 对称感知纹样追踪 spike（P2，差异化特性）
 
 **问题**：中式纹样大面积对称被重复追踪 N 次：文件大、对称不严格、编辑不同步。

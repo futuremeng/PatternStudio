@@ -165,6 +165,13 @@ pub struct TraceParams {
     pub binary_adaptive_t: Option<f64>,
     #[serde(default)]
     pub binary_adaptive_window: Option<u32>,
+    /// Sauvola adaptive binarization (takes precedence over binaryAdaptive).
+    #[serde(default)]
+    pub binary_sauvola: bool,
+    #[serde(default)]
+    pub binary_sauvola_window: Option<u32>,
+    #[serde(default)]
+    pub binary_sauvola_k: Option<f64>,
     #[serde(default)]
     pub layer_strategy: Option<String>,
     #[serde(default)]
@@ -219,6 +226,12 @@ pub struct VectorizeParams {
     pub binary_adaptive_t: Option<f64>,
     #[serde(default)]
     pub binary_adaptive_window: Option<u32>,
+    #[serde(default)]
+    pub binary_sauvola: bool,
+    #[serde(default)]
+    pub binary_sauvola_window: Option<u32>,
+    #[serde(default)]
+    pub binary_sauvola_k: Option<f64>,
 }
 
 /// Parameters that affect only the layering/output stage (VectorDoc → layer
@@ -263,6 +276,9 @@ impl TraceParams {
                 optimize: self.optimize,
                 binary_adaptive_t: self.binary_adaptive_t,
                 binary_adaptive_window: self.binary_adaptive_window,
+                binary_sauvola: self.binary_sauvola,
+                binary_sauvola_window: self.binary_sauvola_window,
+                binary_sauvola_k: self.binary_sauvola_k,
             },
             LayerParams {
                 line_art: self.line_art,
@@ -297,6 +313,9 @@ impl TraceParams {
             optimize: v.optimize,
             binary_adaptive_t: v.binary_adaptive_t,
             binary_adaptive_window: v.binary_adaptive_window,
+            binary_sauvola: v.binary_sauvola,
+            binary_sauvola_window: v.binary_sauvola_window,
+            binary_sauvola_k: v.binary_sauvola_k,
             layer_strategy: l.layer_strategy.clone(),
             complexity_threshold: l.complexity_threshold,
         }
@@ -381,6 +400,13 @@ pub fn build_vtracer_config(params: &TraceParams) -> Result<Config, EngineError>
     }
     if let Some(v) = params.binary_adaptive_window {
         config.binary_adaptive_window = v;
+    }
+    config.binary_sauvola = params.binary_sauvola;
+    if let Some(v) = params.binary_sauvola_window {
+        config.binary_sauvola_window = v;
+    }
+    if let Some(v) = params.binary_sauvola_k {
+        config.binary_sauvola_k = v;
     }
     Ok(config)
 }
